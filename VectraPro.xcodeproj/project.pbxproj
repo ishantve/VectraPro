@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		8B7FEE2E2FEC24E10055FDF8 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */; };
+		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		8B7FEE102FEC24A90055FDF8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8B7FEE2E2FEC24E10055FDF8 /* GoogleMaps in Frameworks */,
+				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,8 @@
 			);
 			name = VectraPro;
 			packageProductDependencies = (
+				8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */,
+				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
 			);
 			productName = VectraPro;
 			productReference = 8B7FEE002FEC24A70055FDF8 /* VectraPro.app */;
@@ -195,6 +204,10 @@
 			);
 			mainGroup = 8B7FEDF72FEC24A70055FDF8;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
+				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B7FEE012FEC24A70055FDF8 /* Products */;
 			projectDirPath = "";
@@ -395,23 +408,28 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = SPGHN7NVU3;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to transcribe your speech into text.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.rigil.VectraPro;
+				PRODUCT_BUNDLE_IDENTIFIER = com.rigil.vectrapro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -427,23 +445,28 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = SPGHN7NVU3;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to transcribe your speech into text.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.rigil.VectraPro;
+				PRODUCT_BUNDLE_IDENTIFIER = com.rigil.vectrapro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -578,6 +601,37 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/MicrosoftCognitiveServicesSpeech;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.14.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
+			productName = GoogleMaps;
+		};
+		C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */;
+			productName = MicrosoftCognitiveServicesSpeech;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8B7FEDF82FEC24A70055FDF8 /* Project object */;
 }

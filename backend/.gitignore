@@ -1,0 +1,8 @@
+# Secrets — do NOT commit the real Azure config
+azure_config.plist
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

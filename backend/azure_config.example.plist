@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EndpointId</key>
+	<string>YOUR_CUSTOM_MODEL_ENDPOINT_ID</string>
+	<key>Region</key>
+	<string>eastus2</string>
+	<key>SubscriptionKey</key>
+	<string>YOUR_AZURE_SPEECH_KEY</string>
+</dict>
+</plist>
