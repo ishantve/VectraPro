@@ -13,6 +13,7 @@ struct MapScreen: View {
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
     @ObservedObject private var presentation = RadarPresentation.shared
     @State private var isLandscape = false
+    @State private var isWindowed = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -37,8 +38,8 @@ struct MapScreen: View {
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { isLandscape = proxy.size.width > proxy.size.height }
-                    .onChange(of: proxy.size) { _, size in isLandscape = size.width > size.height }
+                    .onAppear { updateLayout(for: proxy.size) }
+                    .onChange(of: proxy.size) { _, size in updateLayout(for: size) }
             }
         }
         .overlay(alignment: .top) {
@@ -63,7 +64,9 @@ struct MapScreen: View {
                     .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
             }
             .padding(.leading, 16)
-            .padding(.top, 8)
+            // Drop below the native window controls only when windowed; keep the
+            // original placement in fullscreen.
+            .padding(.top, isWindowed ? 44 : 8)
         }
         .overlay(alignment: .topTrailing) {
             Button {
@@ -113,6 +116,19 @@ struct MapScreen: View {
             }
         }
         .onDisappear { viewModel.stopSimulation() }
+    }
+
+    /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
+    /// in Stage Manager the window doesn't fill the display, so the view is
+    /// meaningfully smaller than the screen.
+    private func updateLayout(for size: CGSize) {
+        isLandscape = size.width > size.height
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) {
+            let screen = scene.screen.bounds.size
+            isWindowed = size.width < screen.width - 1 || size.height < screen.height - 1
+        }
     }
 
     private var controlPanel: some View {
