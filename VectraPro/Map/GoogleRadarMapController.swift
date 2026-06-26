@@ -325,7 +325,10 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     [
       { "elementType": "labels", "stylers": [{ "visibility": "off" }] },
       { "elementType": "geometry", "stylers": [{ "color": "#000000" }] },
-      { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
+      { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#0a0a0a" }] },
+      { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#0a0a0a" }] },
+      { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#0a0a0a" }] },
+      { "featureType": "transit", "elementType": "geometry", "stylers": [{ "color": "#0a0a0a" }] },
       { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
     ]
     """

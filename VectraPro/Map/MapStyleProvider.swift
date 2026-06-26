@@ -14,17 +14,18 @@ enum MapStyleProvider {
     static func styleURL(for provider: MapProvider) -> URL {
         switch provider {
         case .arcgis:
-            // Esri "World Dark Gray Base" is greyer than OSM; darken it heavily
-            // (low brightness + opacity) to read pure-black like OpenStreetMap.
+            // Esri "World Dark Gray Base" — darkened to a near-black base so the
+            // green radar overlay composites the same as on the Google map.
             return rasterStyle(
                 name: "arcgis_dark",
                 tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"],
                 attribution: "© Esri",
-                opacity: 0.55,
-                brightnessMax: 0.3
+                opacity: 0.35,
+                brightnessMax: 0.22
             )
         default:
-            // OpenStreetMap (CARTO dark, no labels), dimmed for a Google-like look.
+            // OpenStreetMap (CARTO dark, no labels) — darkened to a near-black
+            // base to match the Google map's #000000 background.
             return rasterStyle(
                 name: "osm_dark",
                 tiles: [
@@ -33,7 +34,8 @@ enum MapStyleProvider {
                     "https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png",
                 ],
                 attribution: "© OpenStreetMap contributors, © CARTO",
-                opacity: 0.45
+                opacity: 0.28,
+                brightnessMax: 0.5
             )
         }
     }
