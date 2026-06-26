@@ -9,15 +9,26 @@ import SwiftUI
 
 struct MapScreen: View {
 
-    @StateObject private var viewModel = MapViewModel()
-    @StateObject private var speechViewModel = SpeechViewModel()
+    @ObservedObject private var viewModel = MapViewModel.shared
+    @ObservedObject private var speechViewModel = SpeechViewModel.shared
+    @ObservedObject private var presentation = RadarPresentation.shared
     @State private var isLandscape = false
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
+
+    private var provider: MapProvider { MapProvider(rawValue: providerRaw) ?? .mapLibre }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            MapLibreMapView(viewModel: viewModel)
-                .ignoresSafeArea()
+            // Always-black base so the navigation transition / map init never
+            // flashes white before the map paints.
+            Color.black.ignoresSafeArea()
+
+            if !presentation.isMapDetached {
+                mapView
+                    .ignoresSafeArea()
+                    .id(providerRaw)   // recreate when the provider changes
+            }
 
             controlPanel
         }
@@ -62,8 +73,16 @@ struct MapScreen: View {
         }
         .navigationBarBackButtonHidden(true)
         .disablesSwipeBack()
+        .focusable()
+        .onKeyPress(.upArrow) { viewModel.pan(towardBearing: 0); return .handled }
+        .onKeyPress(.downArrow) { viewModel.pan(towardBearing: 180); return .handled }
+        .onKeyPress(.rightArrow) { viewModel.pan(towardBearing: 90); return .handled }
+        .onKeyPress(.leftArrow) { viewModel.pan(towardBearing: 270); return .handled }
+        .onKeyPress("=") { viewModel.zoom(by: 1); return .handled }   // "=" / "+"
+        .onKeyPress("+") { viewModel.zoom(by: 1); return .handled }
+        .onKeyPress("-") { viewModel.zoom(by: -1); return .handled }
         .onAppear {
-            viewModel.startSimulation()
+            viewModel.reset()   // fresh radar each time the screen opens
             speechViewModel.prepare()
             let vm = viewModel
             speechViewModel.onCommand = { [weak vm] transcript in
@@ -84,6 +103,16 @@ struct MapScreen: View {
         .padding()
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
         .padding()
+    }
+
+    @ViewBuilder
+    private var mapView: some View {
+        if provider == .google {
+            GoogleRadarMapView(viewModel: viewModel)
+        } else {
+            // MapLibre-backed (OpenStreetMap or ArcGIS) — same renderer, different tiles.
+            RadarMapView(viewModel: viewModel, styleURL: MapStyleProvider.styleURL(for: provider))
+        }
     }
 
     private var zoomButtons: some View {

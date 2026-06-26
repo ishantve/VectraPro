@@ -1,0 +1,311 @@
+//
+//  GoogleRadarMapController.swift
+//  VectraPro
+//
+//  Google Maps renderer for the radar. Mirrors RadarMapController (MapLibre)
+//  but uses GMS APIs. Consumes the same provider-agnostic geometry (MapLine),
+//  symbols (AircraftSymbol) and shared MapViewModel.
+//
+
+import Combine
+import CoreLocation
+import GoogleMaps
+import QuartzCore
+import UIKit
+
+final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRecognizerDelegate {
+
+    let mapView: GMSMapView
+    private let viewModel: MapViewModel
+    private var cancellables = Set<AnyCancellable>()
+
+    private var didLimitZoom = false
+
+    private enum PanMode { case none, map, label }
+    private var panMode: PanMode = .none
+    private var lastPanTranslation: CGPoint = .zero
+
+    private var ringRadialLines: [GMSPolyline] = []
+    private var ringRadialKey = ""
+    private var stripLines: [UUID: [GMSPolyline]] = [:]
+    private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
+
+    private var aircraftMarker: GMSMarker?
+    private var labelMarker: GMSMarker?
+    private var lastLabelText = ""
+    private var trailMarkers: [GMSMarker] = []
+    private var tether: GMSPolyline?
+    private var isDraggingLabel = false
+
+    private let trailIcons: [UIImage] = (0..<8).map {
+        AircraftSymbol.trailDot(fraction: Double($0) / 7)
+    }
+
+    init(viewModel: MapViewModel) {
+        self.viewModel = viewModel
+        let camera = GMSCameraPosition.camera(withTarget: viewModel.center, zoom: 8.5)
+        // Start at a real (screen-sized) frame so the GL surface renders full
+        // size immediately instead of flashing small then re-rendering.
+        self.mapView = GMSMapView(frame: UIScreen.main.bounds, camera: camera)
+        super.init()
+        setupMapView()
+
+        viewModel.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.sync() }
+            .store(in: &cancellables)
+        viewModel.zoomPublisher
+            .sink { [weak self] delta in self?.applyZoom(delta) }
+            .store(in: &cancellables)
+        viewModel.panPublisher
+            .sink { [weak self] bearing in self?.panStep(towardBearing: bearing) }
+            .store(in: &cancellables)
+    }
+
+    private func setupMapView() {
+        mapView.delegate = self
+        mapView.backgroundColor = .black   // dark base while tiles load (no white)
+        mapView.mapStyle = try? GMSMapStyle(jsonString: Self.darkStyleJSON)
+        mapView.settings.compassButton = false
+        mapView.settings.myLocationButton = false
+        mapView.isMyLocationEnabled = false
+        mapView.settings.scrollGestures = false   // manual pan (clamped)
+        mapView.settings.rotateGestures = false
+        mapView.settings.tiltGestures = false
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.delegate = self
+        pan.maximumNumberOfTouches = 1
+        mapView.addGestureRecognizer(pan)
+    }
+
+    private func applyZoom(_ delta: Double) {
+        let target = max(mapView.minZoom, min(mapView.maxZoom, mapView.camera.zoom + Float(delta)))
+        mapView.animate(toZoom: target)
+    }
+
+    private func panStep(towardBearing bearing: Double) {
+        let step = 3 * 1852.0
+        let newCenter = Geo.offset(from: mapView.camera.target, distanceMeters: step, bearingDegrees: bearing)
+        mapView.animate(toLocation: clampToRadius(newCenter))
+    }
+
+    // MARK: Sync
+
+    func sync() {
+        applyZoomLimit()
+        syncStaticLines()
+        syncAircraft()
+    }
+
+    private func applyZoomLimit() {
+        guard !didLimitZoom, mapView.bounds.width > 0, mapView.bounds.height > 0 else { return }
+        let radius = 70 * 1852.0
+        let center = viewModel.center
+        let north = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 0)
+        let south = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 180)
+        let east = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 90)
+        let west = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 270)
+        let bounds = GMSCoordinateBounds(
+            coordinate: CLLocationCoordinate2D(latitude: north.latitude, longitude: east.longitude),
+            coordinate: CLLocationCoordinate2D(latitude: south.latitude, longitude: west.longitude)
+        )
+        if let camera = mapView.camera(for: bounds, insets: .zero) {
+            mapView.camera = camera
+            mapView.setMinZoom(camera.zoom, maxZoom: mapView.maxZoom)
+        }
+        didLimitZoom = true
+    }
+
+    private func syncStaticLines() {
+        let enabled = viewModel.enabledApproaches
+        let enabledStripIDs = Set(enabled.map(\.runwayID))
+
+        let radialKey = viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        if ringRadialLines.isEmpty || radialKey != ringRadialKey {
+            ringRadialLines.forEach { $0.map = nil }
+            var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
+            lines += viewModel.radialManager.lines(center: viewModel.center)
+            ringRadialLines = add(lines)
+            ringRadialKey = radialKey
+        }
+
+        for (id, lines) in stripLines where !enabledStripIDs.contains(id) {
+            lines.forEach { $0.map = nil }
+            stripLines[id] = nil
+        }
+        for runway in viewModel.runways
+        where enabledStripIDs.contains(runway.id) && stripLines[runway.id] == nil {
+            var lines = RunwayRenderer.lines(runway)
+            lines += LocalizerRenderer.stripGeometry(runway: runway)
+            stripLines[runway.id] = add(lines)
+        }
+
+        for (id, lines) in localizerLineSets where !enabled.contains(id) {
+            lines.forEach { $0.map = nil }
+            localizerLineSets[id] = nil
+        }
+        for approach in enabled where localizerLineSets[approach] == nil {
+            guard let runway = viewModel.runway(for: approach.runwayID) else { continue }
+            localizerLineSets[approach] = add(LocalizerRenderer.localizerLines(runway: runway, side: approach.side))
+        }
+    }
+
+    private func add(_ mapLines: [MapLine]) -> [GMSPolyline] {
+        mapLines.compactMap { mapLine in
+            guard mapLine.coordinates.count >= 2 else { return nil }
+            let path = GMSMutablePath()
+            mapLine.coordinates.forEach { path.add($0) }
+            let polyline = GMSPolyline(path: path)
+            polyline.strokeColor = mapLine.color
+            polyline.strokeWidth = mapLine.width
+            polyline.map = mapView
+            return polyline
+        }
+    }
+
+    // MARK: Aircraft
+
+    private func syncAircraft() {
+        guard let aircraft = viewModel.aircraft.first else { return }
+
+        let marker = aircraftMarker ?? {
+            let m = GMSMarker(position: aircraft.position)
+            m.icon = AircraftSymbol.image()
+            m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            m.isFlat = true
+            m.isTappable = false
+            m.map = mapView
+            aircraftMarker = m
+            return m
+        }()
+        marker.position = aircraft.position
+        marker.rotation = aircraft.headingDegrees
+
+        let text = aircraft.dataBlock
+        let offset = Geo.offset(from: aircraft.position,
+                                distanceMeters: aircraft.labelDistanceMeters,
+                                bearingDegrees: aircraft.labelBearingDegrees)
+        let label = labelMarker ?? {
+            let m = GMSMarker(position: offset)
+            m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            m.isFlat = true
+            m.map = mapView
+            labelMarker = m
+            return m
+        }()
+        if text != lastLabelText {
+            label.icon = AircraftSymbol.label(text)
+            lastLabelText = text
+        }
+        if !isDraggingLabel { label.position = offset }
+
+        syncTrail(aircraft.history)
+        updateTether(from: aircraft.position, to: label.position)
+    }
+
+    private func syncTrail(_ history: [CLLocationCoordinate2D]) {
+        trailMarkers.forEach { $0.map = nil }
+        trailMarkers = []
+        for index in history.indices {
+            let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
+            let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
+            let marker = GMSMarker(position: history[index])
+            marker.icon = trailIcons[step]
+            marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            marker.isTappable = false
+            marker.map = mapView
+            trailMarkers.append(marker)
+        }
+    }
+
+    private func updateTether(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
+        let path = GMSMutablePath()
+        path.add(start)
+        path.add(end)
+        if let tether {
+            tether.path = path
+        } else {
+            let line = GMSPolyline(path: path)
+            line.strokeColor = UIColor.white.withAlphaComponent(0.5)
+            line.strokeWidth = 1.5
+            line.map = mapView
+            tether = line
+        }
+    }
+
+    // MARK: Pan + clamp
+
+    private func clampToRadius(_ coordinate: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+        let maxMeters = 200 * 1852.0
+        let distance = Geo.distanceMeters(from: viewModel.center, to: coordinate)
+        guard distance > maxMeters else { return coordinate }
+        let bearing = Geo.bearing(from: viewModel.center, to: coordinate)
+        return Geo.offset(from: viewModel.center, distanceMeters: maxMeters, bearingDegrees: bearing)
+    }
+
+    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let point = gesture.location(in: mapView)
+        switch gesture.state {
+        case .began:
+            if labelContains(point) { panMode = .label; isDraggingLabel = true }
+            else { panMode = .map; lastPanTranslation = .zero }
+        case .changed:
+            switch panMode {
+            case .label:
+                guard let label = labelMarker, let aircraft = viewModel.aircraft.first else { return }
+                // Disable the GMSMarker move animation so the block tracks the
+                // finger with no lag.
+                CATransaction.begin()
+                CATransaction.setAnimationDuration(0)
+                label.position = mapView.projection.coordinate(for: point)
+                updateTether(from: aircraft.position, to: label.position)
+                CATransaction.commit()
+            case .map:
+                let translation = gesture.translation(in: mapView)
+                let delta = CGPoint(x: translation.x - lastPanTranslation.x,
+                                    y: translation.y - lastPanTranslation.y)
+                lastPanTranslation = translation
+                let screenCenter = CGPoint(x: mapView.bounds.midX, y: mapView.bounds.midY)
+                let target = CGPoint(x: screenCenter.x - delta.x, y: screenCenter.y - delta.y)
+                let proposed = mapView.projection.coordinate(for: target)
+                mapView.camera = GMSCameraPosition(target: clampToRadius(proposed), zoom: mapView.camera.zoom)
+            case .none:
+                break
+            }
+        case .ended, .cancelled, .failed:
+            if panMode == .label, let aircraft = viewModel.aircraft.first, let label = labelMarker {
+                let bearing = Geo.bearing(from: aircraft.position, to: label.position)
+                let distance = Geo.distanceMeters(from: aircraft.position, to: label.position)
+                viewModel.setLabelOffset(for: aircraft.id, bearingDegrees: bearing, distanceMeters: distance)
+            }
+            isDraggingLabel = false
+            panMode = .none
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { true }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+    private func labelContains(_ point: CGPoint) -> Bool {
+        guard let label = labelMarker, let image = label.icon else { return false }
+        let anchor = mapView.projection.point(for: label.position)
+        let rect = CGRect(x: anchor.x - image.size.width / 2,
+                          y: anchor.y - image.size.height / 2,
+                          width: image.size.width, height: image.size.height)
+        return rect.insetBy(dx: -16, dy: -16).contains(point)
+    }
+
+    private static let darkStyleJSON = """
+    [
+      { "elementType": "labels", "stylers": [{ "visibility": "off" }] },
+      { "elementType": "geometry", "stylers": [{ "color": "#000000" }] },
+      { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
+      { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
+    ]
+    """
+}
