@@ -14,6 +14,8 @@ struct MapScreen: View {
     @ObservedObject private var presentation = RadarPresentation.shared
     @State private var isLandscape = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
 
     private var provider: MapProvider { MapProvider(rawValue: providerRaw) ?? .mapLibre }
@@ -61,6 +63,27 @@ struct MapScreen: View {
                     .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
             }
             .padding(.leading, 16)
+            .padding(.top, 8)
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                // Toggle: open the radar in its own window, or merge it back into
+                // this screen. With Stage Manager ON and a monitor connected, drag
+                // the detached window onto the monitor for mouse + keyboard there.
+                if presentation.isMapDetached {
+                    dismissWindow(id: "radar")
+                } else {
+                    openWindow(id: "radar")
+                }
+            } label: {
+                Image(systemName: presentation.isMapDetached ? "rectangle.on.rectangle.slash" : "rectangle.on.rectangle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.6), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+            }
+            .padding(.trailing, 16)
             .padding(.top, 8)
         }
         .overlay(alignment: .bottomTrailing) {

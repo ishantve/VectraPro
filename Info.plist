@@ -9,23 +9,12 @@
 		<true/>
 	</dict>
 
-	<!-- Multiple scenes + external-display routing (see AppDelegate). -->
+	<!-- Multiple scenes so the radar can open in its own window (Stage Manager
+	     can move it to the external display, where mouse + keyboard work). -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
-		<key>UISceneConfigurations</key>
-		<dict>
-			<key>UIWindowSceneSessionRoleExternalDisplayNonInteractive</key>
-			<array>
-				<dict>
-					<key>UISceneConfigurationName</key>
-					<string>External Display</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).ExternalSceneDelegate</string>
-				</dict>
-			</array>
-		</dict>
 	</dict>
 </dict>
 </plist>
