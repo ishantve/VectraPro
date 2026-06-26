@@ -33,12 +33,8 @@ final class MapViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let tickInterval = 1.0          // seconds
 
-    // MARK: - Map ownership (shared so it can move to an external display)
-
-    /// Owns the single MLNMapView; reparented between iPad and external display.
-    private(set) lazy var mapController = RadarMapController(viewModel: self)
-    /// Drives the iPad ↔ external-display transition.
-    private(set) lazy var externalDisplay = ExternalDisplayManager(controller: mapController)
+    /// App-wide shared instance so every scene's map shows the same live state.
+    static let shared = MapViewModel()
     private var tickCount = 0
     private let historySampleTicks = 3      // sample a trail dot every N ticks
     private let maxHistoryPoints = 8
@@ -76,15 +72,16 @@ final class MapViewModel: ObservableObject {
         zoomPublisher.send(delta)
     }
 
+    /// Emits a bearing (0 N, 90 E, 180 S, 270 W) to nudge the map via keyboard.
+    let panPublisher = PassthroughSubject<Double, Never>()
+
+    func pan(towardBearing bearing: Double) {
+        panPublisher.send(bearing)
+    }
+
     init() {
         enabledApproaches = defaultEnabledApproaches()
         aircraft = [makeRandomAircraft()]
-
-        // Create the map controller + external-display watcher now, and surface
-        // external-display changes so the screen rearranges.
-        externalDisplay.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &cancellables)
     }
 
     // MARK: - Voice commands
@@ -127,6 +124,19 @@ final class MapViewModel: ObservableObject {
     func stopSimulation() {
         simulationTimer?.invalidate()
         simulationTimer = nil
+    }
+
+    /// Full fresh start — clears radar state and re-spawns. Called each time the
+    /// screen opens so reopening renders new.
+    func reset() {
+        stopSimulation()
+        tickCount = 0
+        runways = RunwayData.igiAirport
+        enabledApproaches = defaultEnabledApproaches()
+        radialManager.setEnabled(RadialManager.defaultRadials)
+        pendingStart = nil
+        aircraft = [makeRandomAircraft()]
+        startSimulation()
     }
 
     /// Advance every aircraft along its heading by the distance covered at its
@@ -281,12 +291,6 @@ final class MapViewModel: ObservableObject {
         } else {
             pendingStart = coordinate
         }
-    }
-
-    func reset() {
-        runways = RunwayData.igiAirport
-        enabledApproaches = defaultEnabledApproaches()
-        pendingStart = nil
     }
 
     // MARK: - Private

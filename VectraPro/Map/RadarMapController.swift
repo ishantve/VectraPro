@@ -49,9 +49,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
     }
 
-    init(viewModel: MapViewModel) {
+    init(viewModel: MapViewModel, styleURL: URL) {
         self.viewModel = viewModel
-        self.mapView = MLNMapView(frame: .zero, styleURL: MapStyleProvider.darkOSMStyleURL())
+        self.mapView = MLNMapView(frame: .zero, styleURL: styleURL)
         super.init()
         setupMapView()
 
@@ -65,10 +65,21 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         viewModel.zoomPublisher
             .sink { [weak self] delta in self?.applyZoom(delta) }
             .store(in: &cancellables)
+
+        viewModel.panPublisher
+            .sink { [weak self] bearing in self?.panStep(towardBearing: bearing) }
+            .store(in: &cancellables)
+    }
+
+    private func panStep(towardBearing bearing: Double) {
+        let step = 3 * 1852.0   // 3 NM per key press
+        let newCenter = Geo.offset(from: mapView.centerCoordinate, distanceMeters: step, bearingDegrees: bearing)
+        mapView.setCenter(clampToRadius(newCenter), animated: true)
     }
 
     private func setupMapView() {
         mapView.delegate = self
+        mapView.backgroundColor = .black   // black (not white) until tiles load
         mapView.logoView.isHidden = true
         mapView.attributionButton.isHidden = true
         mapView.showsUserLocation = false

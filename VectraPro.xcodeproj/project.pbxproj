@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
+		A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */; };
 		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 			files = (
 				8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */,
 				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
+				A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +123,7 @@
 			packageProductDependencies = (
 				8B7FEE2D2FEC24E10055FDF8 /* MapLibre */,
 				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
+				A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */,
 			);
 			productName = VectraPro;
 			productReference = 8B7FEE002FEC24A70055FDF8 /* VectraPro.app */;
@@ -207,6 +210,7 @@
 			packageReferences = (
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
+				A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B7FEE012FEC24A70055FDF8 /* Products */;
@@ -419,7 +423,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to transcribe your speech into text.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
@@ -459,7 +463,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show your position on the map and provide location-based features.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to transcribe your speech into text.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
@@ -624,6 +628,14 @@
 				minimumVersion = 6.0.0;
 			};
 		};
+		A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -631,6 +643,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;
+		};
+		A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
+			productName = GoogleMaps;
 		};
 		C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */ = {
 			isa = XCSwiftPackageProductDependency;

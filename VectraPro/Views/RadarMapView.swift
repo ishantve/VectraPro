@@ -2,22 +2,28 @@
 //  RadarMapView.swift
 //  VectraPro
 //
-//  Thin SwiftUI wrapper that mounts the shared map view owned by
-//  RadarMapController. The same map view can be hosted here (iPad) or on an
-//  external display — only one at a time — so it reparents without reloading.
+//  SwiftUI wrapper for the radar map. Each instance (iPad screen / external
+//  display) creates its OWN map view but binds to the shared MapViewModel, so
+//  both show the same live radar. (A Metal-backed map view can't be reparented
+//  across separate scenes, so we use one per scene rather than sharing it.)
 //
 
 import MapLibre
 import SwiftUI
 
 struct RadarMapView: UIViewRepresentable {
-    let controller: RadarMapController
+    let viewModel: MapViewModel
+    let styleURL: URL
+
+    func makeCoordinator() -> RadarMapController {
+        RadarMapController(viewModel: viewModel, styleURL: styleURL)
+    }
 
     func makeUIView(context: Context) -> MLNMapView {
-        controller.mapView
+        context.coordinator.mapView
     }
 
     func updateUIView(_ uiView: MLNMapView, context: Context) {
-        controller.sync()
+        context.coordinator.sync()
     }
 }

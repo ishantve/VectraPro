@@ -16,6 +16,8 @@ import Foundation
 @MainActor
 final class SpeechViewModel: ObservableObject {
 
+    static let shared = SpeechViewModel()
+
     @Published private(set) var transcript = ""
     @Published private(set) var isRecording = false
     @Published private(set) var isTranscribing = false
