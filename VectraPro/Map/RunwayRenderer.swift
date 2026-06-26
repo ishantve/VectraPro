@@ -2,26 +2,20 @@
 //  RunwayRenderer.swift
 //  VectraPro
 //
-//  Draws runway centerlines onto a GMSMapView.
+//  Builds the runway centerline as a MapLine.
 //
 
-import GoogleMaps
+import UIKit
 
 enum RunwayRenderer {
 
-    /// Draws a runway centerline and returns the overlays it created so they
-    /// can be removed later without disturbing other map content.
-    @discardableResult
-    static func draw(_ runway: Runway, on mapView: GMSMapView) -> [GMSOverlay] {
-        let path = GMSMutablePath()
-        path.add(runway.endA.coordinate)
-        path.add(runway.endB.coordinate)
-
-        let line = GMSPolyline(path: path)
-        line.strokeColor = .white
-        line.strokeWidth = 4
-        line.map = mapView
-
-        return [line]
+    static func lines(_ runway: Runway) -> [MapLine] {
+        [
+            MapLine(
+                coordinates: [runway.endA.coordinate, runway.endB.coordinate],
+                color: .white,
+                width: 4
+            ),
+        ]
     }
 }

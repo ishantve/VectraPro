@@ -42,6 +42,32 @@ final class MapViewModel: ObservableObject {
 
     private lazy var commandController = CommandController(mapViewModel: self)
 
+    /// Services 0–360 radials; default set on until the API supplies them.
+    let radialManager = RadialManager()
+
+    /// Replace enabled radials (e.g. from the API).
+    func setEnabledRadials(_ degrees: Set<Int>) {
+        objectWillChange.send()
+        radialManager.setEnabled(degrees)
+    }
+
+    func enableRadial(_ degree: Int) {
+        objectWillChange.send()
+        radialManager.enable(degree)
+    }
+
+    func disableRadial(_ degree: Int) {
+        objectWillChange.send()
+        radialManager.disable(degree)
+    }
+
+    /// Emits a zoom delta (+1 in / −1 out) from the zoom buttons.
+    let zoomPublisher = PassthroughSubject<Double, Never>()
+
+    func zoom(by delta: Double) {
+        zoomPublisher.send(delta)
+    }
+
     init() {
         enabledApproaches = defaultEnabledApproaches()
         aircraft = [makeRandomAircraft()]
@@ -60,11 +86,11 @@ final class MapViewModel: ObservableObject {
         for command in commands {
             switch command {
             case .heading(let heading):
-                aircraft[0].headingDegrees = heading
+                aircraft[0].targetHeading = heading
             case .flightLevel(let flightLevel):
                 aircraft[0].altitudeFeet = Double(flightLevel) * 100
             case .speed(let knots):
-                aircraft[0].speedKnots = knots
+                aircraft[0].targetSpeedKnots = knots
             }
         }
     }
@@ -95,6 +121,12 @@ final class MapViewModel: ObservableObject {
         tickCount += 1
 
         for index in aircraft.indices {
+            // Gradual, speed-dependent turn toward any commanded heading.
+            turnTowardTarget(&aircraft[index], dt: tickInterval)
+
+            // Gradual acceleration / deceleration toward any commanded speed.
+            adjustSpeed(&aircraft[index], dt: tickInterval)
+
             // Sample a history point for the trail.
             if tickCount % historySampleTicks == 0 {
                 aircraft[index].history.append(aircraft[index].position)
@@ -110,6 +142,53 @@ final class MapViewModel: ObservableObject {
                 distanceMeters: distance,
                 bearingDegrees: aircraft[index].headingDegrees
             )
+        }
+    }
+
+    /// Standard bank angle for the turn-rate model (heavier transport ~25°).
+    private let maxBankDegrees = 25.0
+
+    /// Turn the aircraft toward its commanded heading at a bank-limited rate.
+    /// Rate of turn (°/s) = 1091 × tan(bank) / TAS(kt) — so faster aircraft turn
+    /// more slowly (larger radius), like a real radar target.
+    private func turnTowardTarget(_ aircraft: inout Aircraft, dt: Double) {
+        guard let target = aircraft.targetHeading else { return }
+
+        let current = aircraft.headingDegrees
+        var diff = (target - current).truncatingRemainder(dividingBy: 360)
+        if diff > 180 { diff -= 360 } else if diff < -180 { diff += 360 }
+
+        let rate = 1091.0 * tan(maxBankDegrees * .pi / 180.0) / max(aircraft.speedKnots, 1)
+        let step = rate * dt
+
+        if abs(diff) <= step {
+            aircraft.headingDegrees = normalizeHeading(target)
+            aircraft.targetHeading = nil   // reached
+        } else {
+            aircraft.headingDegrees = normalizeHeading(current + (diff >= 0 ? step : -step))
+        }
+    }
+
+    private func normalizeHeading(_ heading: Double) -> Double {
+        let value = heading.truncatingRemainder(dividingBy: 360)
+        return value < 0 ? value + 360 : value
+    }
+
+    /// Typical jet rates: accelerates slowly, decelerates a bit faster (drag).
+    private let accelKnotsPerSecond = 1.5
+    private let decelKnotsPerSecond = 2.0
+
+    private func adjustSpeed(_ aircraft: inout Aircraft, dt: Double) {
+        guard let target = aircraft.targetSpeedKnots else { return }
+
+        let diff = target - aircraft.speedKnots
+        let step = (diff > 0 ? accelKnotsPerSecond : decelKnotsPerSecond) * dt
+
+        if abs(diff) <= step {
+            aircraft.speedKnots = target
+            aircraft.targetSpeedKnots = nil   // reached
+        } else {
+            aircraft.speedKnots += diff > 0 ? step : -step
         }
     }
 

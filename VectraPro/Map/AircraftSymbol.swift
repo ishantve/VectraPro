@@ -12,30 +12,39 @@ enum AircraftSymbol {
 
     static let color = UIColor.white
 
-    /// The aircraft symbol — diamond body, a small nose just ahead, and a
-    /// short tail behind. Sized small to read like a real radar target. Drawn
-    /// pointing "up" (north); the marker is rotated to the heading.
+    /// The aircraft symbol — hollow diamond body, a tiny nose, a short tail and
+    /// a forward leader line, all baked into one image so it stays a fixed
+    /// on-screen size and rotates as a whole. Drawn pointing "up" (north); the
+    /// annotation view is rotated to the heading.
     static func image() -> UIImage {
-        let size = CGSize(width: 22, height: 28)
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let side: CGFloat = 100
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
 
         return renderer.image { _ in
             color.setStroke()
             color.setFill()
 
-            let cx: CGFloat = 11
-            let cy: CGFloat = 14      // diamond centre
-            let half: CGFloat = 5.5   // diamond half-size
+            let cx = side / 2          // symbol sits at the centre = aircraft position
+            let cy = side / 2
+            let half: CGFloat = 5.5
+            let leaderLength: CGFloat = 40
 
-            // Nose — tiny triangle sitting right on the front of the diamond.
+            // Leader (velocity vector) — forward from the body.
+            let leader = UIBezierPath()
+            leader.move(to: CGPoint(x: cx, y: cy - half))
+            leader.addLine(to: CGPoint(x: cx, y: cy - leaderLength))
+            leader.lineWidth = 1.5
+            leader.stroke()
+
+            // Nose — tiny triangle on the front of the diamond.
             let nose = UIBezierPath()
-            nose.move(to: CGPoint(x: cx, y: cy - half - 2))        // tip
-            nose.addLine(to: CGPoint(x: cx - 2, y: cy - (2 * half)))     // base on diamond top
-            // nose.addLine(to: CGPoint(x: cx + 2, y: cy - (2 * half)))
+            nose.move(to: CGPoint(x: cx, y: cy - half - 2))
+            nose.addLine(to: CGPoint(x: cx - 2, y: cy - half))
+            nose.addLine(to: CGPoint(x: cx + 2, y: cy - half))
             nose.close()
             nose.fill()
 
-            // Diamond — the aircraft body.
+            // Diamond body (hollow).
             let diamond = UIBezierPath()
             diamond.move(to: CGPoint(x: cx, y: cy - half))
             diamond.addLine(to: CGPoint(x: cx + half, y: cy))
@@ -45,18 +54,12 @@ enum AircraftSymbol {
             diamond.lineWidth = 1.5
             diamond.stroke()
 
-            // Tail — short line behind the body with a small fin.
+            // Tail — short line behind the body.
             let tail = UIBezierPath()
             tail.move(to: CGPoint(x: cx, y: cy + half))
-            tail.addLine(to: CGPoint(x: cx, y: 26))
+            tail.addLine(to: CGPoint(x: cx, y: cy + half + 12))
             tail.lineWidth = 1.5
             tail.stroke()
-
-            // let fin = UIBezierPath()
-            // fin.move(to: CGPoint(x: cx - 4, y: 24))
-            // fin.addLine(to: CGPoint(x: cx + 4, y: 24))
-            // fin.lineWidth = 1.5
-            // fin.stroke()
         }
     }
 

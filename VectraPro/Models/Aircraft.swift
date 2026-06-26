@@ -13,7 +13,11 @@ struct Aircraft: Identifiable {
     var callsign: String
     var position: CLLocationCoordinate2D
     var headingDegrees: Double
+    /// Commanded heading the aircraft is turning toward (nil = none).
+    var targetHeading: Double? = nil
     var speedKnots: Double = Aircraft.defaultSpeedKnots
+    /// Commanded speed the aircraft is accelerating/decelerating to (nil = none).
+    var targetSpeedKnots: Double? = nil
     var altitudeFeet: Double = Aircraft.defaultAltitudeFeet
 
     /// Recent past positions (oldest first) used to draw the history trail.

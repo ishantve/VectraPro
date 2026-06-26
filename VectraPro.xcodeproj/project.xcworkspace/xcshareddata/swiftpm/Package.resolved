@@ -1,13 +1,13 @@
 {
-  "originHash" : "fe5dd08882d08507f16493adf883e323b1dd5a821ac629f6777702bda6b2ba4e",
+  "originHash" : "e2d57ed376725fbc9cd3e9c811144078e2b5ae0d85cda047f93c255e5d9e0853",
   "pins" : [
     {
-      "identity" : "ios-maps-sdk",
+      "identity" : "maplibre-gl-native-distribution",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/googlemaps/ios-maps-sdk",
+      "location" : "https://github.com/maplibre/maplibre-gl-native-distribution",
       "state" : {
-        "revision" : "98096f0cd3524e7217fe36936dc1a0c738819f9c",
-        "version" : "10.14.0"
+        "revision" : "84a79bc375a301169390ac110c868f06c857b83f",
+        "version" : "6.27.0"
       }
     }
   ],

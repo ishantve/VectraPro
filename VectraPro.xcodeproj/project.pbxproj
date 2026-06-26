@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8B7FEE2E2FEC24E10055FDF8 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */; };
+		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
 		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
 /* End PBXBuildFile section */
 
@@ -57,7 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8B7FEE2E2FEC24E10055FDF8 /* GoogleMaps in Frameworks */,
+				8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */,
 				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -119,7 +119,7 @@
 			);
 			name = VectraPro;
 			packageProductDependencies = (
-				8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */,
+				8B7FEE2D2FEC24E10055FDF8 /* MapLibre */,
 				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
 			);
 			productName = VectraPro;
@@ -205,7 +205,7 @@
 			mainGroup = 8B7FEDF72FEC24A70055FDF8;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
+				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -408,9 +408,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = SPGHN7NVU3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -421,7 +422,9 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -445,9 +448,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = SPGHN7NVU3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -458,7 +462,9 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -610,21 +616,21 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */ = {
+		8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
+			repositoryURL = "https://github.com/maplibre/maplibre-gl-native-distribution";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 10.14.0;
+				minimumVersion = 6.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		8B7FEE2D2FEC24E10055FDF8 /* GoogleMaps */ = {
+		8B7FEE2D2FEC24E10055FDF8 /* MapLibre */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
-			productName = GoogleMaps;
+			package = 8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
+			productName = MapLibre;
 		};
 		C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */ = {
 			isa = XCSwiftPackageProductDependency;
