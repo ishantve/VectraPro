@@ -16,8 +16,13 @@ struct MapScreen: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            MapLibreMapView(viewModel: viewModel)
-                .ignoresSafeArea()
+            if viewModel.externalDisplay.isActive {
+                // Map is on the external display; iPad keeps the controls.
+                Color.black.ignoresSafeArea()
+            } else {
+                RadarMapView(controller: viewModel.mapController)
+                    .ignoresSafeArea()
+            }
 
             controlPanel
         }

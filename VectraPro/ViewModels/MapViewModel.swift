@@ -30,7 +30,15 @@ final class MapViewModel: ObservableObject {
     @Published private(set) var aircraft: [Aircraft] = []
 
     private var simulationTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
     private let tickInterval = 1.0          // seconds
+
+    // MARK: - Map ownership (shared so it can move to an external display)
+
+    /// Owns the single MLNMapView; reparented between iPad and external display.
+    private(set) lazy var mapController = RadarMapController(viewModel: self)
+    /// Drives the iPad ↔ external-display transition.
+    private(set) lazy var externalDisplay = ExternalDisplayManager(controller: mapController)
     private var tickCount = 0
     private let historySampleTicks = 3      // sample a trail dot every N ticks
     private let maxHistoryPoints = 8
@@ -71,6 +79,12 @@ final class MapViewModel: ObservableObject {
     init() {
         enabledApproaches = defaultEnabledApproaches()
         aircraft = [makeRandomAircraft()]
+
+        // Create the map controller + external-display watcher now, and surface
+        // external-display changes so the screen rearranges.
+        externalDisplay.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Voice commands
