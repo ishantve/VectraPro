@@ -23,7 +23,11 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private enum PanMode { case none, map, label }
     private var panMode: PanMode = .none
-    private var lastPanTranslation: CGPoint = .zero
+    // Pan anchor captured once at gesture start — avoids re-projecting against a
+    // stale GMSProjection every frame (which drifts / snaps back).
+    private var panStartCenter = CLLocationCoordinate2D()
+    private var latPerPoint: Double = 0
+    private var lngPerPoint: Double = 0
 
     private var ringRadialLines: [GMSPolyline] = []
     private var ringRadialKey = ""
@@ -248,8 +252,21 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let point = gesture.location(in: mapView)
         switch gesture.state {
         case .began:
-            if labelContains(point) { panMode = .label; isDraggingLabel = true }
-            else { panMode = .map; lastPanTranslation = .zero }
+            if labelContains(point) {
+                panMode = .label; isDraggingLabel = true
+            } else {
+                panMode = .map
+                // Capture the geographic-per-point scale ONCE here (zoom is fixed
+                // during a pan) so we can apply the total translation against a
+                // stable anchor instead of the live, lagging projection.
+                let screenCenter = CGPoint(x: mapView.bounds.midX, y: mapView.bounds.midY)
+                panStartCenter = mapView.camera.target
+                let ref = mapView.projection.coordinate(for: screenCenter)
+                let refRight = mapView.projection.coordinate(for: CGPoint(x: screenCenter.x + 100, y: screenCenter.y))
+                let refDown = mapView.projection.coordinate(for: CGPoint(x: screenCenter.x, y: screenCenter.y + 100))
+                lngPerPoint = (refRight.longitude - ref.longitude) / 100
+                latPerPoint = (refDown.latitude - ref.latitude) / 100
+            }
         case .changed:
             switch panMode {
             case .label:
@@ -262,14 +279,18 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 updateTether(from: aircraft.position, to: label.position)
                 CATransaction.commit()
             case .map:
-                let translation = gesture.translation(in: mapView)
-                let delta = CGPoint(x: translation.x - lastPanTranslation.x,
-                                    y: translation.y - lastPanTranslation.y)
-                lastPanTranslation = translation
-                let screenCenter = CGPoint(x: mapView.bounds.midX, y: mapView.bounds.midY)
-                let target = CGPoint(x: screenCenter.x - delta.x, y: screenCenter.y - delta.y)
-                let proposed = mapView.projection.coordinate(for: target)
+                let t = gesture.translation(in: mapView)
+                // Dragging the finger right/down moves the camera target the
+                // opposite way, anchored to where the pan began (no drift).
+                let proposed = CLLocationCoordinate2D(
+                    latitude: panStartCenter.latitude - Double(t.y) * latPerPoint,
+                    longitude: panStartCenter.longitude - Double(t.x) * lngPerPoint
+                )
+                CATransaction.begin()
+                CATransaction.setAnimationDuration(0)
+                CATransaction.setDisableActions(true)
                 mapView.camera = GMSCameraPosition(target: clampToRadius(proposed), zoom: mapView.camera.zoom)
+                CATransaction.commit()
             case .none:
                 break
             }
