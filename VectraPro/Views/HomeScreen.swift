@@ -38,8 +38,15 @@ struct HomeScreen: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(.black)
+            .background {
+                Image("MainMenu")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+            }
             .navigationTitle("VectraPro")
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .map:

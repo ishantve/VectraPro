@@ -28,6 +28,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var didLimitZoom = false
     private var isClamping = false
 
+    private var lastKnownSize: CGSize = .zero
+    private weak var lastScreen: UIScreen?
+
     private enum PanMode { case none, map, label }
     private var panMode: PanMode = .none
     private var lastPanTranslation: CGPoint = .zero
@@ -94,6 +97,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         pan.delegate = self
         pan.maximumNumberOfTouches = 1
         mapView.addGestureRecognizer(pan)
+
+        lastKnownSize = mapView.bounds.size
+        lastScreen = mapView.window?.screen
     }
 
     private func applyZoom(_ delta: Double) {
@@ -121,6 +127,29 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         style.addLayer(layer)
 
         tetherSource = source
+    }
+    
+
+    func mapViewDidFinishRenderingMapFullyRendered(_ mapView: MLNMapView) {
+        handleViewEnvironmentChangeIfNeeded(mapView)
+    }
+
+    func mapViewDidBecomeIdle(_ mapView: MLNMapView) {
+        handleViewEnvironmentChangeIfNeeded(mapView)
+    }
+
+    private func handleViewEnvironmentChangeIfNeeded(_ mapView: MLNMapView) {
+        // Detect changes in size or the screen the view is presented on (e.g., external display moves)
+        let currentSize = mapView.bounds.size
+        let currentScreen = mapView.window?.screen
+        let sizeChanged = currentSize != lastKnownSize && currentSize.width > 0 && currentSize.height > 0
+        let screenChanged = currentScreen !== lastScreen
+        guard sizeChanged || screenChanged else { return }
+        lastKnownSize = currentSize
+        lastScreen = currentScreen
+        // Recompute zoom limits and visible bounds for the new environment
+        didLimitZoom = false
+        applyZoomLimit(mapView)
     }
 
     // MARK: Pan clamp (200 NM)
@@ -386,3 +415,4 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         return rect.insetBy(dx: -16, dy: -16).contains(point)
     }
 }
+
