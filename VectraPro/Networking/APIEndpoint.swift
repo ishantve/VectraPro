@@ -147,6 +147,13 @@ struct UDCConfig: Decodable {
 /// Every API route lives here. Each case maps to a `path`, an HTTP `method`,
 /// and (optionally) query items. Add new routes by adding a case below.
 enum Endpoint {
+    // Post-login bootstrap.
+    case organizations
+    case games(orgID: String)
+    case nickNameUser(nickName: String)
+    case exercises(pageNo: Int, pageSize: Int, search: String)
+    case exerciseDetail(exerciseID: String)
+
     // Flights — examples; replace with your real routes.
     case flights
     case flight(id: String)
@@ -158,6 +165,16 @@ enum Endpoint {
     /// Path appended to the base URL.
     var path: String {
         switch self {
+        case .organizations:
+            return "/organizations"
+        case .games(let orgID):
+            return "/organizations/\(orgID)/games"
+        case .nickNameUser:
+            return "/nickName/user"
+        case .exercises:
+            return "/atc/excercise"   // backend spelling (double-c)
+        case .exerciseDetail:
+            return "/atc"
         case .flights, .createFlight:
             return "/flights"
         case .flight(let id),
@@ -171,7 +188,9 @@ enum Endpoint {
     /// HTTP verb for this endpoint.
     var method: HTTPMethod {
         switch self {
-        case .flights, .flight:   return .get
+        case .organizations, .games, .flights, .flight, .exercises, .exerciseDetail:
+            return .get
+        case .nickNameUser:       return .post
         case .createFlight:       return .post
         case .updateFlight:       return .put
         case .patchFlight:        return .patch
@@ -182,7 +201,24 @@ enum Endpoint {
     /// Optional query items for this endpoint (default none).
     var query: [URLQueryItem]? {
         switch self {
-        default: return nil
+        case .nickNameUser(let nickName):
+            return [URLQueryItem(name: "nickName", value: nickName)]
+        case .exercises(let pageNo, let pageSize, let search):
+            return [
+                URLQueryItem(name: "pageSize", value: String(pageSize)),
+                URLQueryItem(name: "pageNo", value: String(pageNo)),
+                URLQueryItem(name: "sortField", value: "oder"),
+                URLQueryItem(name: "sortDirection", value: "asc"),
+                URLQueryItem(name: "searchField", value: search),
+                URLQueryItem(name: "isMobileAPI", value: "true"),
+            ]
+        case .exerciseDetail(let exerciseID):
+            return [
+                URLQueryItem(name: "exerciseId", value: exerciseID),
+                URLQueryItem(name: "isMobileAPI", value: "true"),
+            ]
+        default:
+            return nil
         }
     }
 }

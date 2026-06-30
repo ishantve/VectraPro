@@ -120,6 +120,24 @@ final class SpeechViewModel: ObservableObject {
         showField = false
     }
 
+    // MARK: - Command keypad preview
+
+    /// Show / update the command sentence (from the keypad) in the field.
+    func previewCommand(_ text: String) {
+        guard !isRecording else { return }
+        hideTask?.cancel()
+        transcript = text
+        showField = true
+    }
+
+    /// Done with the keypad (applied or cancelled) — clear the field at once.
+    func clearPreview() {
+        guard !isRecording else { return }
+        hideTask?.cancel()
+        transcript = ""
+        showField = false
+    }
+
     // MARK: - Auto-hide
 
     private func scheduleAutoHide() {

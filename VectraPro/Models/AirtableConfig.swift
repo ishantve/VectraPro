@@ -1,5 +1,5 @@
 //
-//  OrganizationConfig.swift
+//  AirtableConfig.swift
 //  VectraPro
 //
 //  SwiftData model persisting the organization config fetched from UDC, so the
@@ -10,7 +10,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class OrganizationConfig {
+final class AirtableConfig {
 
     @Attribute(.unique) var id: Int
     var organizationID: String

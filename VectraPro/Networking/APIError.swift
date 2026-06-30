@@ -14,6 +14,10 @@ enum APIError: LocalizedError {
     case invalidResponse
     /// No config in the UDC response matched the given Organization ID.
     case organizationNotFound
+    /// The user has no organization in the /organizations response.
+    case noOrganizationAccess
+    /// The Vectra game wasn't present for the organization.
+    case noApplicationAccess
     /// Non-2xx status. Carries the code and the raw body (for server messages).
     case unacceptableStatus(code: Int, data: Data)
     case decodingFailed(Error)
@@ -30,6 +34,10 @@ enum APIError: LocalizedError {
             return "The server returned an unexpected response."
         case .organizationNotFound:
             return "No organization matched that ID."
+        case .noOrganizationAccess:
+            return "Sorry, It seems you don't have access to this organization."
+        case .noApplicationAccess:
+            return "Sorry, It seems you don't have permission to access this application."
         case .unacceptableStatus(let code, _):
             return "The server returned status code \(code)."
         case .decodingFailed(let error):

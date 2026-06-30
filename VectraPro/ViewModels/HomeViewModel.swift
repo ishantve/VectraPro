@@ -2,26 +2,30 @@
 //  HomeViewModel.swift
 //  VectraPro
 //
-//  Provides the list of exercises shown on the home screen.
+//  Loads the home-screen exercise list from /atc/excercise.
 //
 
 import Combine
 import Foundation
 
+@MainActor
 final class HomeViewModel: ObservableObject {
 
-    let exercises: [Exercise] = [
-        Exercise(
-            title: "Guess the heading",
-            subtitle: "Estimate the aircraft heading on the radar",
-            systemImage: "location.north.line.fill",
-            route: .map
-        ),
-        Exercise(
-            title: "Navigate between two fixes",
-            subtitle: "Plot a course from one fix to another",
-            systemImage: "mappin.and.ellipse",
-            route: .map
-        ),
-    ]
+    @Published private(set) var exercises: [Exercise] = []
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+
+    func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let response: ExercisesResponse = try await APIManager.shared.request(
+                .exercises(pageNo: 0, pageSize: 10, search: "")
+            )
+            exercises = response.record
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
 }

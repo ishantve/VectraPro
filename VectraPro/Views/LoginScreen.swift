@@ -28,7 +28,7 @@ struct LoginScreen: View {
     }
 
     /// The selected organization's saved config.
-    private var config: OrganizationConfig? { ConfigStore.shared.current() }
+    private var config: AirtableConfig? { ConfigStore.shared.current() }
 
     /// When the org's `Nickname` is "Allowed", login is via a nickname instead
     /// of username + password.
@@ -63,6 +63,17 @@ struct LoginScreen: View {
 
     private var canSubmit: Bool { canLogIn && !isLoading }
 
+    /// Build a readable error message, including the server's response body for
+    /// non-2xx responses (so a 403 shows *why*).
+    private func message(for error: Error) -> String {
+        if case let APIError.unacceptableStatus(code, data) = error {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Server error \(code)." : "Error \(code): \(trimmed)"
+        }
+        return error.localizedDescription
+    }
+
     private func performLogin() {
         guard canSubmit else { return }
         Task {
@@ -77,6 +88,9 @@ struct LoginScreen: View {
                         password: password
                     )
                 }
+                // Post-login bootstrap: /organizations then /games (sequential).
+                try await SessionService.shared.loadInitialData()
+
                 isLoading = false
                 toast = Toast(message: "Login successful", isSuccess: true)
                 // Let the success message show briefly, then continue.
@@ -84,9 +98,9 @@ struct LoginScreen: View {
                 onLogin()
             } catch {
                 isLoading = false
-                toast = Toast(message: error.localizedDescription, isSuccess: false)
+                toast = Toast(message: message(for: error), isSuccess: false)
                 // Auto-dismiss the failure message.
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(5))
                 if toast?.isSuccess == false { toast = nil }
             }
         }

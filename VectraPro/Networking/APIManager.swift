@@ -48,6 +48,14 @@ final class APIManager {
     /// Default timeout applied to requests that don't override it.
     var timeout: TimeInterval = 30
 
+    /// Supplies a valid bearer token before each request (refreshing if needed).
+    /// Set by AuthService. Token endpoints bypass this to avoid recursion.
+    var tokenProvider: (() async throws -> String?)?
+
+    /// Forces a token refresh and returns the new token. Called when a request
+    /// comes back 401 so it can be retried once. Set by AuthService.
+    var tokenRefresher: (() async throws -> String?)?
+
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -208,11 +216,13 @@ final class APIManager {
         var merged = headers
         merged["Content-Type"] = "application/x-www-form-urlencoded"
 
+        // Token endpoints must NOT go through the tokenProvider (would recurse).
         let data = try await sendData(path,
                                       method: .post,
                                       bodyData: bodyString.data(using: .utf8),
                                       query: nil,
-                                      headers: merged)
+                                      headers: merged,
+                                      applyAuth: false)
         return try decode(data)
     }
 
@@ -232,26 +242,81 @@ final class APIManager {
         method: HTTPMethod,
         bodyData: Data?,
         query: [URLQueryItem]?,
-        headers: [String: String]
+        headers: [String: String],
+        applyAuth: Bool = true,
+        isRetry: Bool = false
     ) async throws -> Data {
-        let request = try makeRequest(path: path, method: method, bodyData: bodyData, query: query, headers: headers)
+        // Inject a fresh bearer token per request (no shared-state mutation).
+        var allHeaders = headers
+        if applyAuth, let tokenProvider, let token = try await tokenProvider() {
+            allHeaders["Authorization"] = "Bearer \(token)"
+        }
+
+        let request = try makeRequest(path: path, method: method, bodyData: bodyData, query: query, headers: allHeaders)
+
+        #if DEBUG
+        Self.logRequest(request)
+        #endif
 
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            #if DEBUG
+            print("⬇️ [API] ✗ \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")\n   error: \(error.localizedDescription)")
+            #endif
             throw APIError.requestFailed(error)
         }
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
+
+        #if DEBUG
+        Self.logResponse(data, status: http.statusCode, url: request.url)
+        #endif
+
+        // Token expired/rejected mid-flight → force a refresh and retry once.
+        if http.statusCode == 401, applyAuth, !isRetry, let tokenRefresher {
+            _ = try await tokenRefresher()
+            return try await sendData(path,
+                                      method: method,
+                                      bodyData: bodyData,
+                                      query: query,
+                                      headers: headers,
+                                      applyAuth: applyAuth,
+                                      isRetry: true)
+        }
+
         guard (200..<300).contains(http.statusCode) else {
             throw APIError.unacceptableStatus(code: http.statusCode, data: data)
         }
         return data
     }
+
+    #if DEBUG
+    private static func logRequest(_ request: URLRequest) {
+        var lines = ["⬆️ [API] \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")"]
+        if let headers = request.allHTTPHeaderFields, !headers.isEmpty {
+            lines.append("   headers: \(headers)")
+        }
+        if let body = request.httpBody, let text = String(data: body, encoding: .utf8), !text.isEmpty {
+            lines.append("   body: \(text)")
+        }
+        print(lines.joined(separator: "\n"))
+    }
+
+    private static func logResponse(_ data: Data, status: Int, url: URL?) {
+        let mark = (200..<300).contains(status) ? "✓" : "✗"
+        var line = "⬇️ [API] \(mark) \(status) \(url?.absoluteString ?? "?")"
+        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+            let trimmed = text.count > 4000 ? String(text.prefix(4000)) + "…(truncated)" : text
+            line += "\n   response: \(trimmed)"
+        }
+        print(line)
+    }
+    #endif
 
     private func makeRequest(
         path: String,
@@ -291,7 +356,12 @@ final class APIManager {
         if let absolute = URL(string: path), absolute.scheme != nil {
             base = absolute
         } else if let baseURL {
-            base = baseURL.appendingPathComponent(path)
+            // Join base + path with exactly one slash, preserving the base path
+            // (e.g. ".../api/v1/") and any internal slashes in `path`.
+            var root = baseURL.absoluteString
+            if root.hasSuffix("/") { root.removeLast() }
+            let suffix = path.hasPrefix("/") ? path : "/" + path
+            base = URL(string: root + suffix)
         } else {
             base = URL(string: path)
         }

@@ -35,6 +35,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
 
     private var aircraftMarker: GMSMarker?
+    private var fixMarkers: [GMSMarker] = []
+    private var zoneOverlays: [GMSOverlay] = []
     private var labelMarker: GMSMarker?
     private var lastLabelText = ""
     private var trailMarkers: [GMSMarker] = []
@@ -99,7 +101,50 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     func sync() {
         applyZoomLimit()
         syncStaticLines()
+        syncZones()
+        syncFixes()
         syncAircraft()
+    }
+
+    /// Add each zone as a transparent fill polygon (solid border) + center label.
+    private func syncZones() {
+        guard zoneOverlays.isEmpty else { return }
+        for shape in viewModel.zoneShapes() {
+            let path = GMSMutablePath()
+            shape.coordinates.forEach { path.add($0) }
+            let polygon = GMSPolygon(path: path)
+            polygon.fillColor = shape.fillColor
+            polygon.strokeColor = shape.strokeColor
+            polygon.strokeWidth = 1.2
+            polygon.map = mapView
+            zoneOverlays.append(polygon)
+
+            let label = GMSMarker(position: shape.center)
+            label.icon = ZoneRenderer.labelImage(shape.name)
+            label.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            label.isTappable = false
+            label.map = mapView
+            zoneOverlays.append(label)
+        }
+    }
+
+    /// Add an icon marker for each waypoint (triangle) and holding fix (built once).
+    private func syncFixes() {
+        guard fixMarkers.isEmpty else { return }
+        addFixMarkers(viewModel.waypointFixes, icon: FixSymbol.triangle())
+        addFixMarkers(viewModel.holdingFixes, icon: FixSymbol.holding())
+    }
+
+    private func addFixMarkers(_ fixes: [ExerciseDetail.Fix], icon: UIImage) {
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude else { continue }
+            let marker = GMSMarker(position: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            marker.icon = FixSymbol.marker(name: fix.fixName ?? "", icon: icon)
+            marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            marker.isTappable = false
+            marker.map = mapView
+            fixMarkers.append(marker)
+        }
     }
 
     private func applyZoomLimit() {
@@ -129,7 +174,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         if ringRadialLines.isEmpty || radialKey != ringRadialKey {
             ringRadialLines.forEach { $0.map = nil }
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
-            lines += viewModel.radialManager.lines(center: viewModel.center)
+            lines += viewModel.fixRadialLines()
             ringRadialLines = add(lines)
             ringRadialKey = radialKey
         }
@@ -192,7 +237,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                                 bearingDegrees: aircraft.labelBearingDegrees)
         let label = labelMarker ?? {
             let m = GMSMarker(position: offset)
-            m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            // Bottom-left corner on the point so the block sits up-and-right
+            // of the symbol (never overlapping it), zoom-independent.
+            m.groundAnchor = CGPoint(x: 0, y: 1)
             m.isFlat = true
             m.map = mapView
             labelMarker = m
@@ -314,9 +361,10 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private func labelContains(_ point: CGPoint) -> Bool {
         guard let label = labelMarker, let image = label.icon else { return false }
+        // Bottom-left corner anchored on the point (groundAnchor 0,1).
         let anchor = mapView.projection.point(for: label.position)
-        let rect = CGRect(x: anchor.x - image.size.width / 2,
-                          y: anchor.y - image.size.height / 2,
+        let rect = CGRect(x: anchor.x,
+                          y: anchor.y - image.size.height,
                           width: image.size.width, height: image.size.height)
         return rect.insetBy(dx: -16, dy: -16).contains(point)
     }

@@ -8,6 +8,11 @@
 import CoreLocation
 import Foundation
 
+/// Forced turn direction for a vectoring command (nil = shortest way round).
+enum TurnDirection {
+    case left, right
+}
+
 struct Aircraft: Identifiable {
     let id = UUID()
     var callsign: String
@@ -15,10 +20,20 @@ struct Aircraft: Identifiable {
     var headingDegrees: Double
     /// Commanded heading the aircraft is turning toward (nil = none).
     var targetHeading: Double? = nil
+    /// Forced turn direction toward the target (nil = take the shortest way).
+    var turnDirection: TurnDirection? = nil
     var speedKnots: Double = Aircraft.defaultSpeedKnots
     /// Commanded speed the aircraft is accelerating/decelerating to (nil = none).
     var targetSpeedKnots: Double? = nil
+    /// Speed clearance limits: "maintain xxx or greater" / "do not exceed xxx".
+    var minSpeedKnots: Double? = nil
+    var maxSpeedKnots: Double? = nil
     var altitudeFeet: Double = Aircraft.defaultAltitudeFeet
+    /// Commanded altitude the aircraft is climbing/descending to (nil = none).
+    var targetAltitudeFeet: Double? = nil
+    /// Altitude block limits: "maintain block FL low through FL high".
+    var minAltitudeFeet: Double? = nil
+    var maxAltitudeFeet: Double? = nil
 
     /// Recent past positions (oldest first) used to draw the history trail.
     var history: [CLLocationCoordinate2D] = []
@@ -26,7 +41,7 @@ struct Aircraft: Identifiable {
     /// Data-block placement relative to the aircraft (polar offset). The user
     /// can drag the block; this offset keeps it attached as the aircraft moves.
     var labelBearingDegrees: Double = 45
-    var labelDistanceMeters: Double = 1.5 * 1852   // 1.5 NM up-right by default
+    var labelDistanceMeters: Double = 2.0 * 1852   // 2 NM gap; block is corner-anchored up-right
 
     static let defaultSpeedKnots = 250.0
     static let defaultAltitudeFeet = 18_000.0   // FL180

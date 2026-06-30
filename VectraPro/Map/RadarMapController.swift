@@ -16,6 +16,9 @@ import UIKit
 final class ImageAnnotation: MLNPointAnnotation {
     var image: UIImage?
     var rotationDegrees: CGFloat = 0
+    /// Shift of the view centre from the coordinate (points). Default centred;
+    /// the data block uses this to sit with its bottom-left corner on the point.
+    var centerOffset: CGVector = .zero
 }
 
 final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
@@ -43,6 +46,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     private var aircraftAnnotation: ImageAnnotation?
     private var labelAnnotation: ImageAnnotation?
+    private var fixAnnotations: [ImageAnnotation] = []
+    private var zoneAnnotations: [MLNAnnotation] = []
+    private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
     private var lastLabelText = ""
     private var trailAnnotations: [ImageAnnotation] = []
     private var tetherSource: MLNShapeSource?
@@ -178,7 +184,54 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         guard styleLoaded else { return }
         applyZoomLimit(mapView)
         syncStaticLines(mapView)
+        syncZones(mapView)
+        syncFixes(mapView)
         syncAircraft(mapView)
+    }
+
+    /// Add each zone as a transparent fill polygon + solid border + center label.
+    private func syncZones(_ mapView: MLNMapView) {
+        guard zoneAnnotations.isEmpty else { return }
+        for shape in viewModel.zoneShapes() {
+            // Transparent fill.
+            var fillCoords = shape.coordinates
+            let polygon = MLNPolygon(coordinates: &fillCoords, count: UInt(fillCoords.count))
+            zoneFillColors[ObjectIdentifier(polygon)] = shape.fillColor
+            mapView.addAnnotation(polygon)
+            zoneAnnotations.append(polygon)
+
+            // Solid border (closed polyline).
+            var borderCoords = shape.coordinates + [shape.coordinates[0]]
+            let border = MLNPolyline(coordinates: &borderCoords, count: UInt(borderCoords.count))
+            lineStyles[ObjectIdentifier(border)] = (shape.strokeColor, 1.2)
+            mapView.addAnnotation(border)
+            zoneAnnotations.append(border)
+
+            // Center name label.
+            let label = ImageAnnotation()
+            label.image = ZoneRenderer.labelImage(shape.name)
+            label.coordinate = shape.center
+            mapView.addAnnotation(label)
+            zoneAnnotations.append(label)
+        }
+    }
+
+    /// Add an icon marker for each waypoint (triangle) and holding fix (built once).
+    private func syncFixes(_ mapView: MLNMapView) {
+        guard fixAnnotations.isEmpty else { return }
+        addFixMarkers(viewModel.waypointFixes, icon: FixSymbol.triangle(), on: mapView)
+        addFixMarkers(viewModel.holdingFixes, icon: FixSymbol.holding(), on: mapView)
+    }
+
+    private func addFixMarkers(_ fixes: [ExerciseDetail.Fix], icon: UIImage, on mapView: MLNMapView) {
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude else { continue }
+            let annotation = ImageAnnotation()
+            annotation.image = FixSymbol.marker(name: fix.fixName ?? "", icon: icon)
+            annotation.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            fixAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
     }
 
     private func applyZoomLimit(_ mapView: MLNMapView) {
@@ -206,7 +259,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         if ringRadialLines.isEmpty || radialKey != ringRadialKey {
             remove(ringRadialLines, from: mapView)
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
-            lines += viewModel.radialManager.lines(center: viewModel.center)
+            lines += viewModel.fixRadialLines()
             ringRadialLines = add(lines, to: mapView)
             ringRadialKey = radialKey
         }
@@ -281,6 +334,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let previous = labelAnnotation
             let a = ImageAnnotation()
             a.image = AircraftSymbol.label(text)
+            if let img = a.image {
+                // Anchor the block's bottom-left corner on the coordinate so it
+                // always sits up-and-right of the symbol (never overlapping it).
+                a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
+            }
             a.coordinate = isDraggingLabel ? (previous?.coordinate ?? offset) : offset
             labelAnnotation = a
             mapView.addAnnotation(a)
@@ -330,7 +388,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     // MARK: Annotation appearance
 
     func mapView(_ mapView: MLNMapView, strokeColorForShapeAnnotation annotation: MLNShape) -> UIColor {
-        lineStyles[ObjectIdentifier(annotation)]?.color ?? .green
+        let id = ObjectIdentifier(annotation)
+        // Zone fill polygons have no stroke — their border is a separate polyline.
+        if zoneFillColors[id] != nil { return .clear }
+        return lineStyles[id]?.color ?? .green
+    }
+
+    func mapView(_ mapView: MLNMapView, fillColorForPolygonAnnotation annotation: MLNPolygon) -> UIColor {
+        zoneFillColors[ObjectIdentifier(annotation)] ?? .clear
     }
 
     func mapView(_ mapView: MLNMapView, lineWidthForPolylineAnnotation annotation: MLNPolyline) -> CGFloat {
@@ -344,6 +409,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let view = MLNAnnotationView(reuseIdentifier: nil)
         guard let image = imageAnnotation.image else { return view }
         view.frame = CGRect(origin: .zero, size: image.size)
+        view.centerOffset = imageAnnotation.centerOffset
         let imageView = UIImageView(image: image)
         imageView.frame = view.bounds
         view.addSubview(imageView)
@@ -409,8 +475,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private func labelContains(_ point: CGPoint, in mapView: MLNMapView) -> Bool {
         guard let label = labelAnnotation, let image = label.image else { return false }
         let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
-        let rect = CGRect(x: anchor.x - image.size.width / 2,
-                          y: anchor.y - image.size.height / 2,
+        // The view centre sits at anchor + centerOffset; rect is centred there.
+        let center = CGPoint(x: anchor.x + label.centerOffset.dx,
+                             y: anchor.y + label.centerOffset.dy)
+        let rect = CGRect(x: center.x - image.size.width / 2,
+                          y: center.y - image.size.height / 2,
                           width: image.size.width, height: image.size.height)
         return rect.insetBy(dx: -16, dy: -16).contains(point)
     }
