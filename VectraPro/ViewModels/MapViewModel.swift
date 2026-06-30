@@ -13,13 +13,85 @@ final class MapViewModel: ObservableObject {
 
     // MARK: - Radar
 
-    let center: CLLocationCoordinate2D = MapConfiguration.center
+    /// Radar center. Defaults to IGI; replaced by the started exercise's
+    /// map location so the range rings draw around it.
+    private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
     let rings: [RangeRing] = MapConfiguration.rings
     let defaultZoom: Float = MapConfiguration.defaultZoom
 
+    /// Runways/approaches derived from the started exercise (nil → IGI defaults).
+    private var exerciseRunways: [Runway]?
+    private var exerciseApproaches: Set<ApproachID>?
+    /// VOR fixes from the started exercise (radials drawn from each).
+    private(set) var fixes: [ExerciseDetail.Fix] = []
+    /// Airspace zones from the started exercise (plotted as polygons).
+    private(set) var zones: [ExerciseDetail.Zone] = []
+
+    /// Radial lines for the exercise's VOR fixes (empty when none).
+    func fixRadialLines() -> [MapLine] {
+        FixRadialRenderer.lines(fixes: fixes)
+    }
+
+    /// Polygon shapes (border + fill + label) for the exercise's airspace zones.
+    func zoneShapes() -> [ZoneShape] {
+        ZoneRenderer.shapes(zones: zones)
+    }
+
+    /// Waypoint-type fixes, shown as triangle icons on the radar.
+    var waypointFixes: [ExerciseDetail.Fix] {
+        fixes.filter { $0.type?.uppercased() == "WAYPOINT" }
+    }
+
+    /// Holding-type fixes, shown as the holding icon on the radar.
+    var holdingFixes: [ExerciseDetail.Fix] {
+        fixes.filter { $0.type?.uppercased() == "HOLDING" }
+    }
+
+    /// Apply the started exercise: center the radar and derive runways +
+    /// enabled approaches from the API. Built once here so UUIDs stay stable
+    /// across `reset()`.
+    func applyExercise(_ detail: ExerciseDetail) {
+        if let lat = detail.mapLatitude, let lon = detail.mapLongitude {
+            center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+
+        fixes = detail.fixes
+        zones = detail.zones
+
+        var built: [Runway] = []
+        var enabled: Set<ApproachID> = []
+        for rw in detail.runways {
+            let strips = rw.runwayStrips ?? []
+            guard strips.count >= 2,
+                  let aLat = strips[0].stripLatitude, let aLon = strips[0].stripLongitude,
+                  let bLat = strips[1].stripLatitude, let bLon = strips[1].stripLongitude else { continue }
+
+            let runway = Runway(
+                endA: RunwayThreshold(designator: strips[0].stripName ?? "",
+                                      coordinate: CLLocationCoordinate2D(latitude: aLat, longitude: aLon)),
+                endB: RunwayThreshold(designator: strips[1].stripName ?? "",
+                                      coordinate: CLLocationCoordinate2D(latitude: bLat, longitude: bLon)),
+                lengthMeters: nil
+            )
+            built.append(runway)
+            if strips[0].displayLocalizer == true { enabled.insert(ApproachID(runwayID: runway.id, side: .a)) }
+            if strips[1].displayLocalizer == true { enabled.insert(ApproachID(runwayID: runway.id, side: .b)) }
+        }
+
+        if built.isEmpty {
+            exerciseRunways = nil
+            exerciseApproaches = nil
+        } else {
+            exerciseRunways = built
+            exerciseApproaches = enabled
+            runways = built
+            enabledApproaches = enabled
+        }
+    }
+
     // MARK: - Runways & approaches
 
-    @Published private(set) var runways: [Runway] = RunwayData.igiAirport
+    @Published private(set) var runways: [Runway] = []
 
     /// Approaches currently enabled (shown with runway + localizer). Driven
     /// locally for now; will be supplied by the backend later.
@@ -80,7 +152,6 @@ final class MapViewModel: ObservableObject {
     }
 
     init() {
-        enabledApproaches = defaultEnabledApproaches()
         aircraft = [makeRandomAircraft()]
     }
 
@@ -97,11 +168,49 @@ final class MapViewModel: ObservableObject {
         for command in commands {
             switch command {
             case .heading(let heading):
+                aircraft[0].turnDirection = nil           // shortest way
                 aircraft[0].targetHeading = heading
+            case .headingTurn(let heading, let direction):
+                aircraft[0].turnDirection = direction      // forced left / right
+                aircraft[0].targetHeading = heading
+            case .relativeTurn(let degrees, let direction):
+                let current = aircraft[0].headingDegrees
+                let target = direction == .left ? current - degrees : current + degrees
+                aircraft[0].turnDirection = direction
+                aircraft[0].targetHeading = normalizeHeading(target)
+            case .presentHeading:
+                aircraft[0].turnDirection = nil
+                aircraft[0].targetHeading = nil            // stop turning, hold current
             case .flightLevel(let flightLevel):
-                aircraft[0].altitudeFeet = Double(flightLevel) * 100
+                // Climb / descend & maintain — gradual via targetAltitude.
+                aircraft[0].minAltitudeFeet = nil
+                aircraft[0].maxAltitudeFeet = nil
+                aircraft[0].targetAltitudeFeet = Double(flightLevel) * 100
+            case .altitudeBlock(let low, let high):
+                // Maintain block — set floor/ceiling; move into range if outside.
+                let lo = Double(min(low, high)) * 100
+                let hi = Double(max(low, high)) * 100
+                aircraft[0].minAltitudeFeet = lo
+                aircraft[0].maxAltitudeFeet = hi
+                let alt = aircraft[0].altitudeFeet
+                if alt < lo { aircraft[0].targetAltitudeFeet = lo }
+                else if alt > hi { aircraft[0].targetAltitudeFeet = hi }
+                else { aircraft[0].targetAltitudeFeet = nil }
             case .speed(let knots):
+                // Maintain an exact speed — clears any earlier floor/ceiling.
+                aircraft[0].minSpeedKnots = nil
+                aircraft[0].maxSpeedKnots = nil
                 aircraft[0].targetSpeedKnots = knots
+            case .minSpeed(let knots):
+                // "Maintain xxx or greater" — set a floor; speed up if below it.
+                aircraft[0].maxSpeedKnots = nil
+                aircraft[0].minSpeedKnots = knots
+                if aircraft[0].speedKnots < knots { aircraft[0].targetSpeedKnots = knots }
+            case .maxSpeed(let knots):
+                // "Do not exceed xxx" — set a ceiling; slow down if above it.
+                aircraft[0].minSpeedKnots = nil
+                aircraft[0].maxSpeedKnots = knots
+                if aircraft[0].speedKnots > knots { aircraft[0].targetSpeedKnots = knots }
             }
         }
     }
@@ -131,8 +240,9 @@ final class MapViewModel: ObservableObject {
     func reset() {
         stopSimulation()
         tickCount = 0
-        runways = RunwayData.igiAirport
-        enabledApproaches = defaultEnabledApproaches()
+        // Runways come only from the started exercise; none otherwise.
+        runways = exerciseRunways ?? []
+        enabledApproaches = exerciseApproaches ?? []
         radialManager.setEnabled(RadialManager.defaultRadials)
         pendingStart = nil
         aircraft = [makeRandomAircraft()]
@@ -150,6 +260,9 @@ final class MapViewModel: ObservableObject {
 
             // Gradual acceleration / deceleration toward any commanded speed.
             adjustSpeed(&aircraft[index], dt: tickInterval)
+
+            // Gradual climb / descent toward any commanded altitude.
+            adjustAltitude(&aircraft[index], dt: tickInterval)
 
             // Sample a history point for the trail.
             if tickCount % historySampleTicks == 0 {
@@ -182,12 +295,19 @@ final class MapViewModel: ObservableObject {
         var diff = (target - current).truncatingRemainder(dividingBy: 360)
         if diff > 180 { diff -= 360 } else if diff < -180 { diff += 360 }
 
+        // A forced direction (TLH/TRH/relative) overrides the shortest path.
+        if let direction = aircraft.turnDirection {
+            if direction == .right, diff < 0 { diff += 360 }
+            if direction == .left, diff > 0 { diff -= 360 }
+        }
+
         let rate = 1091.0 * tan(maxBankDegrees * .pi / 180.0) / max(aircraft.speedKnots, 1)
         let step = rate * dt
 
         if abs(diff) <= step {
             aircraft.headingDegrees = normalizeHeading(target)
             aircraft.targetHeading = nil   // reached
+            aircraft.turnDirection = nil
         } else {
             aircraft.headingDegrees = normalizeHeading(current + (diff >= 0 ? step : -step))
         }
@@ -213,6 +333,24 @@ final class MapViewModel: ObservableObject {
             aircraft.targetSpeedKnots = nil   // reached
         } else {
             aircraft.speedKnots += diff > 0 ? step : -step
+        }
+    }
+
+    /// Typical climb / descent rate (~2000 ft/min).
+    private let climbFeetPerSecond = 33.0
+    private let descentFeetPerSecond = 33.0
+
+    private func adjustAltitude(_ aircraft: inout Aircraft, dt: Double) {
+        guard let target = aircraft.targetAltitudeFeet else { return }
+
+        let diff = target - aircraft.altitudeFeet
+        let step = (diff > 0 ? climbFeetPerSecond : descentFeetPerSecond) * dt
+
+        if abs(diff) <= step {
+            aircraft.altitudeFeet = target
+            aircraft.targetAltitudeFeet = nil   // reached
+        } else {
+            aircraft.altitudeFeet += diff > 0 ? step : -step
         }
     }
 
@@ -294,12 +432,6 @@ final class MapViewModel: ObservableObject {
     }
 
     // MARK: - Private
-
-    /// Enable a single approach by default so the radar isn't empty.
-    private func defaultEnabledApproaches() -> Set<ApproachID> {
-        guard let approach = runways.first?.approaches.last else { return [] }
-        return [approach.id]
-    }
 
     private func addRunway(from start: CLLocationCoordinate2D,
                            to end: CLLocationCoordinate2D) {
