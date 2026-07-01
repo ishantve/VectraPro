@@ -95,7 +95,7 @@ struct HoldingHangarPanel: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(maxHeight: 220)
             }
         }
         .frame(maxWidth: .infinity)

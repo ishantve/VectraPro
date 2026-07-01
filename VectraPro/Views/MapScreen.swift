@@ -15,6 +15,8 @@ struct MapScreen: View {
     @State private var isLandscape = false
     @State private var isWindowed = false
     @State private var activeLayers: Set<RadarLayer> = []
+    /// Whether the layer buttons row is shown (toggled by the globe icon).
+    @State private var showLayers = false
 
     /// Tint applied to the layer icons (keeps their detail via colorMultiply).
     private let layerTint: Color = .white
@@ -118,30 +120,43 @@ struct MapScreen: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
+                // Always-visible top icons; the globe toggles the layer buttons.
                 HStack(spacing: 12) {
                     windowToggleButton
-                    layerButtons
+                    topActionButton("flag.fill") { /* TODO */ }
+                    topActionButton("person.2.fill") { /* TODO */ }
+                    topActionButton("globe", isOn: showLayers) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                    }
                 }
-                // Holding + flight lists open here, right-aligned under the row.
-                if activeLayers.contains(.holdingPattern) {
-                    let holdings = viewModel.holdingFixes
-                    HoldingHangarPanel(
-                        tabs: holdings.map { $0.fixName ?? "—" },
-                        aircraftByHolding: holdings.map { fix in
-                            viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
-                        }
-                    )
-                } else if let category = activeFlightList {
-                    HangarPanel(title: category.title,
-                                aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+
+                if showLayers {
+                    layerButtons
+                    // Holding + flight lists open here, right-aligned under the row.
+                    if activeLayers.contains(.holdingPattern) {
+                        let holdings = viewModel.holdingFixes
+                        HoldingHangarPanel(
+                            tabs: holdings.map { $0.fixName ?? "—" },
+                            aircraftByHolding: holdings.map { fix in
+                                viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                            }
+                        )
+                    } else if let category = activeFlightList {
+                        HangarPanel(title: category.title,
+                                    aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+                    }
                 }
             }
             .padding(.trailing, 16)
             .padding(.top, 8)
         }
+        .overlay(alignment: .leading) {
+            leftToolbar
+                .padding(.leading, 16)
+        }
         // Obstacle & Zone lists open directly below their own button, left-aligned.
         .overlay(alignment: .topTrailing) {
-            if let layer = buttonAnchoredLayer {
+            if showLayers, let layer = buttonAnchoredLayer {
                 listPanel(for: layer)
                     .offset(x: buttonAnchoredPanelX(layer), y: layerRowBottom)
             }
@@ -229,6 +244,58 @@ struct MapScreen: View {
         }
     }
 
+    /// Left-side tool column: 4 tools + Instructor Mode (2). Clickable; actions TBD.
+    private var leftToolbar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 10) {
+                toolButton("building.2.fill")                        // tower
+                toolButton("antenna.radiowaves.left.and.right")      // radio
+                toolButton("book.fill")                              // book
+                toolButton("list.bullet.rectangle.portrait.fill")    // list
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "flag.fill")
+                Text("Instructor Mode")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.9))
+
+            VStack(spacing: 10) {
+                toolButton("rectangle.stack.badge.plus")             // add layer
+                toolButton("doc.text.fill")                          // document
+            }
+        }
+    }
+
+    private func toolButton(_ systemName: String) -> some View {
+        Button {
+            // TODO: wire tool action
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 45)   // same as the top layer buttons
+                .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(layerBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Top-right action icon (flag / people / globe). `isOn` highlights it.
+    private func topActionButton(_ systemName: String, isOn: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 45)
+                .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4)
+                    .stroke(isOn ? Color.green : layerBorder, lineWidth: isOn ? 2 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Open the radar in its own window, or merge it back into this screen.
     private var windowToggleButton: some View {
         Button {
@@ -263,8 +330,8 @@ struct MapScreen: View {
     private let rowTrailingPadding: CGFloat = 16
     private let rowTopPadding: CGFloat = 8
 
-    /// Y just below the button row — where the anchored panel starts.
-    private var layerRowBottom: CGFloat { rowTopPadding + 45 + 8 }
+    /// Y just below the layer button row (icon row + spacing + layer row + gap).
+    private var layerRowBottom: CGFloat { rowTopPadding + 45 + 10 + 45 + 8 }
 
     private func panelWidth(_ layer: RadarLayer) -> CGFloat {
         switch layer {
