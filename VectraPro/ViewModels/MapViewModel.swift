@@ -26,6 +26,48 @@ final class MapViewModel: ObservableObject {
     private(set) var fixes: [ExerciseDetail.Fix] = []
     /// Airspace zones from the started exercise (plotted as polygons).
     private(set) var zones: [ExerciseDetail.Zone] = []
+    /// Obstructions ("obstacles") from the started exercise.
+    private(set) var obstructions: [ExerciseDetail.Obstruction] = []
+
+    // MARK: - Traffic (hangar lists)
+
+    /// Aircraft spawned into the hangar lists per the exercise frequency.
+    /// These appear in the lists only — not drawn on the map.
+    @Published private(set) var traffic: [Aircraft] = []
+
+    /// Everything shown in the hangar lists: the on-map aircraft + spawned traffic.
+    var listAircraft: [Aircraft] { aircraft + traffic }
+
+    /// Spawn-frequency config per category (from the exercise).
+    private var freqDeparture: ExerciseDetail.FrequencyOfDeparture?
+    private var freqArrival: ExerciseDetail.FrequencyOfArrival?
+    private var freqEnroute: ExerciseDetail.FrequencyOfEnroute?
+
+    /// How a category spawns: a fixed interval (Custom) or random intervals up
+    /// to a quota (Random).
+    private enum SpawnMode {
+        case custom(interval: Double)
+        case random(remaining: Int)
+    }
+    /// Active spawners (one per category that has Custom/Random frequency).
+    private var spawners: [(category: FlightCategory, mode: SpawnMode, countdown: Double)] = []
+
+    /// Max aircraft generated into the hangar lists per exercise (both types).
+    private let maxTraffic = 15
+
+    /// Random-mode interval choices (seconds).
+    private let randomIntervals: [Double] = [15, 20, 30, 45, 60, 90]
+
+    /// Split `total` into `parts` descending whole numbers (priority gets more),
+    /// e.g. (15, 3) → [6,5,4]; (15, 2) → [8,7]; (15, 1) → [15].
+    private func descendingSplit(total: Int, parts: Int) -> [Int] {
+        guard parts > 0 else { return [] }
+        let a = Double(total + parts * (parts - 1) / 2) / Double(parts)
+        var values = (0..<parts).map { Int((a - Double($0)).rounded()) }
+        let diff = total - values.reduce(0, +)   // correct any rounding
+        if !values.isEmpty { values[values.count - 1] += diff }
+        return values
+    }
 
     /// Radial lines for the exercise's VOR fixes (empty when none).
     func fixRadialLines() -> [MapLine] {
@@ -57,6 +99,10 @@ final class MapViewModel: ObservableObject {
 
         fixes = detail.fixes
         zones = detail.zones
+        obstructions = detail.obstructions
+        freqDeparture = detail.frequencyOfDeparture
+        freqArrival = detail.frequencyOfArrival
+        freqEnroute = detail.frequencyOfEnroute
 
         var built: [Runway] = []
         var enabled: Set<ApproachID> = []
@@ -246,13 +292,51 @@ final class MapViewModel: ObservableObject {
         radialManager.setEnabled(RadialManager.defaultRadials)
         pendingStart = nil
         aircraft = [makeRandomAircraft()]
+        resetTraffic()
         startSimulation()
+    }
+
+    /// Clear the hangar lists and rebuild the spawners from the exercise.
+    /// Priority order (most → least traffic): arrival, departure, enroute.
+    private func resetTraffic() {
+        traffic = []
+        spawners = []
+
+        let configs: [(category: FlightCategory, type: String?, flights: Int?, minutes: Int?)] = [
+            (.arrival,   freqArrival?.type,   freqArrival?.arrivalFlights,     freqArrival?.arrivalFlightsTimeValue),
+            (.departure, freqDeparture?.type, freqDeparture?.departureFlights, freqDeparture?.departureFlightsTimeValue),
+            (.enroute,   freqEnroute?.type,   freqEnroute?.enrouteFlights,     freqEnroute?.enrouteFlightsTimeValue)
+        ]
+
+        // Random categories share the total cap, distributed by priority. A
+        // "none" (or missing) type spawns nothing, so its share goes to the rest.
+        let randomCats = configs.filter { $0.type?.lowercased() == "random" }.map(\.category)
+        let quotas = descendingSplit(total: maxTraffic, parts: randomCats.count)
+        let quotaForCategory = Dictionary(uniqueKeysWithValues: zip(randomCats, quotas))
+
+        for config in configs {
+            switch config.type?.lowercased() {
+            case "custom":
+                guard let flights = config.flights, flights > 0,
+                      let minutes = config.minutes, minutes > 0 else { continue }
+                let interval = Double(minutes) * 60.0 / Double(flights)
+                spawners.append((config.category, .custom(interval: interval), interval))
+            case "random":
+                guard let quota = quotaForCategory[config.category], quota > 0 else { continue }
+                spawners.append((config.category, .random(remaining: quota), randomIntervals.randomElement() ?? 30))
+            default:
+                continue   // "none" / missing → no spawner
+            }
+        }
     }
 
     /// Advance every aircraft along its heading by the distance covered at its
     /// speed during one tick. distance = speed × time.
     private func tick() {
         tickCount += 1
+
+        // Spawn traffic into the hangar lists per the exercise frequency.
+        advanceSpawners()
 
         for index in aircraft.indices {
             // Gradual, speed-dependent turn toward any commanded heading.
@@ -374,6 +458,51 @@ final class MapViewModel: ObservableObject {
             position: position,
             headingDegrees: heading
         )
+    }
+
+    /// Advance every spawner; add a list aircraft when its countdown elapses.
+    private func advanceSpawners() {
+        for i in spawners.indices {
+            spawners[i].countdown -= tickInterval
+            guard spawners[i].countdown <= 0 else { continue }
+
+            // Global cap — at most `maxTraffic` aircraft, for both Custom & Random.
+            guard traffic.count < maxTraffic else {
+                spawners[i].countdown = .infinity
+                continue
+            }
+
+            switch spawners[i].mode {
+            case .custom(let interval):
+                traffic.append(makeListAircraft(category: spawners[i].category))
+                spawners[i].countdown += interval
+
+            case .random(let remaining):
+                guard remaining > 0 else {
+                    spawners[i].countdown = .infinity   // quota done — stop
+                    continue
+                }
+                traffic.append(makeListAircraft(category: spawners[i].category))
+                let left = remaining - 1
+                spawners[i].mode = .random(remaining: left)
+                // Pick a fresh random interval for the next one (or stop).
+                spawners[i].countdown = left > 0 ? (randomIntervals.randomElement() ?? 30) : .infinity
+            }
+        }
+    }
+
+    /// A hangar-list aircraft (not drawn on the map): callsign, FL, speed, runway.
+    private func makeListAircraft(category: FlightCategory) -> Aircraft {
+        var ac = Aircraft(callsign: Self.randomCallsign(),
+                          position: center,
+                          headingDegrees: 0)
+        ac.category = category
+        ac.altitudeFeet = Double(Int.random(in: 80...350)) * 100   // FL080–FL350
+        ac.speedKnots = Double(Int.random(in: 180...450))
+        if let runway = runways.randomElement() {
+            ac.assignedRunway = Bool.random() ? runway.endA.designator : runway.endB.designator
+        }
+        return ac
     }
 
     private static func randomCallsign() -> String {

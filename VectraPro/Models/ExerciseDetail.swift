@@ -40,6 +40,10 @@ struct ExerciseDetail: Decodable {
     let commands: Commands?
     let fixes: [Fix]
     let zones: [Zone]
+    let obstructions: [Obstruction]
+    let frequencyOfDeparture: FrequencyOfDeparture?
+    let frequencyOfArrival: FrequencyOfArrival?
+    let frequencyOfEnroute: FrequencyOfEnroute?
 
     struct MapLocation: Decodable { let mapLatitude: Double?; let mapLongitude: Double? }
 
@@ -111,9 +115,39 @@ struct ExerciseDetail: Decodable {
         let longitude: Double?
     }
 
+    /// Spawn frequency for each traffic type (type + flight count + time value).
+    struct FrequencyOfDeparture: Decodable {
+        let type: String?
+        let departureFlights: Int?
+        let departureFlightsTimeValue: Int?
+    }
+    struct FrequencyOfArrival: Decodable {
+        let type: String?
+        let arrivalFlights: Int?
+        let arrivalFlightsTimeValue: Int?
+    }
+    struct FrequencyOfEnroute: Decodable {
+        let type: String?
+        let enrouteFlights: Int?
+        let enrouteFlightsTimeValue: Int?
+    }
+
+    /// An obstruction (shown in the UI as an "obstacle").
+    struct Obstruction: Decodable {
+        let obstructionId: String?
+        let obstructionName: String?
+        let obstructionType: String?
+        let elevationInFeet: Double?
+        let latitude: Double?
+        let longitude: Double?
+        let isLighted: Bool?
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, exerciseName, icaoCode, airportName, vorName
         case mapLocation, isRunwayEnabled, runwaysResponse, aircrafts, airlines, commands, fixes, zone
+        case obstruction
+        case frequencyOfDeparture, frequencyOfArrival, frequencyOfEnroute
     }
 
     init(from decoder: Decoder) throws {
@@ -133,5 +167,9 @@ struct ExerciseDetail: Decodable {
         commands        = try? c.decodeIfPresent(Commands.self, forKey: .commands)
         fixes           = (try? c.decodeIfPresent([Fix].self, forKey: .fixes)) ?? []
         zones           = (try? c.decodeIfPresent([Zone].self, forKey: .zone)) ?? []
+        obstructions    = (try? c.decodeIfPresent([Obstruction].self, forKey: .obstruction)) ?? []
+        frequencyOfDeparture = try? c.decodeIfPresent(FrequencyOfDeparture.self, forKey: .frequencyOfDeparture)
+        frequencyOfArrival   = try? c.decodeIfPresent(FrequencyOfArrival.self, forKey: .frequencyOfArrival)
+        frequencyOfEnroute   = try? c.decodeIfPresent(FrequencyOfEnroute.self, forKey: .frequencyOfEnroute)
     }
 }

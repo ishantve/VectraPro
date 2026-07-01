@@ -13,11 +13,22 @@ enum TurnDirection {
     case left, right
 }
 
+/// Which radar list (hangar) an aircraft belongs to.
+enum FlightCategory {
+    case arrival, departure, enroute
+}
+
 struct Aircraft: Identifiable {
     let id = UUID()
     var callsign: String
     var position: CLLocationCoordinate2D
     var headingDegrees: Double
+    /// Radar list this aircraft appears under (arrival / departure / enroute).
+    var category: FlightCategory = .arrival
+    /// Assigned runway (e.g. "29L"); shown in the hangar list when set.
+    var assignedRunway: String? = nil
+    /// Holding fix this aircraft is holding at (nil = not holding).
+    var holdingName: String? = nil
     /// Commanded heading the aircraft is turning toward (nil = none).
     var targetHeading: Double? = nil
     /// Forced turn direction toward the target (nil = take the shortest way).

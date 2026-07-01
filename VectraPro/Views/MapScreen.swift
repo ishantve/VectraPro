@@ -24,6 +24,31 @@ struct MapScreen: View {
         case obstacle, zone, holdingPattern, enroute, arrival, departure
         var id: String { rawValue }
         var asset: String { rawValue }
+
+        /// Title shown above the hangar list.
+        var title: String {
+            switch self {
+            case .arrival:   return "Arrival"
+            case .departure: return "Departure"
+            case .enroute:   return "Enroute"
+            default:         return rawValue.capitalized
+            }
+        }
+
+        /// The aircraft category this layer lists (nil = not a flight list).
+        var flightCategory: FlightCategory? {
+            switch self {
+            case .arrival:   return .arrival
+            case .departure: return .departure
+            case .enroute:   return .enroute
+            default:         return nil
+            }
+        }
+
+        /// Layers that open a list panel (single-select among themselves).
+        var opensHangar: Bool {
+            flightCategory != nil || self == .holdingPattern || self == .zone || self == .obstacle
+        }
         /// Enroute / Arrival / Departure ship with the grey bg + border baked into
         /// the asset; the first three are plain icons we style to match in code.
         var hasBakedStyle: Bool {
@@ -92,12 +117,34 @@ struct MapScreen: View {
             .padding(.top, isWindowed ? 44 : 8)
         }
         .overlay(alignment: .topTrailing) {
-            HStack(spacing: 12) {
-                layerButtons
-                windowToggleButton
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 12) {
+                    windowToggleButton
+                    layerButtons
+                }
+                // Holding + flight lists open here, right-aligned under the row.
+                if activeLayers.contains(.holdingPattern) {
+                    let holdings = viewModel.holdingFixes
+                    HoldingHangarPanel(
+                        tabs: holdings.map { $0.fixName ?? "—" },
+                        aircraftByHolding: holdings.map { fix in
+                            viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                        }
+                    )
+                } else if let category = activeFlightList {
+                    HangarPanel(title: category.title,
+                                aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+                }
             }
             .padding(.trailing, 16)
             .padding(.top, 8)
+        }
+        // Obstacle & Zone lists open directly below their own button, left-aligned.
+        .overlay(alignment: .topTrailing) {
+            if let layer = buttonAnchoredLayer {
+                listPanel(for: layer)
+                    .offset(x: buttonAnchoredPanelX(layer), y: layerRowBottom)
+            }
         }
         .overlay(alignment: .bottomLeading) {
             zoomButtons
@@ -200,14 +247,80 @@ struct MapScreen: View {
         }
     }
 
+    /// The active flight-list layer whose hangar panel is shown.
+    private var activeFlightList: RadarLayer? {
+        [.arrival, .departure, .enroute].first { activeLayers.contains($0) }
+    }
+
+    /// The active layer whose list opens under its own button (Obstacle / Zone).
+    private var buttonAnchoredLayer: RadarLayer? {
+        [.obstacle, .zone].first { activeLayers.contains($0) }
+    }
+
+    // Top-right button-row metrics (must match the rendered layout).
+    private let layerBtnWidth: CGFloat = 48
+    private let layerBtnSpacing: CGFloat = 8
+    private let rowTrailingPadding: CGFloat = 16
+    private let rowTopPadding: CGFloat = 8
+
+    /// Y just below the button row — where the anchored panel starts.
+    private var layerRowBottom: CGFloat { rowTopPadding + 45 + 8 }
+
+    private func panelWidth(_ layer: RadarLayer) -> CGFloat {
+        switch layer {
+        case .obstacle: return 210
+        default:        return 180   // zone
+        }
+    }
+
+    /// X offset (from the trailing edge) so the panel's left edge sits under the
+    /// layer button's left edge. Negative moves left from the right edge.
+    private func buttonAnchoredPanelX(_ layer: RadarLayer) -> CGFloat {
+        guard let index = RadarLayer.allCases.firstIndex(of: layer) else { return 0 }
+        let count = RadarLayer.allCases.count
+        let step = layerBtnWidth + layerBtnSpacing
+        // Distance from the screen's right edge to this button's left edge.
+        let leftEdgeDistance = rowTrailingPadding
+            + CGFloat(count - 1 - index) * step
+            + layerBtnWidth
+        return panelWidth(layer) - leftEdgeDistance
+    }
+
+    /// The list panel for the button-anchored layers (Obstacle / Zone).
+    @ViewBuilder
+    private func listPanel(for layer: RadarLayer) -> some View {
+        switch layer {
+        case .obstacle: ObstacleListPanel(obstacles: viewModel.obstructions)
+        case .zone:     ZoneListPanel(zones: viewModel.zones)
+        default:        EmptyView()
+        }
+    }
+
+    /// Toggle a layer. Hangar layers (arrival/departure/enroute/holding) are
+    /// single-select — opening one closes the others; the rest toggle freely.
+    private func toggleLayer(_ layer: RadarLayer) {
+        if activeLayers.contains(layer) {
+            activeLayers.remove(layer)
+        } else {
+            if layer.opensHangar {
+                for other in RadarLayer.allCases where other != layer && other.opensHangar {
+                    if activeLayers.remove(other) != nil {
+                        RadarLayerHandler.shared.toggle(other, isOn: false)
+                    }
+                }
+            }
+            activeLayers.insert(layer)
+        }
+        RadarLayerHandler.shared.toggle(layer, isOn: activeLayers.contains(layer))
+    }
+
     /// Obstacles / Enroute / Arrival / Departure layer toggles (40×40, asset art).
     private var layerButtons: some View {
         HStack(spacing: 8) {
             ForEach(RadarLayer.allCases) { layer in
                 let on = activeLayers.contains(layer)
                 Button {
-                    if on { activeLayers.remove(layer) } else { activeLayers.insert(layer) }
-                    RadarLayerHandler.shared.toggle(layer, isOn: activeLayers.contains(layer))
+                    toggleLayer(layer)
                 } label: {
                     layerIcon(layer)
                         .frame(width: 48, height: 45)   // matches the baked assets
