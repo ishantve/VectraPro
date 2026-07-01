@@ -251,6 +251,13 @@ struct HomeScreen: View {
                         ExerciseCard(exercise: exercise, number: index + 1) {
                             await start(exercise)
                         }
+                        .task { await viewModel.loadMoreIfNeeded(currentItem: exercise) }
+                    }
+
+                    if viewModel.isLoadingMore {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(width: 60)
                     }
                 }
                 .padding(24)

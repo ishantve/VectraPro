@@ -11,13 +11,16 @@ import Foundation
 struct ExercisesResponse: Decodable {
     let status: Bool
     let record: [Exercise]
+    /// Total number of exercises across all pages.
+    let length: Int
 
-    enum CodingKeys: String, CodingKey { case status, record }
+    enum CodingKeys: String, CodingKey { case status, record, length }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         status = (try? c.decodeIfPresent(Bool.self, forKey: .status)) ?? false
         record = (try? c.decodeIfPresent([Exercise].self, forKey: .record)) ?? []
+        length = (try? c.decodeIfPresent(Int.self, forKey: .length)) ?? 0
     }
 }
 
