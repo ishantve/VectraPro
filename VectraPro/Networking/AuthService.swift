@@ -61,6 +61,9 @@ final class AuthService: ObservableObject {
 
     static let shared = AuthService()
 
+    /// Client used for username/password (password grant) logins.
+    private static let applicationClientID = "Stratagem-Application"
+
     private(set) var session: Session?
     var nickname: String? { session?.nickname }
     var username: String? { session?.username }
@@ -87,10 +90,12 @@ final class AuthService: ObservableObject {
 
     // MARK: Login
 
-    /// Username + password login (OAuth2 password grant).
+    /// Username + password login (OAuth2 password grant) — uses the
+    /// "Stratagem-Application" client.
     func login(username: String, password: String) async throws {
         try await authenticate(
             extra: ["grant_type": "password", "username": username, "password": password],
+            useApplicationClient: true,
             nickname: nil,
             username: username
         )
@@ -100,6 +105,7 @@ final class AuthService: ObservableObject {
     func login(nickname: String) async throws {
         try await authenticate(
             extra: ["grant_type": "client_credentials"],
+            useApplicationClient: false,
             nickname: nickname,
             username: nil
         )
@@ -155,9 +161,13 @@ final class AuthService: ObservableObject {
 
     private func performRefresh() async throws -> String {
         guard let current = session else { throw AuthError.message("No active session.") }
+        // Refresh must reuse the same client the session was created with:
+        // username/password sessions used the "Stratagem-Application" client.
+        let wasApplicationClient = current.username != nil && current.nickname == nil
         do {
             try await authenticate(
                 extra: ["grant_type": "refresh_token", "refresh_token": current.refreshToken],
+                useApplicationClient: wasApplicationClient,
                 nickname: current.nickname,
                 username: current.username
             )
@@ -171,14 +181,20 @@ final class AuthService: ObservableObject {
     }
 
     /// Calls the token endpoint, builds/updates the session, and persists it.
-    private func authenticate(extra: [String: String], nickname: String?, username: String?) async throws {
+    private func authenticate(extra: [String: String], useApplicationClient: Bool,
+                              nickname: String?, username: String?) async throws {
         guard let config = ConfigStore.shared.current(), !config.authURL.isEmpty else {
             throw AuthError.missingConfig
         }
 
         var form = extra
-        form["client_id"] = config.stratagemMobileID
-        form["client_secret"] = config.stratagemMobileSecret
+        if useApplicationClient {
+            // Username/password uses the "Stratagem-Application" (public) client.
+            form["client_id"] = Self.applicationClientID
+        } else {
+            form["client_id"] = config.stratagemMobileID
+            form["client_secret"] = config.stratagemMobileSecret
+        }
 
         do {
             let token: TokenResponse = try await APIManager.shared.postForm(config.authURL, form: form)
