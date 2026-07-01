@@ -68,7 +68,7 @@ enum ZoneRenderer {
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 
-    private static func color(for zone: ExerciseDetail.Zone) -> UIColor {
+    static func color(for zone: ExerciseDetail.Zone) -> UIColor {
         if let named = zone.color, let c = namedColor(named) { return c }
         switch zone.zoneType?.lowercased() {
         case "danger":     return UIColor.systemRed.withAlphaComponent(0.85)
