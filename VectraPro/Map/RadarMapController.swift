@@ -39,8 +39,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var lastPanTranslation: CGPoint = .zero
 
     private var lineStyles: [ObjectIdentifier: (color: UIColor, width: CGFloat)] = [:]
-    private var ringRadialLines: [MLNPolyline] = []
-    private var ringRadialKey = ""
+    /// Range rings + area-control rings — built once, never removed.
+    private var ringLines: [MLNPolyline] = []
+    /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
+    private var radialLines: [MLNPolyline] = []
+    private var radialLinesKey = ""
     private var stripLines: [UUID: [MLNPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [MLNPolyline]] = [:]
 
@@ -49,10 +52,18 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var labelAnnotations: [UUID: ImageAnnotation] = [:]
     private var labelTexts: [UUID: String] = [:]
     private var trailAnnotations: [UUID: [ImageAnnotation]] = [:]
-    private var fixAnnotations: [ImageAnnotation] = []
+    /// Fix icon markers — rebuilt only when the icon set (Fixes/Holding toggle, count) changes.
+    private var fixIconAnnotations: [ImageAnnotation] = []
+    /// Fix name labels — rebuilt only when the Fixes Names toggle changes (icons stay put).
+    private var fixNameAnnotations: [ImageAnnotation] = []
+    private var fixIconKey = ""
+    private var fixNameKey = ""
     private var zoneAnnotations: [MLNAnnotation] = []
+    private var zoneKey = ""
     private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
     private var tetherSource: MLNShapeSource?
+    private var radialNameAnnotations: [ImageAnnotation] = []
+    private var radialNameKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
     private var draggingLabelID: UUID?
 
@@ -186,14 +197,47 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         guard styleLoaded else { return }
         applyZoomLimit(mapView)
         syncStaticLines(mapView)
+        syncRadialNames(mapView)
         syncZones(mapView)
         syncFixes(mapView)
         syncAircraft(mapView)
     }
 
+    /// Rotated name labels drawn along each VOR radial line.
+    private func syncRadialNames(_ mapView: MLNMapView) {
+        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let key = "\(showNames)-\(viewModel.fixes.count)"
+        guard key != radialNameKey else { return }
+        radialNameKey = key
+        mapView.removeAnnotations(radialNameAnnotations)
+        radialNameAnnotations = []
+        guard showNames else { return }
+
+        for label in viewModel.fixRadialLabels() {
+            let img = FixSymbol.nameLabel(label.name)
+            let annotation = ImageAnnotation()
+            annotation.image = img
+            annotation.coordinate = label.coordinate
+            // Rotate text so it reads along the radial direction.
+            // bearing - 90 converts map-bearing to screen rotation (East = 0°).
+            // Clamp to [-90, 90] so text never appears upside-down.
+            var rotation = label.bearing - 90
+            if rotation > 90  { rotation -= 180 }
+            if rotation < -90 { rotation += 180 }
+            annotation.rotationDegrees = CGFloat(rotation)
+            radialNameAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
+    }
+
     /// Add each zone as a transparent fill polygon + solid border + center label.
     private func syncZones(_ mapView: MLNMapView) {
-        guard zoneAnnotations.isEmpty else { return }
+        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        guard key != zoneKey else { return }
+        zoneKey = key
+        mapView.removeAnnotations(zoneAnnotations)
+        zoneAnnotations = []
+        guard viewModel.layerOn("Zone") else { return }
         for shape in viewModel.zoneShapes() {
             // Transparent fill.
             var fillCoords = shape.coordinates
@@ -218,20 +262,57 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
     }
 
-    /// Add an icon marker for each waypoint (triangle) and holding fix (built once).
+    /// Sync fix icon markers and name labels independently so toggling names
+    /// never repositions the icon markers.
     private func syncFixes(_ mapView: MLNMapView) {
-        guard fixAnnotations.isEmpty else { return }
-        addFixMarkers(viewModel.waypointFixes, icon: FixSymbol.triangle(), on: mapView)
-        addFixMarkers(viewModel.holdingFixes, icon: FixSymbol.holding(), on: mapView)
+        let showFixes   = viewModel.layerOn("Fixes")
+        let showHolding = viewModel.layerOn("Holding")
+        let showNames   = viewModel.layerOn("Fixes Names")
+        let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
+        let nameKey = "\(showNames)-\(iconKey)"
+
+        if iconKey != fixIconKey {
+            fixIconKey = iconKey
+            mapView.removeAnnotations(fixIconAnnotations)
+            fixIconAnnotations = []
+            if showFixes   { addFixIcons(viewModel.waypointFixes, icon: FixSymbol.triangle(), on: mapView) }
+            if showHolding { addFixIcons(viewModel.holdingFixes,   icon: FixSymbol.holding(),  on: mapView) }
+        }
+
+        if nameKey != fixNameKey {
+            fixNameKey = nameKey
+            mapView.removeAnnotations(fixNameAnnotations)
+            fixNameAnnotations = []
+            if showNames && showFixes   { addFixNames(viewModel.waypointFixes, iconSize: FixSymbol.triangle().size, on: mapView) }
+            if showNames && showHolding { addFixNames(viewModel.holdingFixes,   iconSize: FixSymbol.holding().size,  on: mapView) }
+        }
     }
 
-    private func addFixMarkers(_ fixes: [ExerciseDetail.Fix], icon: UIImage, on mapView: MLNMapView) {
+    private func addFixIcons(_ fixes: [ExerciseDetail.Fix], icon: UIImage, on mapView: MLNMapView) {
         for fix in fixes {
             guard let lat = fix.latitude, let lon = fix.longitude else { continue }
             let annotation = ImageAnnotation()
-            annotation.image = FixSymbol.marker(name: fix.fixName ?? "", icon: icon)
+            annotation.image = icon
             annotation.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-            fixAnnotations.append(annotation)
+            fixIconAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
+    }
+
+    private func addFixNames(_ fixes: [ExerciseDetail.Fix], iconSize: CGSize, on mapView: MLNMapView) {
+        let gap: CGFloat = 2
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude,
+                  let name = fix.fixName, !name.isEmpty else { continue }
+            let img = FixSymbol.nameLabel(name)
+            let annotation = ImageAnnotation()
+            annotation.image = img
+            // Positive dy shifts the view's center DOWN from the coordinate,
+            // placing the label below the icon without moving the icon itself.
+            annotation.centerOffset = CGVector(dx: 0,
+                                               dy: iconSize.height / 2 + gap + img.size.height / 2)
+            annotation.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            fixNameAnnotations.append(annotation)
             mapView.addAnnotation(annotation)
         }
     }
@@ -257,14 +338,20 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        let radialKey = viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
-        if ringRadialLines.isEmpty || radialKey != ringRadialKey {
-            remove(ringRadialLines, from: mapView)
+        // Range rings + area-control rings: built once, never removed or recreated.
+        if ringLines.isEmpty {
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
             lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
-            lines += viewModel.fixRadialLines()
-            ringRadialLines = add(lines, to: mapView)
-            ringRadialKey = radialKey
+            ringLines = add(lines, to: mapView)
+        }
+
+        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        let radialsOn = viewModel.layerOn("Radials")
+        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        if radialKey != radialLinesKey {
+            remove(radialLines, from: mapView)
+            radialLines = radialsOn ? add(viewModel.fixRadialLines(), to: mapView) : []
+            radialLinesKey = radialKey
         }
 
         for (id, lines) in stripLines where !enabledStripIDs.contains(id) {

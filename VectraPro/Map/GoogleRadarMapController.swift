@@ -29,8 +29,11 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var latPerPoint: Double = 0
     private var lngPerPoint: Double = 0
 
-    private var ringRadialLines: [GMSPolyline] = []
-    private var ringRadialKey = ""
+    /// Range rings + area-control rings — built once, never removed.
+    private var ringLines: [GMSPolyline] = []
+    /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
+    private var radialLines: [GMSPolyline] = []
+    private var radialLinesKey = ""
     private var stripLines: [UUID: [GMSPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
 
@@ -40,8 +43,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var labelTexts: [UUID: String] = [:]
     private var trailMarkers: [UUID: [GMSMarker]] = [:]
     private var tethers: [UUID: GMSPolyline] = [:]
-    private var fixMarkers: [GMSMarker] = []
+    private var fixIconMarkers: [GMSMarker] = []
+    private var fixNameMarkers: [GMSMarker] = []
+    private var fixIconKey = ""
+    private var fixNameKey = ""
+    private var radialNameMarkers: [GMSMarker] = []
+    private var radialNameKey = ""
     private var zoneOverlays: [GMSOverlay] = []
+    private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
     private var draggingLabelID: UUID?
 
@@ -103,14 +112,45 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     func sync() {
         applyZoomLimit()
         syncStaticLines()
+        syncRadialNames()
         syncZones()
         syncFixes()
         syncAircraft()
     }
 
+    /// Rotated name labels drawn along each VOR radial line.
+    private func syncRadialNames() {
+        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let key = "\(showNames)-\(viewModel.fixes.count)"
+        guard key != radialNameKey else { return }
+        radialNameKey = key
+        radialNameMarkers.forEach { $0.map = nil }
+        radialNameMarkers = []
+        guard showNames else { return }
+
+        for label in viewModel.fixRadialLabels() {
+            let img = FixSymbol.nameLabel(label.name)
+            var rotation = label.bearing - 90
+            if rotation > 90  { rotation -= 180 }
+            if rotation < -90 { rotation += 180 }
+            let marker = GMSMarker(position: label.coordinate)
+            marker.icon = img
+            marker.rotation = rotation
+            marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            marker.isTappable = false
+            marker.map = mapView
+            radialNameMarkers.append(marker)
+        }
+    }
+
     /// Add each zone as a transparent fill polygon (solid border) + center label.
     private func syncZones() {
-        guard zoneOverlays.isEmpty else { return }
+        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        guard key != zoneKey else { return }
+        zoneKey = key
+        zoneOverlays.forEach { $0.map = nil }
+        zoneOverlays = []
+        guard viewModel.layerOn("Zone") else { return }
         for shape in viewModel.zoneShapes() {
             let path = GMSMutablePath()
             shape.coordinates.forEach { path.add($0) }
@@ -130,22 +170,64 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
     }
 
-    /// Add an icon marker for each waypoint (triangle) and holding fix (built once).
+    /// Sync fix icon markers and name labels independently so toggling names
+    /// never repositions the icon markers.
     private func syncFixes() {
-        guard fixMarkers.isEmpty else { return }
-        addFixMarkers(viewModel.waypointFixes, icon: FixSymbol.triangle())
-        addFixMarkers(viewModel.holdingFixes, icon: FixSymbol.holding())
+        let showFixes   = viewModel.layerOn("Fixes")
+        let showHolding = viewModel.layerOn("Holding")
+        let showNames   = viewModel.layerOn("Fixes Names")
+        let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
+        let nameKey = "\(showNames)-\(iconKey)"
+
+        if iconKey != fixIconKey {
+            fixIconKey = iconKey
+            fixIconMarkers.forEach { $0.map = nil }
+            fixIconMarkers = []
+            if showFixes   { addFixIcons(viewModel.waypointFixes, icon: FixSymbol.triangle()) }
+            if showHolding { addFixIcons(viewModel.holdingFixes,   icon: FixSymbol.holding()) }
+        }
+
+        if nameKey != fixNameKey {
+            fixNameKey = nameKey
+            fixNameMarkers.forEach { $0.map = nil }
+            fixNameMarkers = []
+            if showNames && showFixes   { addFixNames(viewModel.waypointFixes, iconSize: FixSymbol.triangle().size) }
+            if showNames && showHolding { addFixNames(viewModel.holdingFixes,   iconSize: FixSymbol.holding().size) }
+        }
     }
 
-    private func addFixMarkers(_ fixes: [ExerciseDetail.Fix], icon: UIImage) {
+    private func addFixIcons(_ fixes: [ExerciseDetail.Fix], icon: UIImage) {
         for fix in fixes {
             guard let lat = fix.latitude, let lon = fix.longitude else { continue }
             let marker = GMSMarker(position: CLLocationCoordinate2D(latitude: lat, longitude: lon))
-            marker.icon = FixSymbol.marker(name: fix.fixName ?? "", icon: icon)
+            marker.icon = icon
             marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
             marker.isTappable = false
             marker.map = mapView
-            fixMarkers.append(marker)
+            fixIconMarkers.append(marker)
+        }
+    }
+
+    private func addFixNames(_ fixes: [ExerciseDetail.Fix], iconSize: CGSize) {
+        let gap: CGFloat = 2
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude,
+                  let name = fix.fixName, !name.isEmpty else { continue }
+            let img = FixSymbol.nameLabel(name)
+            // Build a transparent padded image whose top edge sits at the fix coord
+            // (icon centre). The label occupies the bottom, separated from the icon
+            // by gap — so the label appears below the icon without moving it.
+            let canvasH = iconSize.height / 2 + gap + img.size.height
+            let canvas = CGSize(width: img.size.width, height: canvasH)
+            let paddedImg = UIGraphicsImageRenderer(size: canvas).image { _ in
+                img.draw(at: CGPoint(x: 0, y: canvasH - img.size.height))
+            }
+            let marker = GMSMarker(position: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            marker.icon = paddedImg
+            marker.groundAnchor = CGPoint(x: 0.5, y: 0)   // top-centre at fix coord
+            marker.isTappable = false
+            marker.map = mapView
+            fixNameMarkers.append(marker)
         }
     }
 
@@ -172,14 +254,20 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        let radialKey = viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
-        if ringRadialLines.isEmpty || radialKey != ringRadialKey {
-            ringRadialLines.forEach { $0.map = nil }
+        // Range rings + area-control rings: built once, never removed.
+        if ringLines.isEmpty {
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
             lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
-            lines += viewModel.fixRadialLines()
-            ringRadialLines = add(lines)
-            ringRadialKey = radialKey
+            ringLines = add(lines)
+        }
+
+        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        let radialsOn = viewModel.layerOn("Radials")
+        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        if radialKey != radialLinesKey {
+            radialLines.forEach { $0.map = nil }
+            radialLines = radialsOn ? add(viewModel.fixRadialLines()) : []
+            radialLinesKey = radialKey
         }
 
         for (id, lines) in stripLines where !enabledStripIDs.contains(id) {

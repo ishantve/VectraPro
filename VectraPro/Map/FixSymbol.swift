@@ -46,6 +46,19 @@ enum FixSymbol {
         }
     }
 
+    /// Just the name label (no icon), for placing separately below a fix marker.
+    static func nameLabel(_ name: String) -> UIImage {
+        let label = name.uppercased()
+        let font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: offWhite]
+        let textSize = (label as NSString).size(withAttributes: attrs)
+        let canvas = CGSize(width: ceil(textSize.width + 2), height: ceil(textSize.height))
+        return UIGraphicsImageRenderer(size: canvas).image { _ in
+            (label as NSString).draw(in: CGRect(x: 1, y: 0, width: textSize.width, height: textSize.height),
+                                     withAttributes: attrs)
+        }
+    }
+
     /// Load a named asset and resize it to fit `size` (aspect preserved).
     private static func resized(named: String, size: CGFloat) -> UIImage? {
         guard let base = UIImage(named: named) else { return nil }
