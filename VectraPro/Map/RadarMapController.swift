@@ -16,6 +16,9 @@ import UIKit
 final class ImageAnnotation: MLNPointAnnotation {
     var image: UIImage?
     var rotationDegrees: CGFloat = 0
+    /// Shift of the view centre from the coordinate (points). Default centred;
+    /// the data block uses this to sit with its bottom-left corner on the point.
+    var centerOffset: CGVector = .zero
 }
 
 final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
@@ -28,22 +31,41 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var didLimitZoom = false
     private var isClamping = false
 
+    private var lastKnownSize: CGSize = .zero
+    private weak var lastScreen: UIScreen?
+
     private enum PanMode { case none, map, label }
     private var panMode: PanMode = .none
     private var lastPanTranslation: CGPoint = .zero
 
     private var lineStyles: [ObjectIdentifier: (color: UIColor, width: CGFloat)] = [:]
-    private var ringRadialLines: [MLNPolyline] = []
-    private var ringRadialKey = ""
+    /// Range rings + area-control rings — built once, never removed.
+    private var ringLines: [MLNPolyline] = []
+    /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
+    private var radialLines: [MLNPolyline] = []
+    private var radialLinesKey = ""
     private var stripLines: [UUID: [MLNPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [MLNPolyline]] = [:]
 
-    private var aircraftAnnotation: ImageAnnotation?
-    private var labelAnnotation: ImageAnnotation?
-    private var lastLabelText = ""
-    private var trailAnnotations: [ImageAnnotation] = []
+    // Per-aircraft annotations, keyed by aircraft id (multi-aircraft support).
+    private var aircraftAnnotations: [UUID: ImageAnnotation] = [:]
+    private var labelAnnotations: [UUID: ImageAnnotation] = [:]
+    private var labelTexts: [UUID: String] = [:]
+    private var trailAnnotations: [UUID: [ImageAnnotation]] = [:]
+    /// Fix icon markers — rebuilt only when the icon set (Fixes/Holding toggle, count) changes.
+    private var fixIconAnnotations: [ImageAnnotation] = []
+    /// Fix name labels — rebuilt only when the Fixes Names toggle changes (icons stay put).
+    private var fixNameAnnotations: [ImageAnnotation] = []
+    private var fixIconKey = ""
+    private var fixNameKey = ""
+    private var zoneAnnotations: [MLNAnnotation] = []
+    private var zoneKey = ""
+    private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
     private var tetherSource: MLNShapeSource?
-    private var isDraggingLabel = false
+    private var radialNameAnnotations: [ImageAnnotation] = []
+    private var radialNameKey = ""
+    /// Which aircraft's data block is being dragged (nil = none).
+    private var draggingLabelID: UUID?
 
     private let trailIcons: [UIImage] = (0..<8).map {
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
@@ -94,6 +116,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         pan.delegate = self
         pan.maximumNumberOfTouches = 1
         mapView.addGestureRecognizer(pan)
+
+        lastKnownSize = mapView.bounds.size
+        lastScreen = mapView.window?.screen
     }
 
     private func applyZoom(_ delta: Double) {
@@ -122,6 +147,29 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         tetherSource = source
     }
+    
+
+    func mapViewDidFinishRenderingMapFullyRendered(_ mapView: MLNMapView) {
+        handleViewEnvironmentChangeIfNeeded(mapView)
+    }
+
+    func mapViewDidBecomeIdle(_ mapView: MLNMapView) {
+        handleViewEnvironmentChangeIfNeeded(mapView)
+    }
+
+    private func handleViewEnvironmentChangeIfNeeded(_ mapView: MLNMapView) {
+        // Detect changes in size or the screen the view is presented on (e.g., external display moves)
+        let currentSize = mapView.bounds.size
+        let currentScreen = mapView.window?.screen
+        let sizeChanged = currentSize != lastKnownSize && currentSize.width > 0 && currentSize.height > 0
+        let screenChanged = currentScreen !== lastScreen
+        guard sizeChanged || screenChanged else { return }
+        lastKnownSize = currentSize
+        lastScreen = currentScreen
+        // Recompute zoom limits and visible bounds for the new environment
+        didLimitZoom = false
+        applyZoomLimit(mapView)
+    }
 
     // MARK: Pan clamp (200 NM)
 
@@ -149,7 +197,124 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         guard styleLoaded else { return }
         applyZoomLimit(mapView)
         syncStaticLines(mapView)
+        syncRadialNames(mapView)
+        syncZones(mapView)
+        syncFixes(mapView)
         syncAircraft(mapView)
+    }
+
+    /// Rotated name labels drawn along each VOR radial line.
+    private func syncRadialNames(_ mapView: MLNMapView) {
+        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let key = "\(showNames)-\(viewModel.fixes.count)"
+        guard key != radialNameKey else { return }
+        radialNameKey = key
+        mapView.removeAnnotations(radialNameAnnotations)
+        radialNameAnnotations = []
+        guard showNames else { return }
+
+        for label in viewModel.fixRadialLabels() {
+            let img = FixSymbol.nameLabel(label.name)
+            let annotation = ImageAnnotation()
+            annotation.image = img
+            annotation.coordinate = label.coordinate
+            // Rotate text so it reads along the radial direction.
+            // bearing - 90 converts map-bearing to screen rotation (East = 0°).
+            // Clamp to [-90, 90] so text never appears upside-down.
+            var rotation = label.bearing - 90
+            if rotation > 90  { rotation -= 180 }
+            if rotation < -90 { rotation += 180 }
+            annotation.rotationDegrees = CGFloat(rotation)
+            radialNameAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
+    }
+
+    /// Add each zone as a transparent fill polygon + solid border + center label.
+    private func syncZones(_ mapView: MLNMapView) {
+        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        guard key != zoneKey else { return }
+        zoneKey = key
+        mapView.removeAnnotations(zoneAnnotations)
+        zoneAnnotations = []
+        guard viewModel.layerOn("Zone") else { return }
+        for shape in viewModel.zoneShapes() {
+            // Transparent fill.
+            var fillCoords = shape.coordinates
+            let polygon = MLNPolygon(coordinates: &fillCoords, count: UInt(fillCoords.count))
+            zoneFillColors[ObjectIdentifier(polygon)] = shape.fillColor
+            mapView.addAnnotation(polygon)
+            zoneAnnotations.append(polygon)
+
+            // Solid border (closed polyline).
+            var borderCoords = shape.coordinates + [shape.coordinates[0]]
+            let border = MLNPolyline(coordinates: &borderCoords, count: UInt(borderCoords.count))
+            lineStyles[ObjectIdentifier(border)] = (shape.strokeColor, 1.2)
+            mapView.addAnnotation(border)
+            zoneAnnotations.append(border)
+
+            // Center name label.
+            let label = ImageAnnotation()
+            label.image = ZoneRenderer.labelImage(shape.name)
+            label.coordinate = shape.center
+            mapView.addAnnotation(label)
+            zoneAnnotations.append(label)
+        }
+    }
+
+    /// Sync fix icon markers and name labels independently so toggling names
+    /// never repositions the icon markers.
+    private func syncFixes(_ mapView: MLNMapView) {
+        let showFixes   = viewModel.layerOn("Fixes")
+        let showHolding = viewModel.layerOn("Holding")
+        let showNames   = viewModel.layerOn("Fixes Names")
+        let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
+        let nameKey = "\(showNames)-\(iconKey)"
+
+        if iconKey != fixIconKey {
+            fixIconKey = iconKey
+            mapView.removeAnnotations(fixIconAnnotations)
+            fixIconAnnotations = []
+            if showFixes   { addFixIcons(viewModel.waypointFixes, icon: FixSymbol.triangle(), on: mapView) }
+            if showHolding { addFixIcons(viewModel.holdingFixes,   icon: FixSymbol.holding(),  on: mapView) }
+        }
+
+        if nameKey != fixNameKey {
+            fixNameKey = nameKey
+            mapView.removeAnnotations(fixNameAnnotations)
+            fixNameAnnotations = []
+            if showNames && showFixes   { addFixNames(viewModel.waypointFixes, iconSize: FixSymbol.triangle().size, on: mapView) }
+            if showNames && showHolding { addFixNames(viewModel.holdingFixes,   iconSize: FixSymbol.holding().size,  on: mapView) }
+        }
+    }
+
+    private func addFixIcons(_ fixes: [ExerciseDetail.Fix], icon: UIImage, on mapView: MLNMapView) {
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude else { continue }
+            let annotation = ImageAnnotation()
+            annotation.image = icon
+            annotation.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            fixIconAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
+    }
+
+    private func addFixNames(_ fixes: [ExerciseDetail.Fix], iconSize: CGSize, on mapView: MLNMapView) {
+        let gap: CGFloat = 2
+        for fix in fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude,
+                  let name = fix.fixName, !name.isEmpty else { continue }
+            let img = FixSymbol.nameLabel(name)
+            let annotation = ImageAnnotation()
+            annotation.image = img
+            // Positive dy shifts the view's center DOWN from the coordinate,
+            // placing the label below the icon without moving the icon itself.
+            annotation.centerOffset = CGVector(dx: 0,
+                                               dy: iconSize.height / 2 + gap + img.size.height / 2)
+            annotation.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            fixNameAnnotations.append(annotation)
+            mapView.addAnnotation(annotation)
+        }
     }
 
     private func applyZoomLimit(_ mapView: MLNMapView) {
@@ -173,13 +338,20 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        let radialKey = viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
-        if ringRadialLines.isEmpty || radialKey != ringRadialKey {
-            remove(ringRadialLines, from: mapView)
+        // Range rings + area-control rings: built once, never removed or recreated.
+        if ringLines.isEmpty {
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
-            lines += viewModel.radialManager.lines(center: viewModel.center)
-            ringRadialLines = add(lines, to: mapView)
-            ringRadialKey = radialKey
+            lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
+            ringLines = add(lines, to: mapView)
+        }
+
+        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        let radialsOn = viewModel.layerOn("Radials")
+        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        if radialKey != radialLinesKey {
+            remove(radialLines, from: mapView)
+            radialLines = radialsOn ? add(viewModel.fixRadialLines(), to: mapView) : []
+            radialLinesKey = radialKey
         }
 
         for (id, lines) in stripLines where !enabledStripIDs.contains(id) {
@@ -231,64 +403,82 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     // MARK: Aircraft
 
     private func syncAircraft(_ mapView: MLNMapView) {
-        guard let aircraft = viewModel.aircraft.first else { return }
+        let current = viewModel.aircraft
+        let liveIDs = Set(current.map(\.id))
 
-        let symbol = aircraftAnnotation ?? {
-            let a = ImageAnnotation()
-            a.image = AircraftSymbol.image()
-            a.coordinate = aircraft.position
-            aircraftAnnotation = a
-            mapView.addAnnotation(a)
-            return a
-        }()
-        symbol.coordinate = aircraft.position
-        updateRotation(of: symbol, degrees: aircraft.headingDegrees, on: mapView)
-
-        let text = aircraft.dataBlock
-        let offset = Geo.offset(from: aircraft.position,
-                                distanceMeters: aircraft.labelDistanceMeters,
-                                bearingDegrees: aircraft.labelBearingDegrees)
-        if labelAnnotation == nil || lastLabelText != text {
-            let previous = labelAnnotation
-            let a = ImageAnnotation()
-            a.image = AircraftSymbol.label(text)
-            a.coordinate = isDraggingLabel ? (previous?.coordinate ?? offset) : offset
-            labelAnnotation = a
-            mapView.addAnnotation(a)
-            if let previous { mapView.removeAnnotation(previous) }
-            lastLabelText = text
-        } else if !isDraggingLabel {
-            labelAnnotation?.coordinate = offset
+        // Remove annotations for aircraft that no longer exist.
+        for (id, symbol) in aircraftAnnotations where !liveIDs.contains(id) {
+            mapView.removeAnnotation(symbol)
+            aircraftAnnotations[id] = nil
+            if let label = labelAnnotations[id] { mapView.removeAnnotation(label); labelAnnotations[id] = nil }
+            labelTexts[id] = nil
+            if let trail = trailAnnotations[id] { mapView.removeAnnotations(trail); trailAnnotations[id] = nil }
         }
 
-        syncTrail(aircraft.history, on: mapView)
+        for aircraft in current {
+            // Symbol.
+            let symbol = aircraftAnnotations[aircraft.id] ?? {
+                let a = ImageAnnotation()
+                a.image = AircraftSymbol.image()
+                a.coordinate = aircraft.position
+                aircraftAnnotations[aircraft.id] = a
+                mapView.addAnnotation(a)
+                return a
+            }()
+            symbol.coordinate = aircraft.position
+            updateRotation(of: symbol, degrees: aircraft.headingDegrees, on: mapView)
 
-        if let label = labelAnnotation {
-            updateTether(from: aircraft.position, to: label.coordinate, on: mapView)
+            // Data block.
+            let text = aircraft.dataBlock
+            let offset = Geo.offset(from: aircraft.position,
+                                    distanceMeters: aircraft.labelDistanceMeters,
+                                    bearingDegrees: aircraft.labelBearingDegrees)
+            if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != text {
+                let previous = labelAnnotations[aircraft.id]
+                let a = ImageAnnotation()
+                a.image = AircraftSymbol.label(text)
+                if let img = a.image {
+                    a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
+                }
+                a.coordinate = draggingLabelID == aircraft.id ? (previous?.coordinate ?? offset) : offset
+                labelAnnotations[aircraft.id] = a
+                mapView.addAnnotation(a)
+                if let previous { mapView.removeAnnotation(previous) }
+                labelTexts[aircraft.id] = text
+            } else if draggingLabelID != aircraft.id {
+                labelAnnotations[aircraft.id]?.coordinate = offset
+            }
+
+            syncTrail(aircraft.history, id: aircraft.id, on: mapView)
         }
+
+        updateTethers(on: mapView)
     }
 
-    private func syncTrail(_ history: [CLLocationCoordinate2D], on mapView: MLNMapView) {
-        if !trailAnnotations.isEmpty {
-            mapView.removeAnnotations(trailAnnotations)
-            trailAnnotations = []
-        }
+    private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
+        if let old = trailAnnotations[id] { mapView.removeAnnotations(old) }
+        var annotations: [ImageAnnotation] = []
         for index in history.indices {
             let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
             let annotation = ImageAnnotation()
             annotation.image = trailIcons[step]
             annotation.coordinate = history[index]
-            trailAnnotations.append(annotation)
+            annotations.append(annotation)
             mapView.addAnnotation(annotation)
         }
+        trailAnnotations[id] = annotations
     }
 
-    private func updateTether(from start: CLLocationCoordinate2D,
-                              to end: CLLocationCoordinate2D,
-                              on mapView: MLNMapView) {
-        var coords = [start, end]
-        tetherSource?.shape = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
+    /// One tether line per aircraft, from its symbol to its data block.
+    private func updateTethers(on mapView: MLNMapView) {
+        var features: [MLNPolylineFeature] = []
+        for aircraft in viewModel.aircraft {
+            guard let label = labelAnnotations[aircraft.id] else { continue }
+            var coords = [aircraft.position, label.coordinate]
+            features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+        }
+        tetherSource?.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
     private func updateRotation(of annotation: ImageAnnotation, degrees: CGFloat, on mapView: MLNMapView) {
@@ -301,7 +491,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     // MARK: Annotation appearance
 
     func mapView(_ mapView: MLNMapView, strokeColorForShapeAnnotation annotation: MLNShape) -> UIColor {
-        lineStyles[ObjectIdentifier(annotation)]?.color ?? .green
+        let id = ObjectIdentifier(annotation)
+        // Zone fill polygons have no stroke — their border is a separate polyline.
+        if zoneFillColors[id] != nil { return .clear }
+        return lineStyles[id]?.color ?? .green
+    }
+
+    func mapView(_ mapView: MLNMapView, fillColorForPolygonAnnotation annotation: MLNPolygon) -> UIColor {
+        zoneFillColors[ObjectIdentifier(annotation)] ?? .clear
     }
 
     func mapView(_ mapView: MLNMapView, lineWidthForPolylineAnnotation annotation: MLNPolyline) -> CGFloat {
@@ -315,6 +512,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let view = MLNAnnotationView(reuseIdentifier: nil)
         guard let image = imageAnnotation.image else { return view }
         view.frame = CGRect(origin: .zero, size: image.size)
+        view.centerOffset = imageAnnotation.centerOffset
         let imageView = UIImageView(image: image)
         imageView.frame = view.bounds
         view.addSubview(imageView)
@@ -329,9 +527,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         switch gesture.state {
         case .began:
-            if labelContains(point, in: mapView) {
+            if let id = labelHit(point, in: mapView) {
                 panMode = .label
-                isDraggingLabel = true
+                draggingLabelID = id
             } else {
                 panMode = .map
                 lastPanTranslation = .zero
@@ -340,9 +538,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         case .changed:
             switch panMode {
             case .label:
-                guard let label = labelAnnotation, let aircraft = viewModel.aircraft.first else { return }
+                guard let id = draggingLabelID, let label = labelAnnotations[id] else { return }
                 label.coordinate = mapView.convert(point, toCoordinateFrom: mapView)
-                updateTether(from: aircraft.position, to: label.coordinate, on: mapView)
+                updateTethers(on: mapView)
 
             case .map:
                 let translation = gesture.translation(in: mapView)
@@ -359,12 +557,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             }
 
         case .ended, .cancelled, .failed:
-            if panMode == .label, let aircraft = viewModel.aircraft.first, let label = labelAnnotation {
+            if panMode == .label, let id = draggingLabelID,
+               let aircraft = viewModel.aircraft.first(where: { $0.id == id }),
+               let label = labelAnnotations[id] {
                 let bearing = Geo.bearing(from: aircraft.position, to: label.coordinate)
                 let distance = Geo.distanceMeters(from: aircraft.position, to: label.coordinate)
                 viewModel.setLabelOffset(for: aircraft.id, bearingDegrees: bearing, distanceMeters: distance)
             }
-            isDraggingLabel = false
+            draggingLabelID = nil
             panMode = .none
 
         default:
@@ -377,12 +577,20 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
-    private func labelContains(_ point: CGPoint, in mapView: MLNMapView) -> Bool {
-        guard let label = labelAnnotation, let image = label.image else { return false }
-        let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
-        let rect = CGRect(x: anchor.x - image.size.width / 2,
-                          y: anchor.y - image.size.height / 2,
-                          width: image.size.width, height: image.size.height)
-        return rect.insetBy(dx: -16, dy: -16).contains(point)
+    /// The aircraft id whose data block contains `point` (nil = none).
+    private func labelHit(_ point: CGPoint, in mapView: MLNMapView) -> UUID? {
+        for (id, label) in labelAnnotations {
+            guard let image = label.image else { continue }
+            let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
+            // The view centre sits at anchor + centerOffset; rect is centred there.
+            let center = CGPoint(x: anchor.x + label.centerOffset.dx,
+                                 y: anchor.y + label.centerOffset.dy)
+            let rect = CGRect(x: center.x - image.size.width / 2,
+                              y: center.y - image.size.height / 2,
+                              width: image.size.width, height: image.size.height)
+            if rect.insetBy(dx: -16, dy: -16).contains(point) { return id }
+        }
+        return nil
     }
 }
+

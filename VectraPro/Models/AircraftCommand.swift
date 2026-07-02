@@ -8,7 +8,13 @@
 import Foundation
 
 enum AircraftCommand: Equatable {
-    case heading(Double)        // turn to an absolute heading (0–359)
+    case heading(Double)                        // fly an absolute heading (shortest turn)
+    case headingTurn(Double, TurnDirection)     // absolute heading, forced turn direction
+    case relativeTurn(Double, TurnDirection)    // turn N degrees left / right
+    case presentHeading                         // stop the turn, hold current heading
     case flightLevel(Int)       // climb / descend / maintain to a flight level
-    case speed(Double)          // set speed in knots
+    case altitudeBlock(low: Int, high: Int)   // maintain block FL low through FL high
+    case speed(Double)          // maintain an exact speed in knots
+    case minSpeed(Double)       // maintain xxx knots or greater (speed floor)
+    case maxSpeed(Double)       // do not exceed xxx knots (speed ceiling)
 }

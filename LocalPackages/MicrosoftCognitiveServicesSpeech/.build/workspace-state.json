@@ -1,0 +1,31 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "microsoftcognitiveservicesspeech",
+          "kind" : "root",
+          "location" : "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/LocalPackages/MicrosoftCognitiveServicesSpeech",
+          "name" : "MicrosoftCognitiveServicesSpeech"
+        },
+        "path" : "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/LocalPackages/MicrosoftCognitiveServicesSpeech/MicrosoftCognitiveServicesSpeech.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "MicrosoftCognitiveServicesSpeech"
+      }
+    ],
+    "dependencies" : [
+
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}
