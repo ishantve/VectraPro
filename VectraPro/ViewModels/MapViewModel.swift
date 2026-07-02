@@ -16,7 +16,27 @@ final class MapViewModel: ObservableObject {
     /// Radar center. Defaults to IGI; replaced by the started exercise's
     /// map location so the range rings draw around it.
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
+    /// Map-layer visibility (driven by the "Map Layers" menu toggles).
+    @Published var layers: [String: Bool] = [
+        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true
+    ]
+    func layerOn(_ name: String) -> Bool { layers[name] ?? false }
+
+    /// Set a layer toggle, cascading to dependent labels when a parent turns on or off.
+    func setLayer(_ name: String, _ value: Bool) {
+        layers[name] = value
+        switch name {
+        case "Fixes":
+            layers["Fixes Names"] = value
+        case "Radials":
+            layers["Radials Names"] = value
+        default: break
+        }
+    }
+
     let rings: [RangeRing] = MapConfiguration.rings
+    /// Wide Area Control Radar rings (100/150/200/250 NM), same centre.
+    let areaControlRings: [RangeRing] = MapConfiguration.areaControlRings
     let defaultZoom: Float = MapConfiguration.defaultZoom
 
     /// Runways/approaches derived from the started exercise (nil → IGI defaults).
@@ -91,6 +111,11 @@ final class MapViewModel: ObservableObject {
     /// Radial lines for the exercise's VOR fixes (empty when none).
     func fixRadialLines() -> [MapLine] {
         FixRadialRenderer.lines(fixes: fixes)
+    }
+
+    /// Label positions / names / bearings for named VOR radials.
+    func fixRadialLabels() -> [FixRadialRenderer.RadialLabel] {
+        FixRadialRenderer.labels(fixes: fixes, center: center)
     }
 
     /// Polygon shapes (border + fill + label) for the exercise's airspace zones.
@@ -368,11 +393,12 @@ final class MapViewModel: ObservableObject {
         return result
     }
 
-    /// Categories for the initially-spawned aircraft, distributed across the
-    /// active categories by priority (falls back to arrival if none active).
+    /// Categories for the initially-spawned (on-map) aircraft. Only Arrival &
+    /// Enroute spawn on the radar — Departures leave from the runway, so they
+    /// live only in the hangar list (via the frequency spawner).
     private func initialCategories() -> [FlightCategory] {
         let count = initialSpawnCount()
-        let cats = activeCategories()
+        let cats = activeCategories().filter { $0 != .departure }
         guard !cats.isEmpty else { return Array(repeating: .arrival, count: count) }
         let split = descendingSplit(total: count, parts: cats.count)
         return zip(cats, split).flatMap { Array(repeating: $0.0, count: $0.1) }
@@ -523,17 +549,26 @@ final class MapViewModel: ObservableObject {
     /// Spawn an aircraft outside the 60 NM radius, heading roughly inbound so
     /// it crosses the scope.
     private func makeRandomAircraft(category: FlightCategory = .arrival) -> Aircraft {
-        let spawnBearing = Double.random(in: 0..<360)
-        let rangeNM = Double.random(in: 60..<70)
-        let position = Geo.offset(
-            from: center,
-            distanceMeters: rangeNM * Distance.metersPerNauticalMile,
-            bearingDegrees: spawnBearing
-        )
+        let position: CLLocationCoordinate2D
+        let heading: Double
 
-        // Inbound heading = back toward the centre, ± some spread.
-        let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
-        let heading = (inbound + Double.random(in: -40...40) + 360).truncatingRemainder(dividingBy: 360)
+        if category == .arrival, let radial = randomVORRadial() {
+            // Spawn on a (visible) VOR radial at ~70 NM out (or its end if
+            // shorter), heading to the centre.
+            let spawnDistance = min(70 * Distance.metersPerNauticalMile, radial.lengthMeters)
+            position = Geo.offset(from: radial.origin,
+                                  distanceMeters: spawnDistance,
+                                  bearingDegrees: radial.angle)
+            heading = Geo.bearing(from: position, to: center)
+        } else {
+            let spawnBearing = Double.random(in: 0..<360)
+            let rangeNM = Double.random(in: 60..<70)
+            position = Geo.offset(from: center,
+                                  distanceMeters: rangeNM * Distance.metersPerNauticalMile,
+                                  bearingDegrees: spawnBearing)
+            let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
+            heading = (inbound + Double.random(in: -40...40) + 360).truncatingRemainder(dividingBy: 360)
+        }
 
         var aircraft = Aircraft(
             callsign: makeCallsign(),
@@ -543,6 +578,22 @@ final class MapViewModel: ObservableObject {
         aircraft.category = category
         aircraft.aircraftType = aircraftTypes.randomElement()?.icaoCode
         return aircraft
+    }
+
+    /// A random VOR-fix radial (origin, bearing, drawn length) — the radials
+    /// actually shown on the radar. Nil if the exercise has none.
+    private func randomVORRadial() -> (origin: CLLocationCoordinate2D, angle: Double, lengthMeters: Double)? {
+        var options: [(CLLocationCoordinate2D, Double, Double)] = []
+        for fix in fixes where fix.type?.uppercased() == "VOR" {
+            guard let lat = fix.latitude, let lon = fix.longitude, let radials = fix.radials else { continue }
+            let origin = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            for r in radials {
+                guard let angle = r.angle, let distanceNM = r.distance, distanceNM > 0 else { continue }
+                // FixRadialRenderer draws each radial at 3× its reported distance.
+                options.append((origin, angle, distanceNM * 3 * Distance.metersPerNauticalMile))
+            }
+        }
+        return options.randomElement()
     }
 
     /// Callsign from the exercise airlines (ICAO code + flight number), or a

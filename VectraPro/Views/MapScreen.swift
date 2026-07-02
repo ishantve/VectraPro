@@ -20,11 +20,6 @@ struct MapScreen: View {
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
     enum LeftMenu { case operations, comms, reference, display, insert, collab }
     @State private var openLeftMenu: LeftMenu?
-    /// On/off state of each display-layer toggle.
-    @State private var displayToggles: [String: Bool] = [
-        "Radials": true, "Fixes": true, "Fixes Names": true, "NOTAM": true, "Zone": true
-    ]
-
     /// Display-layer rows (icon, name), in order.
     private let displayOptions: [(icon: String, name: String)] = [
         ("cloud.fill", "Weather"),
@@ -185,7 +180,9 @@ struct MapScreen: View {
                 GeometryReader { geo in
                     let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
                     let menuTop = toolbarTop + activeMenuTopY
-                    let maxH = max(140, geo.size.height - menuTop - 100)  // keep clear of bottom controls
+                    // Display (Map Layers) gets a bit more height; others keep clearance.
+                    let bottomClearance: CGFloat = openLeftMenu == .display ? 70 : 100
+                    let maxH = max(140, geo.size.height - menuTop - bottomClearance)
                     activeMenuView(maxHeight: maxH)
                         .offset(x: 68, y: menuTop)   // 16 pad + 48 button + 4 gap
                 }
@@ -368,44 +365,64 @@ struct MapScreen: View {
         case .operations:
             menuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
                 collabRow("doc.text.fill", "Flight Data")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("airplane", "Aircraft Control")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("arrow.left.arrow.right", "Handoffs")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("square.grid.2x2.fill", "Sector Management")
             }
         case .comms:
             menuCard(width: 230, maxHeight: maxHeight, title: "COMMUNICATIONS", rows: 3) {
                 collabRow("antenna.radiowaves.left.and.right", "Radio Operations")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("message.fill", "Message Center")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("mappin.and.ellipse", "Coordination")
             }
         case .reference:
             menuCard(width: 230, maxHeight: maxHeight, title: "REFERENCE", rows: 3) {
                 collabRow("map.fill", "Maps & Charts")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("gearshape.2.fill", "Procedures")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("doc.text.magnifyingglass", "Quick Reference")
             }
         case .display:
-            menuCard(width: 250, maxHeight: maxHeight, title: nil, rows: displayOptions.count) {
+            menuCard(width: 250, maxHeight: maxHeight, title: "MAP LAYERS", rows: displayOptions.count) {
                 ForEach(displayOptions, id: \.name) { option in
                     displayRow(option.icon, option.name)
+                    if option.name != displayOptions.last?.name {
+                        Divider().overlay(.white.opacity(0.12))
+                    }
                 }
             }
         case .insert:
             menuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 8) {
                 collabRow("cloud.fill", "Insert Weather")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("exclamationmark.triangle.fill", "Insert NOTAM")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("airplane", "Insert Rogue Plane")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("flame.fill", "Engine Fire")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("fanblades.fill", "Single Engine Failure")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("gearshape.2.fill", "Double Engine Failure")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("wrench.and.screwdriver.fill", "Hydraulic Failure")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("cross.case.fill", "Medical Emergency")
             }
         case .collab:
             menuCard(width: 220, maxHeight: maxHeight, title: "ATC COLLABORATION HUB", rows: 4) {
                 collabRow("questionmark.circle", "Ask A Question")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("text.bubble", "Comment")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("airplane", "Issue TFR")
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("list.bullet.rectangle", "Issue PREP")
             }
         case .none:
@@ -420,23 +437,25 @@ struct MapScreen: View {
                                          @ViewBuilder content: () -> Content) -> some View {
         let rowHeight: CGFloat = 48
         let titleHeight: CGFloat = title != nil ? 50 : 0
-        let estimated = 12 + titleHeight + CGFloat(rows) * rowHeight
-        let height = min(estimated, maxHeight)
+        let rowsHeight = 12 + CGFloat(rows) * rowHeight
+        // The header stays fixed; only the rows scroll, capped to fit maxHeight.
+        let scrollHeight = min(rowsHeight, max(80, maxHeight - titleHeight))
 
-        return ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let title {
-                    Text(title)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                }
-                content()
+        return VStack(alignment: .leading, spacing: 0) {
+            if let title {
+                Text(title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
             }
-            .padding(.vertical, 6)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) { content() }
+                    .padding(.vertical, 6)
+            }
+            .frame(height: scrollHeight)
         }
-        .frame(width: width, height: height)
+        .frame(width: width)
         .background(Color(red: 0.06, green: 0.10, blue: 0.18).opacity(0.97),
                     in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14)
@@ -455,11 +474,12 @@ struct MapScreen: View {
                 .foregroundStyle(.white)
             Spacer(minLength: 8)
             Toggle("", isOn: Binding(
-                get: { displayToggles[name] ?? false },
-                set: { displayToggles[name] = $0 }
+                get: { viewModel.layers[name] ?? false },
+                set: { viewModel.setLayer(name, $0) }
             ))
             .labelsHidden()
             .tint(Color(red: 0.20, green: 0.55, blue: 0.98))
+            .scaleEffect(0.8)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
