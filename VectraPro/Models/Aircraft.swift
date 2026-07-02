@@ -48,6 +48,10 @@ struct Aircraft: Identifiable {
     var minAltitudeFeet: Double? = nil
     var maxAltitudeFeet: Double? = nil
 
+    /// Horizontal separation ring radius (NM).
+    /// Conflict is flagged when another aircraft enters this zone at a similar altitude.
+    var colliderRadiusNM: Double = 2.5
+
     /// Recent past positions (oldest first) used to draw the history trail.
     var history: [CLLocationCoordinate2D] = []
 
@@ -56,7 +60,7 @@ struct Aircraft: Identifiable {
     var labelBearingDegrees: Double = 45
     var labelDistanceMeters: Double = 2.0 * 1852   // 2 NM gap; block is corner-anchored up-right
 
-    static let defaultSpeedKnots = 250.0
+    static let defaultSpeedKnots = 1000.0
     static let defaultAltitudeFeet = 18_000.0   // FL180
 
     /// Flight level (altitude in hundreds of feet), e.g. 180.

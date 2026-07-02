@@ -144,6 +144,17 @@ final class MapViewModel: ObservableObject {
         fixes = detail.fixes
         zones = detail.zones
         obstructions = detail.obstructions
+
+        #if DEBUG
+        print("========== ZONES (\(zones.count)) ==========")
+        for z in zones {
+            print("  zone: id=\(z.zoneId ?? "—")  name=\(z.zoneName ?? "—")  type=\(z.zoneType ?? "—")  isActive=\(String(describing: z.isActive))  color=\(z.color ?? "—")  colliders=\(z.colliders?.count ?? 0)")
+            for (i, c) in (z.colliders ?? []).enumerated() {
+                print("    [\(i)] lat=\(String(describing: c.latitude))  lon=\(String(describing: c.longitude))")
+            }
+        }
+        print("==========================================")
+        #endif
         freqDeparture = detail.frequencyOfDeparture
         freqArrival = detail.frequencyOfArrival
         freqEnroute = detail.frequencyOfEnroute
@@ -230,6 +241,15 @@ final class MapViewModel: ObservableObject {
     // MARK: - Drawing
 
     @Published var isDrawing = false
+    /// Aircraft IDs whose 2.5 NM circles are touching (distance < 5 NM) — yellow warning.
+    @Published private(set) var yellowConflictIDs: Set<UUID> = []
+    /// Aircraft IDs within 3 NM of another aircraft — red critical alert.
+    @Published private(set) var redConflictIDs: Set<UUID> = []
+    /// Aircraft IDs whose collider ring is touching a zone boundary (approaching wall).
+    @Published private(set) var zoneConflictIDs: Set<UUID> = []
+    /// Alternates true/false every simulation tick — drives data-block blink for zone conflicts.
+    @Published private(set) var blinkState: Bool = false
+
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
     private lazy var commandController = CommandController(mapViewModel: self)
@@ -472,6 +492,100 @@ final class MapViewModel: ObservableObject {
                 bearingDegrees: aircraft[index].headingDegrees
             )
         }
+        detectConflicts()
+        detectZoneConflicts()
+        blinkState.toggle()
+    }
+
+    /// Checks every aircraft pair for separation loss.
+    /// Yellow = circles touching (distance < 5 NM).
+    /// Red    = critical separation loss (distance < 3 NM).
+    /// Both levels also require < 1 000 ft vertical separation.
+    private func detectConflicts() {
+        var yellows = Set<UUID>()
+        var reds    = Set<UUID>()
+        for i in 0..<aircraft.count {
+            for j in (i + 1)..<aircraft.count {
+                let a = aircraft[i], b = aircraft[j]
+                let hDistNM = Geo.distanceMeters(from: a.position, to: b.position) / 1852.0
+                let vDistFt = abs(a.altitudeFeet - b.altitudeFeet)
+                guard vDistFt < 1000 else { continue }
+                if hDistNM < (a.colliderRadiusNM + b.colliderRadiusNM) {
+                    yellows.insert(a.id); yellows.insert(b.id)
+                }
+                if hDistNM < 3.0 {
+                    reds.insert(a.id); reds.insert(b.id)
+                }
+            }
+        }
+        if yellows != yellowConflictIDs { yellowConflictIDs = yellows }
+        if reds    != redConflictIDs    { redConflictIDs    = reds    }
+    }
+
+    /// Checks every aircraft against every zone polygon.
+    /// Altitude-independent — zone colliders extend from ground to infinity.
+    ///
+    /// Two levels:
+    ///  • Collider ring touches zone edge → `zoneConflictIDs` (datablock blinks red)
+    ///  • Aircraft body (position) enters polygon → aircraft is destroyed and removed
+    private func detectZoneConflicts() {
+        let shapes = zoneShapes()
+        var conflicts = Set<UUID>()
+        var toDestroy = Set<UUID>()
+
+        for ac in aircraft {
+            if shapes.contains(where: { polygonContains($0.coordinates, point: ac.position) }) {
+                toDestroy.insert(ac.id)
+            } else {
+                let thresholdM = ac.colliderRadiusNM * 1852.0
+                let touchesBoundary = shapes.contains { shape in
+                    let coords = shape.coordinates
+                    guard coords.count >= 2 else { return false }
+                    for i in 0..<coords.count {
+                        let a = coords[i], b = coords[(i + 1) % coords.count]
+                        if distanceToSegmentMeters(point: ac.position, segA: a, segB: b) < thresholdM {
+                            return true
+                        }
+                    }
+                    return false
+                }
+                if touchesBoundary { conflicts.insert(ac.id) }
+            }
+        }
+
+        // Destroy aircraft whose body entered a zone — remove from map and hangar.
+        if !toDestroy.isEmpty {
+            aircraft.removeAll { toDestroy.contains($0.id) }
+            traffic.removeAll  { toDestroy.contains($0.id) }
+            conflicts.subtract(toDestroy)
+        }
+
+        if conflicts != zoneConflictIDs { zoneConflictIDs = conflicts }
+    }
+
+    /// Minimum distance (metres) from `point` to the line segment [segA, segB].
+    /// Uses a flat-Earth projection centred on segA — accurate enough for radar scales.
+    private func distanceToSegmentMeters(
+        point: CLLocationCoordinate2D,
+        segA: CLLocationCoordinate2D,
+        segB: CLLocationCoordinate2D
+    ) -> Double {
+        let p  = flatXY(origin: segA, target: point)
+        let ab = flatXY(origin: segA, target: segB)
+        let lenSq = ab.x * ab.x + ab.y * ab.y
+        guard lenSq > 0 else { return hypot(p.x, p.y) }
+        let t = max(0, min(1, (p.x * ab.x + p.y * ab.y) / lenSq))
+        return hypot(p.x - ab.x * t, p.y - ab.y * t)
+    }
+
+    /// Flat-Earth XY offset (metres) from `origin` to `target`.
+    private func flatXY(origin: CLLocationCoordinate2D,
+                        target: CLLocationCoordinate2D) -> (x: Double, y: Double) {
+        let R = 6_371_000.0
+        let dLat = (target.latitude  - origin.latitude)  * .pi / 180
+        let dLon = (target.longitude - origin.longitude) * .pi / 180
+        let meanLat = (origin.latitude + target.latitude) / 2 * .pi / 180
+        return (x: dLon * cos(meanLat) * R, y: dLat * R)
     }
 
     /// Standard bank angle for the turn-rate model (heavier transport ~25°).
@@ -586,6 +700,21 @@ final class MapViewModel: ObservableObject {
         )
         aircraft.category = category
         aircraft.aircraftType = aircraftTypes.randomElement()?.icaoCode
+
+        // Pre-populate 6 history dots so the tail is visible from the moment
+        // the aircraft appears. Dots are spaced by the same distance the aircraft
+        // travels between two history samples (speed × sampleInterval).
+        let sampleDistMeters = aircraft.speedKnots * 1852.0 / 3600.0
+                               * Double(historySampleTicks) * tickInterval
+        let backBearing = (heading + 180).truncatingRemainder(dividingBy: 360)
+        for i in stride(from: 6, through: 1, by: -1) {
+            aircraft.history.append(
+                Geo.offset(from: position,
+                           distanceMeters: Double(i) * sampleDistMeters,
+                           bearingDegrees: backBearing)
+            )
+        }
+
         return aircraft
     }
 

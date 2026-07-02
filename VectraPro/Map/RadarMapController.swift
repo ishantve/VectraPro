@@ -62,6 +62,10 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var zoneKey = ""
     private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
     private var tetherSource: MLNShapeSource?
+    private var normalCircleSource: MLNShapeSource?
+    private var yellowCircleSource: MLNShapeSource?
+    private var redCircleSource: MLNShapeSource?
+    private var zoneColliderSource: MLNShapeSource?
     private var radialNameAnnotations: [ImageAnnotation] = []
     private var radialNameKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -132,6 +136,10 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
         styleLoaded = true
         setupTetherLayer(style)
+        setupNormalCircleLayer(style)
+        setupYellowCircleLayer(style)
+        setupRedCircleLayer(style)
+        setupZoneColliderLayer(style)
         sync()
     }
 
@@ -146,6 +154,51 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         style.addLayer(layer)
 
         tetherSource = source
+    }
+
+    private func setupNormalCircleLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "circles-normal", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "circles-normal", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.white.withAlphaComponent(0.35))
+        layer.lineWidth = NSExpression(forConstantValue: 1.2)
+        style.addLayer(layer)
+        normalCircleSource = source
+    }
+
+    private func setupYellowCircleLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "circles-yellow", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "circles-yellow", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.systemYellow.withAlphaComponent(0.9))
+        layer.lineWidth = NSExpression(forConstantValue: 1.8)
+        layer.lineDashPattern = NSExpression(forConstantValue: [4, 3])
+        style.addLayer(layer)
+        yellowCircleSource = source
+    }
+
+    private func setupRedCircleLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "circles-red", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "circles-red", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.systemRed.withAlphaComponent(0.9))
+        layer.lineWidth = NSExpression(forConstantValue: 1.8)
+        layer.lineDashPattern = NSExpression(forConstantValue: [4, 3])
+        style.addLayer(layer)
+        redCircleSource = source
+    }
+
+    private func setupZoneColliderLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "zone-colliders", shape: nil, options: nil)
+        style.addSource(source)
+
+        let layer = MLNLineStyleLayer(identifier: "zone-colliders", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.orange.withAlphaComponent(0.9))
+        layer.lineWidth = NSExpression(forConstantValue: 1.8)
+        layer.lineDashPattern = NSExpression(forConstantValue: [4, 3])
+        style.addLayer(layer)
+
+        zoneColliderSource = source
     }
     
 
@@ -173,7 +226,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     // MARK: Pan clamp (200 NM)
 
+    func mapViewRegionIsChanging(_ mapView: MLNMapView) {
+        refreshAircraftScale()
+    }
+
     func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
+        refreshAircraftScale()
         if isClamping { isClamping = false; return }
         let clamped = clampToRadius(mapView.centerCoordinate)
         guard clamped.latitude != mapView.centerCoordinate.latitude
@@ -201,6 +259,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         syncZones(mapView)
         syncFixes(mapView)
         syncAircraft(mapView)
+        syncColliders()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -319,7 +378,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     private func applyZoomLimit(_ mapView: MLNMapView) {
         guard !didLimitZoom, mapView.bounds.width > 0, mapView.bounds.height > 0 else { return }
-        let radius = 70 * 1852.0
+        let radius = 65 * 1852.0
         let center = viewModel.center
         let north = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 0)
         let south = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 180)
@@ -430,13 +489,19 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
             // Data block.
             let text = aircraft.dataBlock
+            let isRed    = viewModel.redConflictIDs.contains(aircraft.id)
+                        || viewModel.zoneConflictIDs.contains(aircraft.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
+            let blink    = viewModel.blinkState
+            let conflictColor: UIColor? = blink ? (isRed ? .systemRed : isYellow ? .systemYellow : nil) : nil
+            let labelKey = conflictColor != nil ? "\(text)-\(isRed ? "red" : "yellow")" : text
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
                                     bearingDegrees: aircraft.labelBearingDegrees)
-            if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != text {
+            if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != labelKey {
                 let previous = labelAnnotations[aircraft.id]
                 let a = ImageAnnotation()
-                a.image = AircraftSymbol.label(text)
+                a.image = AircraftSymbol.label(text, conflictColor: conflictColor)
                 if let img = a.image {
                     a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
                 }
@@ -444,7 +509,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                 labelAnnotations[aircraft.id] = a
                 mapView.addAnnotation(a)
                 if let previous { mapView.removeAnnotation(previous) }
-                labelTexts[aircraft.id] = text
+                labelTexts[aircraft.id] = labelKey
             } else if draggingLabelID != aircraft.id {
                 labelAnnotations[aircraft.id]?.coordinate = offset
             }
@@ -453,6 +518,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
 
         updateTethers(on: mapView)
+        // Apply current zoom scale to any newly created annotations immediately
+        // so they never appear at the wrong size for even one frame.
+        refreshAircraftScale()
     }
 
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
@@ -481,10 +549,76 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         tetherSource?.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
+    /// Aircraft circles: always-visible white ring for every aircraft; yellow/red
+    /// dashed ring replaces it during each blink-on phase when in conflict.
+    /// Zone proximity ring (orange) is drawn separately.
+    private func syncColliders() {
+        var normalFeatures: [MLNPolylineFeature] = []
+        var yellowFeatures: [MLNPolylineFeature] = []
+        var redFeatures:    [MLNPolylineFeature] = []
+
+        for ac in viewModel.aircraft {
+            let isRed    = viewModel.redConflictIDs.contains(ac.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
+            let blink    = viewModel.blinkState
+            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            coords.append(coords[0])
+            let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
+            if isRed && blink        { redFeatures.append(feature) }
+            else if isYellow && blink { yellowFeatures.append(feature) }
+            else                      { normalFeatures.append(feature) }
+        }
+
+        normalCircleSource?.shape = MLNShapeCollectionFeature(shapes: normalFeatures)
+        yellowCircleSource?.shape = MLNShapeCollectionFeature(shapes: yellowFeatures)
+        redCircleSource?.shape    = MLNShapeCollectionFeature(shapes: redFeatures)
+
+        var zoneFeatures: [MLNPolylineFeature] = []
+        for ac in viewModel.aircraft where viewModel.zoneConflictIDs.contains(ac.id) {
+            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            coords.append(coords[0])
+            zoneFeatures.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+        }
+        zoneColliderSource?.shape = MLNShapeCollectionFeature(shapes: zoneFeatures)
+    }
+
+    private func circleCoords(center: CLLocationCoordinate2D, radiusNM: Double, steps: Int = 36) -> [CLLocationCoordinate2D] {
+        (0..<steps).map { i in
+            Geo.offset(from: center,
+                       distanceMeters: radiusNM * 1852.0,
+                       bearingDegrees: Double(i) * 360.0 / Double(steps))
+        }
+    }
+
     private func updateRotation(of annotation: ImageAnnotation, degrees: CGFloat, on mapView: MLNMapView) {
         annotation.rotationDegrees = degrees
         if let view = mapView.view(for: annotation) {
-            view.transform = CGAffineTransform(rotationAngle: degrees * .pi / 180)
+            let s = aircraftScale(for: mapView)
+            view.transform = CGAffineTransform(rotationAngle: degrees * .pi / 180).scaledBy(x: s, y: s)
+        }
+    }
+
+    /// Scale factor so aircraft symbol grows proportionally with zoom.
+    /// At the base zoom (8.8) scale = 1; doubles for each zoom level above it.
+    private func aircraftScale(for mapView: MLNMapView) -> CGFloat {
+        CGFloat(pow(2.0, mapView.zoomLevel - 8.8))
+    }
+
+    /// Re-apply scale to aircraft symbols and trail dots when the user zooms interactively.
+    private func refreshAircraftScale() {
+        let s = aircraftScale(for: mapView)
+        for (_, symbol) in aircraftAnnotations {
+            if let view = mapView.view(for: symbol) {
+                view.transform = CGAffineTransform(rotationAngle: symbol.rotationDegrees * .pi / 180)
+                    .scaledBy(x: s, y: s)
+            }
+        }
+        for (_, dots) in trailAnnotations {
+            for dot in dots {
+                if let view = mapView.view(for: dot) {
+                    view.transform = CGAffineTransform(scaleX: s, y: s)
+                }
+            }
         }
     }
 
