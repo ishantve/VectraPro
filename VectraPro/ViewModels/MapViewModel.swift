@@ -549,25 +549,34 @@ final class MapViewModel: ObservableObject {
     /// Spawn an aircraft outside the 60 NM radius, heading roughly inbound so
     /// it crosses the scope.
     private func makeRandomAircraft(category: FlightCategory = .arrival) -> Aircraft {
-        let position: CLLocationCoordinate2D
-        let heading: Double
+        var position: CLLocationCoordinate2D = center
+        var heading: Double = 0
 
-        if category == .arrival, let radial = randomVORRadial() {
-            // Spawn on a (visible) VOR radial at ~70 NM out (or its end if
-            // shorter), heading to the centre.
-            let spawnDistance = min(70 * Distance.metersPerNauticalMile, radial.lengthMeters)
-            position = Geo.offset(from: radial.origin,
-                                  distanceMeters: spawnDistance,
-                                  bearingDegrees: radial.angle)
-            heading = Geo.bearing(from: position, to: center)
-        } else {
-            let spawnBearing = Double.random(in: 0..<360)
-            let rangeNM = Double.random(in: 60..<70)
-            position = Geo.offset(from: center,
-                                  distanceMeters: rangeNM * Distance.metersPerNauticalMile,
-                                  bearingDegrees: spawnBearing)
-            let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
-            heading = (inbound + Double.random(in: -40...40) + 360).truncatingRemainder(dividingBy: 360)
+        // Retry up to 20 times to find a spawn point outside every zone.
+        for _ in 0..<20 {
+            let candidate: CLLocationCoordinate2D
+            let candidateHeading: Double
+
+            if category == .arrival, let radial = randomVORRadial() {
+                let spawnDistance = min(70 * Distance.metersPerNauticalMile, radial.lengthMeters)
+                candidate = Geo.offset(from: radial.origin,
+                                       distanceMeters: spawnDistance,
+                                       bearingDegrees: radial.angle)
+                candidateHeading = Geo.bearing(from: candidate, to: center)
+            } else {
+                let spawnBearing = Double.random(in: 0..<360)
+                let rangeNM = Double.random(in: 60..<70)
+                candidate = Geo.offset(from: center,
+                                       distanceMeters: rangeNM * Distance.metersPerNauticalMile,
+                                       bearingDegrees: spawnBearing)
+                let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
+                candidateHeading = (inbound + Double.random(in: -40...40) + 360)
+                    .truncatingRemainder(dividingBy: 360)
+            }
+
+            position = candidate
+            heading  = candidateHeading
+            if !isInsideAnyZone(candidate) { break }
         }
 
         var aircraft = Aircraft(
@@ -578,6 +587,28 @@ final class MapViewModel: ObservableObject {
         aircraft.category = category
         aircraft.aircraftType = aircraftTypes.randomElement()?.icaoCode
         return aircraft
+    }
+
+    /// True if `point` is inside any zone polygon (ray-casting, flat-Earth).
+    private func isInsideAnyZone(_ point: CLLocationCoordinate2D) -> Bool {
+        zoneShapes().contains { polygonContains($0.coordinates, point: point) }
+    }
+
+    /// Standard ray-casting point-in-polygon using lat/lon as a 2-D plane.
+    private func polygonContains(_ polygon: [CLLocationCoordinate2D],
+                                  point: CLLocationCoordinate2D) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var j = polygon.count - 1
+        for i in 0..<polygon.count {
+            let xi = polygon[i].longitude, yi = polygon[i].latitude
+            let xj = polygon[j].longitude, yj = polygon[j].latitude
+            let crossesY = (yi > point.latitude) != (yj > point.latitude)
+            let xIntersect = (xj - xi) * (point.latitude - yi) / (yj - yi) + xi
+            if crossesY && point.longitude < xIntersect { inside = !inside }
+            j = i
+        }
+        return inside
     }
 
     /// A random VOR-fix radial (origin, bearing, drawn length) — the radials
