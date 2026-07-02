@@ -176,6 +176,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         if ringRadialLines.isEmpty || radialKey != ringRadialKey {
             ringRadialLines.forEach { $0.map = nil }
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
+            lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
             lines += viewModel.fixRadialLines()
             ringRadialLines = add(lines)
             ringRadialKey = radialKey

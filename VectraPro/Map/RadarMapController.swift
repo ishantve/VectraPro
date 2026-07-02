@@ -261,6 +261,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         if ringRadialLines.isEmpty || radialKey != ringRadialKey {
             remove(ringRadialLines, from: mapView)
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
+            lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
             lines += viewModel.fixRadialLines()
             ringRadialLines = add(lines, to: mapView)
             ringRadialKey = radialKey

@@ -17,6 +17,8 @@ final class MapViewModel: ObservableObject {
     /// map location so the range rings draw around it.
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
     let rings: [RangeRing] = MapConfiguration.rings
+    /// Wide Area Control Radar rings (100/150/200/250 NM), same centre.
+    let areaControlRings: [RangeRing] = MapConfiguration.areaControlRings
     let defaultZoom: Float = MapConfiguration.defaultZoom
 
     /// Runways/approaches derived from the started exercise (nil → IGI defaults).

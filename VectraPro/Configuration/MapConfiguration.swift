@@ -34,4 +34,14 @@ enum MapConfiguration {
             RangeRing(radiusNM: 60, style: dashed, color: neutral, lineWidth: 0.8),
         ]
     }()
+
+    /// Area Control Radar rings — wide, very light dashed circles sharing the
+    /// same centre as the range rings.
+    static let areaControlRings: [RangeRing] = {
+        let dashed = RingStyle.dashed(dashMeters: 6000, gapMeters: 4000)
+        let faint = UIColor(white: 0.78, alpha: 0.35)
+        return [100, 150, 200, 250].map {
+            RangeRing(radiusNM: $0, style: dashed, color: faint, lineWidth: 0.9)
+        }
+    }()
 }
