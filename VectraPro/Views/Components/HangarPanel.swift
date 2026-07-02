@@ -40,7 +40,7 @@ struct HangarPanel: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(maxHeight: 220)
             }
         }
         .padding(10)

@@ -44,15 +44,17 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var stripLines: [UUID: [MLNPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [MLNPolyline]] = [:]
 
-    private var aircraftAnnotation: ImageAnnotation?
-    private var labelAnnotation: ImageAnnotation?
+    // Per-aircraft annotations, keyed by aircraft id (multi-aircraft support).
+    private var aircraftAnnotations: [UUID: ImageAnnotation] = [:]
+    private var labelAnnotations: [UUID: ImageAnnotation] = [:]
+    private var labelTexts: [UUID: String] = [:]
+    private var trailAnnotations: [UUID: [ImageAnnotation]] = [:]
     private var fixAnnotations: [ImageAnnotation] = []
     private var zoneAnnotations: [MLNAnnotation] = []
     private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
-    private var lastLabelText = ""
-    private var trailAnnotations: [ImageAnnotation] = []
     private var tetherSource: MLNShapeSource?
-    private var isDraggingLabel = false
+    /// Which aircraft's data block is being dragged (nil = none).
+    private var draggingLabelID: UUID?
 
     private let trailIcons: [UIImage] = (0..<8).map {
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
@@ -313,69 +315,82 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     // MARK: Aircraft
 
     private func syncAircraft(_ mapView: MLNMapView) {
-        guard let aircraft = viewModel.aircraft.first else { return }
+        let current = viewModel.aircraft
+        let liveIDs = Set(current.map(\.id))
 
-        let symbol = aircraftAnnotation ?? {
-            let a = ImageAnnotation()
-            a.image = AircraftSymbol.image()
-            a.coordinate = aircraft.position
-            aircraftAnnotation = a
-            mapView.addAnnotation(a)
-            return a
-        }()
-        symbol.coordinate = aircraft.position
-        updateRotation(of: symbol, degrees: aircraft.headingDegrees, on: mapView)
+        // Remove annotations for aircraft that no longer exist.
+        for (id, symbol) in aircraftAnnotations where !liveIDs.contains(id) {
+            mapView.removeAnnotation(symbol)
+            aircraftAnnotations[id] = nil
+            if let label = labelAnnotations[id] { mapView.removeAnnotation(label); labelAnnotations[id] = nil }
+            labelTexts[id] = nil
+            if let trail = trailAnnotations[id] { mapView.removeAnnotations(trail); trailAnnotations[id] = nil }
+        }
 
-        let text = aircraft.dataBlock
-        let offset = Geo.offset(from: aircraft.position,
-                                distanceMeters: aircraft.labelDistanceMeters,
-                                bearingDegrees: aircraft.labelBearingDegrees)
-        if labelAnnotation == nil || lastLabelText != text {
-            let previous = labelAnnotation
-            let a = ImageAnnotation()
-            a.image = AircraftSymbol.label(text)
-            if let img = a.image {
-                // Anchor the block's bottom-left corner on the coordinate so it
-                // always sits up-and-right of the symbol (never overlapping it).
-                a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
+        for aircraft in current {
+            // Symbol.
+            let symbol = aircraftAnnotations[aircraft.id] ?? {
+                let a = ImageAnnotation()
+                a.image = AircraftSymbol.image()
+                a.coordinate = aircraft.position
+                aircraftAnnotations[aircraft.id] = a
+                mapView.addAnnotation(a)
+                return a
+            }()
+            symbol.coordinate = aircraft.position
+            updateRotation(of: symbol, degrees: aircraft.headingDegrees, on: mapView)
+
+            // Data block.
+            let text = aircraft.dataBlock
+            let offset = Geo.offset(from: aircraft.position,
+                                    distanceMeters: aircraft.labelDistanceMeters,
+                                    bearingDegrees: aircraft.labelBearingDegrees)
+            if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != text {
+                let previous = labelAnnotations[aircraft.id]
+                let a = ImageAnnotation()
+                a.image = AircraftSymbol.label(text)
+                if let img = a.image {
+                    a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
+                }
+                a.coordinate = draggingLabelID == aircraft.id ? (previous?.coordinate ?? offset) : offset
+                labelAnnotations[aircraft.id] = a
+                mapView.addAnnotation(a)
+                if let previous { mapView.removeAnnotation(previous) }
+                labelTexts[aircraft.id] = text
+            } else if draggingLabelID != aircraft.id {
+                labelAnnotations[aircraft.id]?.coordinate = offset
             }
-            a.coordinate = isDraggingLabel ? (previous?.coordinate ?? offset) : offset
-            labelAnnotation = a
-            mapView.addAnnotation(a)
-            if let previous { mapView.removeAnnotation(previous) }
-            lastLabelText = text
-        } else if !isDraggingLabel {
-            labelAnnotation?.coordinate = offset
+
+            syncTrail(aircraft.history, id: aircraft.id, on: mapView)
         }
 
-        syncTrail(aircraft.history, on: mapView)
-
-        if let label = labelAnnotation {
-            updateTether(from: aircraft.position, to: label.coordinate, on: mapView)
-        }
+        updateTethers(on: mapView)
     }
 
-    private func syncTrail(_ history: [CLLocationCoordinate2D], on mapView: MLNMapView) {
-        if !trailAnnotations.isEmpty {
-            mapView.removeAnnotations(trailAnnotations)
-            trailAnnotations = []
-        }
+    private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
+        if let old = trailAnnotations[id] { mapView.removeAnnotations(old) }
+        var annotations: [ImageAnnotation] = []
         for index in history.indices {
             let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
             let annotation = ImageAnnotation()
             annotation.image = trailIcons[step]
             annotation.coordinate = history[index]
-            trailAnnotations.append(annotation)
+            annotations.append(annotation)
             mapView.addAnnotation(annotation)
         }
+        trailAnnotations[id] = annotations
     }
 
-    private func updateTether(from start: CLLocationCoordinate2D,
-                              to end: CLLocationCoordinate2D,
-                              on mapView: MLNMapView) {
-        var coords = [start, end]
-        tetherSource?.shape = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
+    /// One tether line per aircraft, from its symbol to its data block.
+    private func updateTethers(on mapView: MLNMapView) {
+        var features: [MLNPolylineFeature] = []
+        for aircraft in viewModel.aircraft {
+            guard let label = labelAnnotations[aircraft.id] else { continue }
+            var coords = [aircraft.position, label.coordinate]
+            features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+        }
+        tetherSource?.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
     private func updateRotation(of annotation: ImageAnnotation, degrees: CGFloat, on mapView: MLNMapView) {
@@ -424,9 +439,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         switch gesture.state {
         case .began:
-            if labelContains(point, in: mapView) {
+            if let id = labelHit(point, in: mapView) {
                 panMode = .label
-                isDraggingLabel = true
+                draggingLabelID = id
             } else {
                 panMode = .map
                 lastPanTranslation = .zero
@@ -435,9 +450,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         case .changed:
             switch panMode {
             case .label:
-                guard let label = labelAnnotation, let aircraft = viewModel.aircraft.first else { return }
+                guard let id = draggingLabelID, let label = labelAnnotations[id] else { return }
                 label.coordinate = mapView.convert(point, toCoordinateFrom: mapView)
-                updateTether(from: aircraft.position, to: label.coordinate, on: mapView)
+                updateTethers(on: mapView)
 
             case .map:
                 let translation = gesture.translation(in: mapView)
@@ -454,12 +469,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             }
 
         case .ended, .cancelled, .failed:
-            if panMode == .label, let aircraft = viewModel.aircraft.first, let label = labelAnnotation {
+            if panMode == .label, let id = draggingLabelID,
+               let aircraft = viewModel.aircraft.first(where: { $0.id == id }),
+               let label = labelAnnotations[id] {
                 let bearing = Geo.bearing(from: aircraft.position, to: label.coordinate)
                 let distance = Geo.distanceMeters(from: aircraft.position, to: label.coordinate)
                 viewModel.setLabelOffset(for: aircraft.id, bearingDegrees: bearing, distanceMeters: distance)
             }
-            isDraggingLabel = false
+            draggingLabelID = nil
             panMode = .none
 
         default:
@@ -472,16 +489,20 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
-    private func labelContains(_ point: CGPoint, in mapView: MLNMapView) -> Bool {
-        guard let label = labelAnnotation, let image = label.image else { return false }
-        let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
-        // The view centre sits at anchor + centerOffset; rect is centred there.
-        let center = CGPoint(x: anchor.x + label.centerOffset.dx,
-                             y: anchor.y + label.centerOffset.dy)
-        let rect = CGRect(x: center.x - image.size.width / 2,
-                          y: center.y - image.size.height / 2,
-                          width: image.size.width, height: image.size.height)
-        return rect.insetBy(dx: -16, dy: -16).contains(point)
+    /// The aircraft id whose data block contains `point` (nil = none).
+    private func labelHit(_ point: CGPoint, in mapView: MLNMapView) -> UUID? {
+        for (id, label) in labelAnnotations {
+            guard let image = label.image else { continue }
+            let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
+            // The view centre sits at anchor + centerOffset; rect is centred there.
+            let center = CGPoint(x: anchor.x + label.centerOffset.dx,
+                                 y: anchor.y + label.centerOffset.dy)
+            let rect = CGRect(x: center.x - image.size.width / 2,
+                              y: center.y - image.size.height / 2,
+                              width: image.size.width, height: image.size.height)
+            if rect.insetBy(dx: -16, dy: -16).contains(point) { return id }
+        }
+        return nil
     }
 }
 

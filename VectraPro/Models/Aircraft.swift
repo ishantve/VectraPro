@@ -29,6 +29,8 @@ struct Aircraft: Identifiable {
     var assignedRunway: String? = nil
     /// Holding fix this aircraft is holding at (nil = not holding).
     var holdingName: String? = nil
+    /// ICAO type code of the aircraft (e.g. "AT72"), from the exercise.
+    var aircraftType: String? = nil
     /// Commanded heading the aircraft is turning toward (nil = none).
     var targetHeading: Double? = nil
     /// Forced turn direction toward the target (nil = take the shortest way).

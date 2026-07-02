@@ -38,6 +38,9 @@ struct ExerciseDetail: Decodable {
     let aircrafts: [AircraftType]
     let airlines: [Airline]
     let commands: Commands?
+    let isMultiMode: Bool?
+    let airspaceCapacity: Int?
+    let aircraftSpawningCount: Int?
     let fixes: [Fix]
     let zones: [Zone]
     let obstructions: [Obstruction]
@@ -147,6 +150,7 @@ struct ExerciseDetail: Decodable {
         case id, exerciseName, icaoCode, airportName, vorName
         case mapLocation, isRunwayEnabled, runwaysResponse, aircrafts, airlines, commands, fixes, zone
         case obstruction
+        case isMultiMode, airspaceCapacity, aircraftSpawningCount
         case frequencyOfDeparture, frequencyOfArrival, frequencyOfEnroute
     }
 
@@ -165,6 +169,9 @@ struct ExerciseDetail: Decodable {
         aircrafts       = (try? c.decodeIfPresent([AircraftType].self, forKey: .aircrafts)) ?? []
         airlines        = (try? c.decodeIfPresent([Airline].self, forKey: .airlines)) ?? []
         commands        = try? c.decodeIfPresent(Commands.self, forKey: .commands)
+        isMultiMode          = try? c.decodeIfPresent(Bool.self, forKey: .isMultiMode)
+        airspaceCapacity     = try? c.decodeIfPresent(Int.self, forKey: .airspaceCapacity)
+        aircraftSpawningCount = try? c.decodeIfPresent(Int.self, forKey: .aircraftSpawningCount)
         fixes           = (try? c.decodeIfPresent([Fix].self, forKey: .fixes)) ?? []
         zones           = (try? c.decodeIfPresent([Zone].self, forKey: .zone)) ?? []
         obstructions    = (try? c.decodeIfPresent([Obstruction].self, forKey: .obstruction)) ?? []

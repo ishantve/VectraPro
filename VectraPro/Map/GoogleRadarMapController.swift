@@ -34,14 +34,16 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var stripLines: [UUID: [GMSPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
 
-    private var aircraftMarker: GMSMarker?
+    // Per-aircraft markers, keyed by aircraft id (multi-aircraft support).
+    private var aircraftMarkers: [UUID: GMSMarker] = [:]
+    private var labelMarkers: [UUID: GMSMarker] = [:]
+    private var labelTexts: [UUID: String] = [:]
+    private var trailMarkers: [UUID: [GMSMarker]] = [:]
+    private var tethers: [UUID: GMSPolyline] = [:]
     private var fixMarkers: [GMSMarker] = []
     private var zoneOverlays: [GMSOverlay] = []
-    private var labelMarker: GMSMarker?
-    private var lastLabelText = ""
-    private var trailMarkers: [GMSMarker] = []
-    private var tether: GMSPolyline?
-    private var isDraggingLabel = false
+    /// Which aircraft's data block is being dragged (nil = none).
+    private var draggingLabelID: UUID?
 
     private let trailIcons: [UIImage] = (0..<8).map {
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
@@ -216,48 +218,61 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     // MARK: Aircraft
 
     private func syncAircraft() {
-        guard let aircraft = viewModel.aircraft.first else { return }
+        let current = viewModel.aircraft
+        let liveIDs = Set(current.map(\.id))
 
-        let marker = aircraftMarker ?? {
-            let m = GMSMarker(position: aircraft.position)
-            m.icon = AircraftSymbol.image()
-            m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
-            m.isFlat = true
-            m.isTappable = false
-            m.map = mapView
-            aircraftMarker = m
-            return m
-        }()
-        marker.position = aircraft.position
-        marker.rotation = aircraft.headingDegrees
-
-        let text = aircraft.dataBlock
-        let offset = Geo.offset(from: aircraft.position,
-                                distanceMeters: aircraft.labelDistanceMeters,
-                                bearingDegrees: aircraft.labelBearingDegrees)
-        let label = labelMarker ?? {
-            let m = GMSMarker(position: offset)
-            // Bottom-left corner on the point so the block sits up-and-right
-            // of the symbol (never overlapping it), zoom-independent.
-            m.groundAnchor = CGPoint(x: 0, y: 1)
-            m.isFlat = true
-            m.map = mapView
-            labelMarker = m
-            return m
-        }()
-        if text != lastLabelText {
-            label.icon = AircraftSymbol.label(text)
-            lastLabelText = text
+        // Remove markers for aircraft that no longer exist.
+        for (id, marker) in aircraftMarkers where !liveIDs.contains(id) {
+            marker.map = nil
+            aircraftMarkers[id] = nil
+            labelMarkers[id]?.map = nil; labelMarkers[id] = nil
+            labelTexts[id] = nil
+            trailMarkers[id]?.forEach { $0.map = nil }; trailMarkers[id] = nil
+            tethers[id]?.map = nil; tethers[id] = nil
         }
-        if !isDraggingLabel { label.position = offset }
 
-        syncTrail(aircraft.history)
-        updateTether(from: aircraft.position, to: label.position)
+        for aircraft in current {
+            // Symbol.
+            let marker = aircraftMarkers[aircraft.id] ?? {
+                let m = GMSMarker(position: aircraft.position)
+                m.icon = AircraftSymbol.image()
+                m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+                m.isFlat = true
+                m.isTappable = false
+                m.map = mapView
+                aircraftMarkers[aircraft.id] = m
+                return m
+            }()
+            marker.position = aircraft.position
+            marker.rotation = aircraft.headingDegrees
+
+            // Data block.
+            let text = aircraft.dataBlock
+            let offset = Geo.offset(from: aircraft.position,
+                                    distanceMeters: aircraft.labelDistanceMeters,
+                                    bearingDegrees: aircraft.labelBearingDegrees)
+            let label = labelMarkers[aircraft.id] ?? {
+                let m = GMSMarker(position: offset)
+                m.groundAnchor = CGPoint(x: 0, y: 1)   // bottom-left corner on the point
+                m.isFlat = true
+                m.map = mapView
+                labelMarkers[aircraft.id] = m
+                return m
+            }()
+            if labelTexts[aircraft.id] != text {
+                label.icon = AircraftSymbol.label(text)
+                labelTexts[aircraft.id] = text
+            }
+            if draggingLabelID != aircraft.id { label.position = offset }
+
+            syncTrail(aircraft.history, id: aircraft.id)
+            updateTether(for: aircraft.id, from: aircraft.position, to: label.position)
+        }
     }
 
-    private func syncTrail(_ history: [CLLocationCoordinate2D]) {
-        trailMarkers.forEach { $0.map = nil }
-        trailMarkers = []
+    private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
+        trailMarkers[id]?.forEach { $0.map = nil }
+        var markers: [GMSMarker] = []
         for index in history.indices {
             let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
@@ -266,22 +281,23 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
             marker.isTappable = false
             marker.map = mapView
-            trailMarkers.append(marker)
+            markers.append(marker)
         }
+        trailMarkers[id] = markers
     }
 
-    private func updateTether(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
+    private func updateTether(for id: UUID, from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
         let path = GMSMutablePath()
         path.add(start)
         path.add(end)
-        if let tether {
+        if let tether = tethers[id] {
             tether.path = path
         } else {
             let line = GMSPolyline(path: path)
             line.strokeColor = UIColor.white.withAlphaComponent(0.5)
             line.strokeWidth = 1.5
             line.map = mapView
-            tether = line
+            tethers[id] = line
         }
     }
 
@@ -299,8 +315,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let point = gesture.location(in: mapView)
         switch gesture.state {
         case .began:
-            if labelContains(point) {
-                panMode = .label; isDraggingLabel = true
+            if let id = labelHit(point) {
+                panMode = .label; draggingLabelID = id
             } else {
                 panMode = .map
                 // Capture the geographic-per-point scale ONCE here (zoom is fixed
@@ -317,13 +333,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         case .changed:
             switch panMode {
             case .label:
-                guard let label = labelMarker, let aircraft = viewModel.aircraft.first else { return }
+                guard let id = draggingLabelID, let label = labelMarkers[id],
+                      let aircraft = viewModel.aircraft.first(where: { $0.id == id }) else { return }
                 // Disable the GMSMarker move animation so the block tracks the
                 // finger with no lag.
                 CATransaction.begin()
                 CATransaction.setAnimationDuration(0)
                 label.position = mapView.projection.coordinate(for: point)
-                updateTether(from: aircraft.position, to: label.position)
+                updateTether(for: id, from: aircraft.position, to: label.position)
                 CATransaction.commit()
             case .map:
                 let t = gesture.translation(in: mapView)
@@ -342,12 +359,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 break
             }
         case .ended, .cancelled, .failed:
-            if panMode == .label, let aircraft = viewModel.aircraft.first, let label = labelMarker {
+            if panMode == .label, let id = draggingLabelID,
+               let aircraft = viewModel.aircraft.first(where: { $0.id == id }),
+               let label = labelMarkers[id] {
                 let bearing = Geo.bearing(from: aircraft.position, to: label.position)
                 let distance = Geo.distanceMeters(from: aircraft.position, to: label.position)
                 viewModel.setLabelOffset(for: aircraft.id, bearingDegrees: bearing, distanceMeters: distance)
             }
-            isDraggingLabel = false
+            draggingLabelID = nil
             panMode = .none
         default:
             break
@@ -359,14 +378,18 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
-    private func labelContains(_ point: CGPoint) -> Bool {
-        guard let label = labelMarker, let image = label.icon else { return false }
-        // Bottom-left corner anchored on the point (groundAnchor 0,1).
-        let anchor = mapView.projection.point(for: label.position)
-        let rect = CGRect(x: anchor.x,
-                          y: anchor.y - image.size.height,
-                          width: image.size.width, height: image.size.height)
-        return rect.insetBy(dx: -16, dy: -16).contains(point)
+    /// The aircraft id whose data block contains `point` (nil = none).
+    private func labelHit(_ point: CGPoint) -> UUID? {
+        for (id, label) in labelMarkers {
+            guard let image = label.icon else { continue }
+            // Bottom-left corner anchored on the point (groundAnchor 0,1).
+            let anchor = mapView.projection.point(for: label.position)
+            let rect = CGRect(x: anchor.x,
+                              y: anchor.y - image.size.height,
+                              width: image.size.width, height: image.size.height)
+            if rect.insetBy(dx: -16, dy: -16).contains(point) { return id }
+        }
+        return nil
     }
 
     private static let darkStyleJSON = """

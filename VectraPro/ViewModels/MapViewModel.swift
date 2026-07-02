@@ -52,8 +52,12 @@ final class MapViewModel: ObservableObject {
     /// Active spawners (one per category that has Custom/Random frequency).
     private var spawners: [(category: FlightCategory, mode: SpawnMode, countdown: Double)] = []
 
-    /// Max aircraft generated into the hangar lists per exercise (both types).
-    private let maxTraffic = 15
+    /// Multi-aircraft spawning (from the exercise).
+    private var isMultiMode = false
+    private var airspaceCapacity = 1
+    private var aircraftSpawningCount = 1
+    private var airlines: [ExerciseDetail.Airline] = []
+    private var aircraftTypes: [ExerciseDetail.AircraftType] = []
 
     /// Random-mode interval choices (seconds).
     private let randomIntervals: [Double] = [15, 20, 30, 45, 60, 90]
@@ -62,10 +66,25 @@ final class MapViewModel: ObservableObject {
     /// e.g. (15, 3) → [6,5,4]; (15, 2) → [8,7]; (15, 1) → [15].
     private func descendingSplit(total: Int, parts: Int) -> [Int] {
         guard parts > 0 else { return [] }
+        guard total > 0 else { return Array(repeating: 0, count: parts) }
+
+        // Descending-by-1 sequence centred to sum ≈ total, clamped ≥ 0.
         let a = Double(total + parts * (parts - 1) / 2) / Double(parts)
-        var values = (0..<parts).map { Int((a - Double($0)).rounded()) }
-        let diff = total - values.reduce(0, +)   // correct any rounding
-        if !values.isEmpty { values[values.count - 1] += diff }
+        var values = (0..<parts).map { max(0, Int((a - Double($0)).rounded())) }
+
+        // Fix the sum exactly, adjusting the highest-priority slots first.
+        var diff = total - values.reduce(0, +)
+        var i = 0
+        let safety = parts * (total + parts) + 1
+        while diff != 0, i < safety {
+            let idx = i % parts
+            if diff > 0 {
+                values[idx] += 1; diff -= 1
+            } else if values[idx] > 0 {
+                values[idx] -= 1; diff += 1
+            }
+            i += 1
+        }
         return values
     }
 
@@ -103,6 +122,32 @@ final class MapViewModel: ObservableObject {
         freqDeparture = detail.frequencyOfDeparture
         freqArrival = detail.frequencyOfArrival
         freqEnroute = detail.frequencyOfEnroute
+
+        // Multi-aircraft spawning config + identities (airlines / aircraft types).
+        isMultiMode = detail.isMultiMode ?? false
+        airspaceCapacity = detail.airspaceCapacity ?? 1
+        aircraftSpawningCount = detail.aircraftSpawningCount ?? 1
+        airlines = detail.airlines
+        aircraftTypes = detail.aircrafts
+
+        #if DEBUG
+        print("""
+        ========== EXERCISE DETAIL ==========
+        name: \(detail.exerciseName)   icao: \(detail.icaoCode ?? "—")   airport: \(detail.airportName ?? "—")
+        map: \(detail.mapLatitude ?? 0), \(detail.mapLongitude ?? 0)
+        isMultiMode: \(String(describing: detail.isMultiMode))
+        airspaceCapacity: \(String(describing: detail.airspaceCapacity))
+        aircraftSpawningCount: \(String(describing: detail.aircraftSpawningCount))
+        → initialSpawnCount: \(initialSpawnCount())
+        runways: \(detail.runways.count)   fixes: \(fixes.count)   zones: \(zones.count)   obstructions: \(obstructions.count)
+        airlines (\(airlines.count)): \(airlines.map { "\($0.icaoCode ?? "?")/\($0.callSign ?? "?")" })
+        aircrafts (\(aircraftTypes.count)): \(aircraftTypes.map { "\($0.icaoCode ?? "?")=\($0.model ?? "?") [\($0.icaoWTC ?? "?")]" })
+        freqDeparture: type=\(detail.frequencyOfDeparture?.type ?? "—") flights=\(String(describing: detail.frequencyOfDeparture?.departureFlights)) time=\(String(describing: detail.frequencyOfDeparture?.departureFlightsTimeValue))
+        freqArrival:   type=\(detail.frequencyOfArrival?.type ?? "—") flights=\(String(describing: detail.frequencyOfArrival?.arrivalFlights)) time=\(String(describing: detail.frequencyOfArrival?.arrivalFlightsTimeValue))
+        freqEnroute:   type=\(detail.frequencyOfEnroute?.type ?? "—") flights=\(String(describing: detail.frequencyOfEnroute?.enrouteFlights)) time=\(String(describing: detail.frequencyOfEnroute?.enrouteFlightsTimeValue))
+        =====================================
+        """)
+        #endif
 
         var built: [Runway] = []
         var enabled: Set<ApproachID> = []
@@ -291,9 +336,46 @@ final class MapViewModel: ObservableObject {
         enabledApproaches = exerciseApproaches ?? []
         radialManager.setEnabled(RadialManager.defaultRadials)
         pendingStart = nil
-        aircraft = [makeRandomAircraft()]
+        // Initial aircraft count toward the capacity and are distributed across
+        // the active categories with the same priority logic as the lists.
+        aircraft = initialCategories().map { makeRandomAircraft(category: $0) }
         resetTraffic()
         startSimulation()
+    }
+
+    /// How many aircraft to spawn on the radar at start.
+    ///  • single mode → 1
+    ///  • multi mode  → aircraftSpawningCount, capped at airspaceCapacity
+    private func initialSpawnCount() -> Int {
+        guard isMultiMode else { return 1 }
+        let capacity = max(airspaceCapacity, 0)
+        let requested = max(aircraftSpawningCount, 0)
+        return max(1, min(requested, capacity))
+    }
+
+    /// A category is active if its frequency type is Custom or Random.
+    private func isActiveType(_ type: String?) -> Bool {
+        let t = type?.lowercased()
+        return t == "custom" || t == "random"
+    }
+
+    /// Active categories in priority order (arrival → departure → enroute).
+    private func activeCategories() -> [FlightCategory] {
+        var result: [FlightCategory] = []
+        if isActiveType(freqArrival?.type)   { result.append(.arrival) }
+        if isActiveType(freqDeparture?.type) { result.append(.departure) }
+        if isActiveType(freqEnroute?.type)   { result.append(.enroute) }
+        return result
+    }
+
+    /// Categories for the initially-spawned aircraft, distributed across the
+    /// active categories by priority (falls back to arrival if none active).
+    private func initialCategories() -> [FlightCategory] {
+        let count = initialSpawnCount()
+        let cats = activeCategories()
+        guard !cats.isEmpty else { return Array(repeating: .arrival, count: count) }
+        let split = descendingSplit(total: count, parts: cats.count)
+        return zip(cats, split).flatMap { Array(repeating: $0.0, count: $0.1) }
     }
 
     /// Clear the hangar lists and rebuild the spawners from the exercise.
@@ -311,7 +393,7 @@ final class MapViewModel: ObservableObject {
         // Random categories share the total cap, distributed by priority. A
         // "none" (or missing) type spawns nothing, so its share goes to the rest.
         let randomCats = configs.filter { $0.type?.lowercased() == "random" }.map(\.category)
-        let quotas = descendingSplit(total: maxTraffic, parts: randomCats.count)
+        let quotas = descendingSplit(total: airspaceCapacity, parts: randomCats.count)
         let quotaForCategory = Dictionary(uniqueKeysWithValues: zip(randomCats, quotas))
 
         for config in configs {
@@ -440,7 +522,7 @@ final class MapViewModel: ObservableObject {
 
     /// Spawn an aircraft outside the 60 NM radius, heading roughly inbound so
     /// it crosses the scope.
-    private func makeRandomAircraft() -> Aircraft {
+    private func makeRandomAircraft(category: FlightCategory = .arrival) -> Aircraft {
         let spawnBearing = Double.random(in: 0..<360)
         let rangeNM = Double.random(in: 60..<70)
         let position = Geo.offset(
@@ -453,11 +535,23 @@ final class MapViewModel: ObservableObject {
         let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
         let heading = (inbound + Double.random(in: -40...40) + 360).truncatingRemainder(dividingBy: 360)
 
-        return Aircraft(
-            callsign: Self.randomCallsign(),
+        var aircraft = Aircraft(
+            callsign: makeCallsign(),
             position: position,
             headingDegrees: heading
         )
+        aircraft.category = category
+        aircraft.aircraftType = aircraftTypes.randomElement()?.icaoCode
+        return aircraft
+    }
+
+    /// Callsign from the exercise airlines (ICAO code + flight number), or a
+    /// built-in fallback when the exercise has none.
+    private func makeCallsign() -> String {
+        if let code = airlines.compactMap({ $0.icaoCode }).filter({ !$0.isEmpty }).randomElement() {
+            return code + String(Int.random(in: 100...999))
+        }
+        return Self.randomCallsign()
     }
 
     /// Advance every spawner; add a list aircraft when its countdown elapses.
@@ -466,8 +560,9 @@ final class MapViewModel: ObservableObject {
             spawners[i].countdown -= tickInterval
             guard spawners[i].countdown <= 0 else { continue }
 
-            // Global cap — at most `maxTraffic` aircraft, for both Custom & Random.
-            guard traffic.count < maxTraffic else {
+            // Global cap = airspaceCapacity, counting the initially-spawned
+            // aircraft too (map targets + hangar traffic).
+            guard listAircraft.count < airspaceCapacity else {
                 spawners[i].countdown = .infinity
                 continue
             }

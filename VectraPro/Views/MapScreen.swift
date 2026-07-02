@@ -15,6 +15,33 @@ struct MapScreen: View {
     @State private var isLandscape = false
     @State private var isWindowed = false
     @State private var activeLayers: Set<RadarLayer> = []
+    /// Whether the layer buttons row is shown (toggled by the globe icon).
+    @State private var showLayers = false
+    /// Which left-toolbar menu is open (nil = none). Only one at a time.
+    enum LeftMenu { case operations, comms, reference, display, insert, collab }
+    @State private var openLeftMenu: LeftMenu?
+    /// On/off state of each display-layer toggle.
+    @State private var displayToggles: [String: Bool] = [
+        "Radials": true, "Fixes": true, "Fixes Names": true, "NOTAM": true, "Zone": true
+    ]
+
+    /// Display-layer rows (icon, name), in order.
+    private let displayOptions: [(icon: String, name: String)] = [
+        ("cloud.fill", "Weather"),
+        ("scope", "Radials"),
+        ("scope", "Radials Names"),
+        ("triangle.fill", "Fixes"),
+        ("triangle.fill", "Fixes Names"),
+        ("exclamationmark.triangle.fill", "NOTAM"),
+        ("nosign", "Zone"),
+        ("smallcircle.filled.circle", "Holding"),
+        ("mountain.2.fill", "Obstacles"),
+        ("wind", "Wind"),
+        ("wind", "Wind Speed"),
+        ("cloud.fill", "Clouds"),
+        ("bolt.fill", "Lightening"),
+        ("cloud.bolt.rain.fill", "Thunderstorm")
+    ]
 
     /// Tint applied to the layer icons (keeps their detail via colorMultiply).
     private let layerTint: Color = .white
@@ -118,30 +145,55 @@ struct MapScreen: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
+                // Always-visible top icons; the globe toggles the layer buttons.
                 HStack(spacing: 12) {
                     windowToggleButton
-                    layerButtons
+                    topActionButton("flag.fill") { /* TODO */ }
+                    topActionButton("person.2.fill") { /* TODO */ }
+                    topActionButton("globe", isOn: showLayers) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                    }
                 }
-                // Holding + flight lists open here, right-aligned under the row.
-                if activeLayers.contains(.holdingPattern) {
-                    let holdings = viewModel.holdingFixes
-                    HoldingHangarPanel(
-                        tabs: holdings.map { $0.fixName ?? "—" },
-                        aircraftByHolding: holdings.map { fix in
-                            viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
-                        }
-                    )
-                } else if let category = activeFlightList {
-                    HangarPanel(title: category.title,
-                                aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+
+                if showLayers {
+                    layerButtons
+                    // Holding + flight lists open here, right-aligned under the row.
+                    if activeLayers.contains(.holdingPattern) {
+                        let holdings = viewModel.holdingFixes
+                        HoldingHangarPanel(
+                            tabs: holdings.map { $0.fixName ?? "—" },
+                            aircraftByHolding: holdings.map { fix in
+                                viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                            }
+                        )
+                    } else if let category = activeFlightList {
+                        HangarPanel(title: category.title,
+                                    aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+                    }
                 }
             }
             .padding(.trailing, 16)
             .padding(.top, 8)
         }
+        .overlay(alignment: .leading) {
+            leftToolbar.padding(.leading, 16)
+        }
+        // Left-tool menus: aligned with their button, capped + scrollable so they
+        // never run off-screen or under the bottom controls.
+        .overlay {
+            if anyLeftMenuOpen {
+                GeometryReader { geo in
+                    let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
+                    let menuTop = toolbarTop + activeMenuTopY
+                    let maxH = max(140, geo.size.height - menuTop - 100)  // keep clear of bottom controls
+                    activeMenuView(maxHeight: maxH)
+                        .offset(x: 68, y: menuTop)   // 16 pad + 48 button + 4 gap
+                }
+            }
+        }
         // Obstacle & Zone lists open directly below their own button, left-aligned.
         .overlay(alignment: .topTrailing) {
-            if let layer = buttonAnchoredLayer {
+            if showLayers, let layer = buttonAnchoredLayer {
                 listPanel(for: layer)
                     .offset(x: buttonAnchoredPanelX(layer), y: layerRowBottom)
             }
@@ -229,6 +281,225 @@ struct MapScreen: View {
         }
     }
 
+    /// Total height of the left toolbar (used to locate its centred position).
+    private let toolbarHeight: CGFloat = 354   // 4 tools(210) + 12 + label(20) + 12 + 2 instr(100)
+
+    private var anyLeftMenuOpen: Bool { openLeftMenu != nil }
+
+    /// Toggle a left-toolbar menu (closes any other that was open).
+    private func toggleLeftMenu(_ menu: LeftMenu) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            openLeftMenu = (openLeftMenu == menu) ? nil : menu
+        }
+    }
+
+    /// Top Y (within the toolbar) of the button that opened the active menu,
+    /// so the popup aligns with its icon. Metrics: button 45h, spacing 10,
+    /// group spacing 12, label 20h.
+    private var activeMenuTopY: CGFloat {
+        switch openLeftMenu {
+        case .operations: return 0                        // tower (1st tool)
+        case .comms:     return 1 * 55                    // radio (2nd tool)
+        case .reference: return 2 * 55                    // book (3rd tool)
+        case .display:   return 3 * 55                    // list (4th tool)
+        case .insert:    return 210 + 12 + 20 + 12        // add-layer (1st instructor)
+        case .collab:    return 210 + 12 + 20 + 12 + 55   // doc (2nd instructor)
+        case .none:      return 0
+        }
+    }
+
+    /// Left-side tool column: 4 tools + Instructor Mode (2). Clickable; actions TBD.
+    private var leftToolbar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 10) {
+                toolButton("building.2.fill", isOn: openLeftMenu == .operations) {
+                    toggleLeftMenu(.operations)                      // Operations
+                }
+                toolButton("antenna.radiowaves.left.and.right", isOn: openLeftMenu == .comms) {
+                    toggleLeftMenu(.comms)                           // Communications
+                }
+                toolButton("book.fill", isOn: openLeftMenu == .reference) {
+                    toggleLeftMenu(.reference)                       // Reference
+                }
+                toolButton("list.bullet.rectangle.portrait.fill", isOn: openLeftMenu == .display) {
+                    toggleLeftMenu(.display)                         // Display layers
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "flag.fill")
+                Text("Instructor Mode")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .fixedSize()
+            // Keep the column as wide as the buttons (48) with a fixed height so
+            // button positions are deterministic; let the label overflow right.
+            .frame(width: 48, height: 20, alignment: .leading)
+
+            VStack(spacing: 10) {
+                toolButton("rectangle.stack.badge.plus", isOn: openLeftMenu == .insert) {
+                    toggleLeftMenu(.insert)                          // Insert
+                }
+                toolButton("doc.text.fill", isOn: openLeftMenu == .collab) {
+                    toggleLeftMenu(.collab)                          // ATC Collaboration Hub
+                }
+            }
+        }
+    }
+
+    private func toolButton(_ systemName: String, isOn: Bool = false, action: @escaping () -> Void = {}) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 45)   // same as the top layer buttons
+                .background(isOn ? Color(red: 0.20, green: 0.45, blue: 0.95) : layerBG,
+                            in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(layerBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The currently-open left-tool menu, capped to `maxHeight` (scrolls if taller).
+    @ViewBuilder
+    private func activeMenuView(maxHeight: CGFloat) -> some View {
+        switch openLeftMenu {
+        case .operations:
+            menuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
+                collabRow("doc.text.fill", "Flight Data")
+                collabRow("airplane", "Aircraft Control")
+                collabRow("arrow.left.arrow.right", "Handoffs")
+                collabRow("square.grid.2x2.fill", "Sector Management")
+            }
+        case .comms:
+            menuCard(width: 230, maxHeight: maxHeight, title: "COMMUNICATIONS", rows: 3) {
+                collabRow("antenna.radiowaves.left.and.right", "Radio Operations")
+                collabRow("message.fill", "Message Center")
+                collabRow("mappin.and.ellipse", "Coordination")
+            }
+        case .reference:
+            menuCard(width: 230, maxHeight: maxHeight, title: "REFERENCE", rows: 3) {
+                collabRow("map.fill", "Maps & Charts")
+                collabRow("gearshape.2.fill", "Procedures")
+                collabRow("doc.text.magnifyingglass", "Quick Reference")
+            }
+        case .display:
+            menuCard(width: 250, maxHeight: maxHeight, title: nil, rows: displayOptions.count) {
+                ForEach(displayOptions, id: \.name) { option in
+                    displayRow(option.icon, option.name)
+                }
+            }
+        case .insert:
+            menuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 8) {
+                collabRow("cloud.fill", "Insert Weather")
+                collabRow("exclamationmark.triangle.fill", "Insert NOTAM")
+                collabRow("airplane", "Insert Rogue Plane")
+                collabRow("flame.fill", "Engine Fire")
+                collabRow("fanblades.fill", "Single Engine Failure")
+                collabRow("gearshape.2.fill", "Double Engine Failure")
+                collabRow("wrench.and.screwdriver.fill", "Hydraulic Failure")
+                collabRow("cross.case.fill", "Medical Emergency")
+            }
+        case .collab:
+            menuCard(width: 220, maxHeight: maxHeight, title: "ATC COLLABORATION HUB", rows: 4) {
+                collabRow("questionmark.circle", "Ask A Question")
+                collabRow("text.bubble", "Comment")
+                collabRow("airplane", "Issue TFR")
+                collabRow("list.bullet.rectangle", "Issue PREP")
+            }
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// A styled popup card sized to its rows, capped at `maxHeight` (scrolls if
+    /// taller). Height is computed from `rows` so it hugs content reliably.
+    private func menuCard<Content: View>(width: CGFloat, maxHeight: CGFloat,
+                                         title: String?, rows: Int,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        let rowHeight: CGFloat = 48
+        let titleHeight: CGFloat = title != nil ? 50 : 0
+        let estimated = 12 + titleHeight + CGFloat(rows) * rowHeight
+        let height = min(estimated, maxHeight)
+
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let title {
+                    Text(title)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                }
+                content()
+            }
+            .padding(.vertical, 6)
+        }
+        .frame(width: width, height: height)
+        .background(Color(red: 0.06, green: 0.10, blue: 0.18).opacity(0.97),
+                    in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color(red: 0.32, green: 0.56, blue: 0.95).opacity(0.7), lineWidth: 1.5))
+        .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+    }
+
+    private func displayRow(_ icon: String, _ name: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18))
+                .foregroundStyle(.white)
+                .frame(width: 26)
+            Text(name)
+                .font(.system(size: 16))
+                .foregroundStyle(.white)
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(
+                get: { displayToggles[name] ?? false },
+                set: { displayToggles[name] = $0 }
+            ))
+            .labelsHidden()
+            .tint(Color(red: 0.20, green: 0.55, blue: 0.98))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private func collabRow(_ systemName: String, _ title: String) -> some View {
+        Button {
+            // TODO: wire hub action
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: systemName)
+                    .font(.system(size: 18))
+                    .foregroundStyle(.white)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Top-right action icon (flag / people / globe). `isOn` highlights it.
+    private func topActionButton(_ systemName: String, isOn: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 45)
+                .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4)
+                    .stroke(isOn ? Color.green : layerBorder, lineWidth: isOn ? 2 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Open the radar in its own window, or merge it back into this screen.
     private var windowToggleButton: some View {
         Button {
@@ -263,8 +534,8 @@ struct MapScreen: View {
     private let rowTrailingPadding: CGFloat = 16
     private let rowTopPadding: CGFloat = 8
 
-    /// Y just below the button row — where the anchored panel starts.
-    private var layerRowBottom: CGFloat { rowTopPadding + 45 + 8 }
+    /// Y just below the layer button row (icon row + spacing + layer row + gap).
+    private var layerRowBottom: CGFloat { rowTopPadding + 45 + 10 + 45 + 8 }
 
     private func panelWidth(_ layer: RadarLayer) -> CGFloat {
         switch layer {
