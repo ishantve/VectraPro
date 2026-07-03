@@ -73,7 +73,7 @@ struct Aircraft: Identifiable {
     var labelBearingDegrees: Double = 45
     var labelDistanceMeters: Double = 2.0 * 1852   // 2 NM gap; block is corner-anchored up-right
 
-    static let defaultSpeedKnots = 1000.0
+    static let defaultSpeedKnots = 250.0
     static let defaultAltitudeFeet = 18_000.0   // FL180
 
     /// Flight level (altitude in hundreds of feet), e.g. 180.
