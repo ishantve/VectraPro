@@ -31,27 +31,13 @@ struct VectraProApp: App {
 struct RadarWindowScene: View {
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
 
-    /// Largest square edge we'll render the radar at.
-    private let maxSquare: CGFloat = 1920
-
     var body: some View {
-        GeometryReader { geo in
-            // Detect the available resolution (the window fills the external
-            // display once dragged over) and fit the biggest square that fits,
-            // capped at 1920×1920. The rest stays black.
-            let side = min(min(geo.size.width, geo.size.height), maxSquare)
-            ZStack {
-                Color.black
-                radarMap
-                    .frame(width: side, height: side)
-                    .clipped()
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-        .ignoresSafeArea()
-        .background(.black)
-        .onAppear { RadarPresentation.shared.isMapDetached = true }
-        .onDisappear { RadarPresentation.shared.isMapDetached = false }
+        radarMap
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .background(.black)
+            .onAppear { RadarPresentation.shared.isMapDetached = true }
+            .onDisappear { RadarPresentation.shared.isMapDetached = false }
     }
 
     @ViewBuilder

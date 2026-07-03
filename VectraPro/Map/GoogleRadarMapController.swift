@@ -49,6 +49,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var fixNameKey = ""
     private var radialNameMarkers: [GMSMarker] = []
     private var radialNameKey = ""
+    /// Body diamond outlines (cyan) and nose diamond outlines (magenta) for debug visualisation.
+    private var bodyDiamondLines: [UUID: GMSPolyline] = [:]
+    private var noseDiamondLines: [UUID: GMSPolyline] = [:]
+    /// Separation circles — always visible, one per aircraft. Color reflects conflict state.
+    private var separationCircles: [UUID: GMSCircle] = [:]
+    /// Orange rings — aircraft approaching a zone boundary.
+    private var zoneColliderCircles: [UUID: GMSCircle] = [:]
     private var zoneOverlays: [GMSOverlay] = []
     private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -116,6 +123,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncZones()
         syncFixes()
         syncAircraft()
+        syncColliders()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -233,7 +241,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private func applyZoomLimit() {
         guard !didLimitZoom, mapView.bounds.width > 0, mapView.bounds.height > 0 else { return }
-        let radius = 70 * 1852.0
+        let radius = 65 * 1852.0
         let center = viewModel.center
         let north = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 0)
         let south = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 180)
@@ -304,6 +312,93 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
     }
 
+    // MARK: Colliders
+
+    /// One GMSCircle per aircraft, always visible. Stroke color reflects conflict level + blink state.
+    /// Zone proximity circles (orange) are maintained separately.
+    private func syncColliders() {
+        let liveIDs = Set(viewModel.aircraft.map(\.id))
+        let blink   = viewModel.blinkState
+
+        // — Body & nose diamonds (debug visualisation) —
+        for id in Array(bodyDiamondLines.keys) where !liveIDs.contains(id) {
+            bodyDiamondLines[id]?.map = nil; bodyDiamondLines[id] = nil
+            noseDiamondLines[id]?.map = nil; noseDiamondLines[id] = nil
+        }
+        for ac in viewModel.aircraft {
+            let bodyPath = gmsDiamondPath(center: ac.position,
+                                          forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
+                                          headingDeg: ac.headingDegrees)
+            let noseCenter = Geo.offset(from: ac.position,
+                                        distanceMeters: ac.noseOffsetNM * 1852,
+                                        bearingDegrees: ac.headingDegrees)
+            let nosePath = gmsDiamondPath(center: noseCenter,
+                                          forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
+                                          headingDeg: ac.headingDegrees)
+            if let bd = bodyDiamondLines[ac.id] { bd.path = bodyPath }
+            else {
+                let l = GMSPolyline(path: bodyPath)
+                l.strokeColor = UIColor.cyan.withAlphaComponent(0.9)
+                l.strokeWidth = 1.5; l.map = mapView
+                bodyDiamondLines[ac.id] = l
+            }
+            if let nd = noseDiamondLines[ac.id] { nd.path = nosePath }
+            else {
+                let l = GMSPolyline(path: nosePath)
+                l.strokeColor = UIColor.magenta.withAlphaComponent(0.9)
+                l.strokeWidth = 1.5; l.map = mapView
+                noseDiamondLines[ac.id] = l
+            }
+        }
+
+        // — Separation circles (always visible, colour varies) —
+        for id in Array(separationCircles.keys) where !liveIDs.contains(id) {
+            separationCircles[id]?.map = nil; separationCircles[id] = nil
+        }
+        for ac in viewModel.aircraft {
+            let r        = ac.colliderRadiusNM * 1852.0
+            let isRed    = viewModel.redConflictIDs.contains(ac.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
+            let stroke: UIColor = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.9)
+                                : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.9)
+                                :                       UIColor.white.withAlphaComponent(0.35)
+            let fill: UIColor   = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.06)
+                                : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.06)
+                                :                       .clear
+            if let c = separationCircles[ac.id] {
+                c.position    = ac.position
+                c.radius      = r
+                c.strokeColor = stroke
+                c.fillColor   = fill
+            } else {
+                let c = GMSCircle(position: ac.position, radius: r)
+                c.strokeColor = stroke
+                c.strokeWidth = 1.5
+                c.fillColor   = fill
+                c.map = mapView
+                separationCircles[ac.id] = c
+            }
+        }
+
+        // — Zone proximity (orange) —
+        for id in Array(zoneColliderCircles.keys)
+            where !viewModel.zoneConflictIDs.contains(id) || !liveIDs.contains(id) {
+            zoneColliderCircles[id]?.map = nil; zoneColliderCircles[id] = nil
+        }
+        for ac in viewModel.aircraft where viewModel.zoneConflictIDs.contains(ac.id) {
+            let r = ac.colliderRadiusNM * 1852.0
+            if let c = zoneColliderCircles[ac.id] { c.position = ac.position; c.radius = r }
+            else {
+                let c = GMSCircle(position: ac.position, radius: r)
+                c.strokeColor = UIColor.orange.withAlphaComponent(0.9)
+                c.strokeWidth = 1.8
+                c.fillColor   = UIColor.orange.withAlphaComponent(0.08)
+                c.map = mapView
+                zoneColliderCircles[ac.id] = c
+            }
+        }
+    }
+
     // MARK: Aircraft
 
     private func syncAircraft() {
@@ -337,6 +432,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
             // Data block.
             let text = aircraft.dataBlock
+            let isRed    = viewModel.redConflictIDs.contains(aircraft.id)
+                        || viewModel.zoneConflictIDs.contains(aircraft.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
+            let blink    = viewModel.blinkState
+            let conflictColor: UIColor? = blink ? (isRed ? .systemRed : isYellow ? .systemYellow : nil) : nil
+            let labelKey = conflictColor != nil ? "\(text)-\(isRed ? "red" : "yellow")" : text
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
                                     bearingDegrees: aircraft.labelBearingDegrees)
@@ -348,9 +449,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 labelMarkers[aircraft.id] = m
                 return m
             }()
-            if labelTexts[aircraft.id] != text {
-                label.icon = AircraftSymbol.label(text)
-                labelTexts[aircraft.id] = text
+            if labelTexts[aircraft.id] != labelKey {
+                label.icon = AircraftSymbol.label(text, conflictColor: conflictColor)
+                labelTexts[aircraft.id] = labelKey
             }
             if draggingLabelID != aircraft.id { label.position = offset }
 
@@ -479,6 +580,23 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             if rect.insetBy(dx: -16, dy: -16).contains(point) { return id }
         }
         return nil
+    }
+
+    private func gmsDiamondPath(center: CLLocationCoordinate2D,
+                                 forwardNM: Double, sideNM: Double,
+                                 headingDeg: Double) -> GMSMutablePath {
+        let bearings: [(Double, Double)] = [
+            (forwardNM * 1852, headingDeg),
+            (sideNM    * 1852, headingDeg + 90),
+            (forwardNM * 1852, headingDeg + 180),
+            (sideNM    * 1852, headingDeg + 270),
+        ]
+        let path = GMSMutablePath()
+        for (dist, bearing) in bearings {
+            path.add(Geo.offset(from: center, distanceMeters: dist, bearingDegrees: bearing))
+        }
+        path.add(Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg))
+        return path
     }
 
     private static let darkStyleJSON = """

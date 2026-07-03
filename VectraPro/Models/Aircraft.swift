@@ -48,6 +48,19 @@ struct Aircraft: Identifiable {
     var minAltitudeFeet: Double? = nil
     var maxAltitudeFeet: Double? = nil
 
+    /// Horizontal separation ring radius (NM).
+    /// Conflict is flagged when another aircraft enters this zone at a similar altitude.
+    var colliderRadiusNM: Double = 2.5
+    /// Body diamond — vertices sit on the outer edge of the aircraft body diamond.
+    /// half=5.5 pt on a 100pt canvas at zoom 8.8 / 65 NM view ≈ 0.6 NM per half-step.
+    var bodyForwardNM: Double = 0.6
+    var bodySideNM:    Double = 0.6
+    /// Nose collider — thin rectangle from body-diamond front to leader-line tip.
+    /// Body front ≈ 0.6 NM, leader tip ≈ 1.85 NM → centre 1.22 NM, half-length 0.62 NM.
+    var noseOffsetNM:  Double = 1.22
+    var noseForwardNM: Double = 0.62
+    var noseSideNM:    Double = 0.07
+
     /// Recent past positions (oldest first) used to draw the history trail.
     var history: [CLLocationCoordinate2D] = []
 
@@ -56,7 +69,7 @@ struct Aircraft: Identifiable {
     var labelBearingDegrees: Double = 45
     var labelDistanceMeters: Double = 2.0 * 1852   // 2 NM gap; block is corner-anchored up-right
 
-    static let defaultSpeedKnots = 250.0
+    static let defaultSpeedKnots = 1000.0
     static let defaultAltitudeFeet = 18_000.0   // FL180
 
     /// Flight level (altitude in hundreds of feet), e.g. 180.

@@ -24,10 +24,10 @@ enum AircraftSymbol {
             color.setStroke()
             color.setFill()
 
-            let cx = side / 2          // symbol sits at the centre = aircraft position
+            let cx = side / 2
             let cy = side / 2
             let half: CGFloat = 5.5
-            let leaderLength: CGFloat = 40
+            let leaderLength: CGFloat = 20
 
             // Leader (velocity vector) — forward from the body.
             let leader = UIBezierPath()
@@ -57,7 +57,7 @@ enum AircraftSymbol {
             // Tail — short line behind the body.
             let tail = UIBezierPath()
             tail.move(to: CGPoint(x: cx, y: cy + half))
-            tail.addLine(to: CGPoint(x: cx, y: cy + half + 12))
+            tail.addLine(to: CGPoint(x: cx, y: cy + half + 8))
             tail.lineWidth = 1.5
             tail.stroke()
         }
@@ -77,12 +77,13 @@ enum AircraftSymbol {
     }
 
     /// The data-block text image (left-padded so it sits beside the symbol).
-    static func label(_ text: String) -> UIImage {
+    /// Pass a `conflictColor` (`.systemRed`, `.systemYellow`) to tint the text during a blink.
+    static func label(_ text: String, conflictColor: UIColor? = nil) -> UIImage {
         let label = UILabel()
         label.numberOfLines = 0
         label.text = text
         label.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
-        label.textColor = color
+        label.textColor = conflictColor ?? color
         label.sizeToFit()
 
         let leftPad: CGFloat = 8
