@@ -30,6 +30,7 @@ struct MapScreen: View {
         ("exclamationmark.triangle.fill", "NOTAM"),
         ("nosign", "Zone"),
         ("smallcircle.filled.circle", "Holding"),
+        ("point.3.connected.trianglepath.dotted", "Trail"),
         ("mountain.2.fill", "Obstacles"),
         ("wind", "Wind"),
         ("wind", "Wind Speed"),
@@ -239,7 +240,7 @@ struct MapScreen: View {
                 vm?.handleVoiceCommand(transcript)
             }
         }
-        .onDisappear { viewModel.stopSimulation() }
+        .onDisappear { viewModel.clearOnExit() }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
@@ -398,7 +399,13 @@ struct MapScreen: View {
                 }
             }
         case .insert:
-            menuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 8) {
+            menuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 9) {
+                insertToggleRow("ruler", "Distance Measurement",
+                                isOn: viewModel.isDistanceMeasuring) {
+                    viewModel.toggleDistanceMeasurement()
+                    if viewModel.isDistanceMeasuring { openLeftMenu = nil }
+                }
+                Divider().overlay(.white.opacity(0.12))
                 collabRow("cloud.fill", "Insert Weather")
                 Divider().overlay(.white.opacity(0.12))
                 collabRow("exclamationmark.triangle.fill", "Insert NOTAM")
@@ -483,6 +490,29 @@ struct MapScreen: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    private func insertToggleRow(_ systemName: String, _ title: String,
+                                  isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: systemName)
+                    .font(.system(size: 18))
+                    .foregroundStyle(isOn ? Color.orange : .white)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundStyle(isOn ? Color.orange : .white)
+                Spacer(minLength: 0)
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isOn ? Color.orange : .white.opacity(0.4))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func collabRow(_ systemName: String, _ title: String) -> some View {

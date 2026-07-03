@@ -18,7 +18,8 @@ final class MapViewModel: ObservableObject {
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
     /// Map-layer visibility (driven by the "Map Layers" menu toggles).
     @Published var layers: [String: Bool] = [
-        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true
+        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true,
+        "Trail": true
     ]
     func layerOn(_ name: String) -> Bool { layers[name] ?? false }
 
@@ -235,8 +236,57 @@ final class MapViewModel: ObservableObject {
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
     private var tickCount = 0
-    private let historySampleTicks = 3      // sample a trail dot every N ticks
-    private let maxHistoryPoints = 8
+    private let historySampleTicks = 3      // sample a trail point every N ticks
+    private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
+
+    private let physics   = AircraftPhysics.shared
+    private let collision = AircraftCollisionDetector.shared
+    private let spawner   = AircraftSpawner.shared
+
+    /// Context bundle passed to the simulator for all spawn calls.
+    private var spawnContext: SpawnContext {
+        SpawnContext(center: center, zoneShapes: zoneShapes(), fixes: fixes,
+                     airlines: airlines, aircraftTypes: aircraftTypes, runways: runways,
+                     historySampleTicks: historySampleTicks, tickInterval: tickInterval)
+    }
+
+    // MARK: - Distance measurement
+
+    enum MeasurementAnchor {
+        case fixed(CLLocationCoordinate2D)
+        case aircraft(UUID)
+    }
+
+    @Published private(set) var isDistanceMeasuring = false
+    private var measurementAnchorA: MeasurementAnchor?
+    private var measurementAnchorB: MeasurementAnchor?
+
+    var measurementPositionA: CLLocationCoordinate2D? { measurementAnchorA.flatMap { resolved($0) } }
+    var measurementPositionB: CLLocationCoordinate2D? { measurementAnchorB.flatMap { resolved($0) } }
+
+    private func resolved(_ anchor: MeasurementAnchor) -> CLLocationCoordinate2D? {
+        switch anchor {
+        case .fixed(let c):    return c
+        case .aircraft(let id): return aircraft.first { $0.id == id }?.position
+        }
+    }
+
+    func toggleDistanceMeasurement() {
+        isDistanceMeasuring.toggle()
+        if !isDistanceMeasuring { measurementAnchorA = nil; measurementAnchorB = nil }
+    }
+
+    func addMeasurementAnchor(_ anchor: MeasurementAnchor) {
+        if measurementAnchorA == nil {
+            measurementAnchorA = anchor
+        } else if measurementAnchorB == nil {
+            measurementAnchorB = anchor
+        } else {
+            measurementAnchorA = nil      // 3rd click → discard both, restart cycle
+            measurementAnchorB = nil
+        }
+        objectWillChange.send()
+    }
 
     // MARK: - Drawing
 
@@ -251,6 +301,11 @@ final class MapViewModel: ObservableObject {
     @Published private(set) var fixConflictIDs: Set<UUID> = []
     /// Alternates true/false every simulation tick — drives data-block blink for zone conflicts.
     @Published private(set) var blinkState: Bool = false
+
+    /// The aircraft the controller has selected — keyboard commands apply to this one.
+    @Published private(set) var selectedAircraftID: UUID? = nil
+
+    func selectAircraft(_ id: UUID?) { selectedAircraftID = id }
 
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
@@ -290,7 +345,7 @@ final class MapViewModel: ObservableObject {
     }
 
     init() {
-        aircraft = [makeRandomAircraft()]
+        aircraft = [spawner.makeRandomAircraft(context: spawnContext)]
     }
 
     // MARK: - Voice commands
@@ -300,57 +355,16 @@ final class MapViewModel: ObservableObject {
         commandController.process(transcript)
     }
 
-    /// Apply parsed commands to the (currently single) aircraft.
+    /// Apply parsed commands to the selected aircraft.
+    /// Routes all audio feedback through CommandFeedbackManager.
     func apply(_ commands: [AircraftCommand]) {
-        guard !aircraft.isEmpty else { return }
-        for command in commands {
-            switch command {
-            case .heading(let heading):
-                aircraft[0].turnDirection = nil           // shortest way
-                aircraft[0].targetHeading = heading
-            case .headingTurn(let heading, let direction):
-                aircraft[0].turnDirection = direction      // forced left / right
-                aircraft[0].targetHeading = heading
-            case .relativeTurn(let degrees, let direction):
-                let current = aircraft[0].headingDegrees
-                let target = direction == .left ? current - degrees : current + degrees
-                aircraft[0].turnDirection = direction
-                aircraft[0].targetHeading = normalizeHeading(target)
-            case .presentHeading:
-                aircraft[0].turnDirection = nil
-                aircraft[0].targetHeading = nil            // stop turning, hold current
-            case .flightLevel(let flightLevel):
-                // Climb / descend & maintain — gradual via targetAltitude.
-                aircraft[0].minAltitudeFeet = nil
-                aircraft[0].maxAltitudeFeet = nil
-                aircraft[0].targetAltitudeFeet = Double(flightLevel) * 100
-            case .altitudeBlock(let low, let high):
-                // Maintain block — set floor/ceiling; move into range if outside.
-                let lo = Double(min(low, high)) * 100
-                let hi = Double(max(low, high)) * 100
-                aircraft[0].minAltitudeFeet = lo
-                aircraft[0].maxAltitudeFeet = hi
-                let alt = aircraft[0].altitudeFeet
-                if alt < lo { aircraft[0].targetAltitudeFeet = lo }
-                else if alt > hi { aircraft[0].targetAltitudeFeet = hi }
-                else { aircraft[0].targetAltitudeFeet = nil }
-            case .speed(let knots):
-                // Maintain an exact speed — clears any earlier floor/ceiling.
-                aircraft[0].minSpeedKnots = nil
-                aircraft[0].maxSpeedKnots = nil
-                aircraft[0].targetSpeedKnots = knots
-            case .minSpeed(let knots):
-                // "Maintain xxx or greater" — set a floor; speed up if below it.
-                aircraft[0].maxSpeedKnots = nil
-                aircraft[0].minSpeedKnots = knots
-                if aircraft[0].speedKnots < knots { aircraft[0].targetSpeedKnots = knots }
-            case .maxSpeed(let knots):
-                // "Do not exceed xxx" — set a ceiling; slow down if above it.
-                aircraft[0].minSpeedKnots = nil
-                aircraft[0].maxSpeedKnots = knots
-                if aircraft[0].speedKnots > knots { aircraft[0].targetSpeedKnots = knots }
-            }
+        guard let id = selectedAircraftID,
+              let i = aircraft.firstIndex(where: { $0.id == id }) else {
+            CommandFeedbackManager.shared.aircraftNotFound()
+            return
         }
+        physics.apply(commands, to: &aircraft[i])
+        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
     }
 
     deinit {
@@ -373,6 +387,42 @@ final class MapViewModel: ObservableObject {
         simulationTimer = nil
     }
 
+    /// Wipes all live state when leaving the radar screen so there is no stale
+    /// flash if the user re-enters. applyExercise() will be called again before
+    /// onAppear fires, so exercise config (fixes, zones, etc.) is safe to clear.
+    func clearOnExit() {
+        stopSimulation()
+        tickCount = 0
+        aircraft = []
+        traffic  = []
+        spawners = []
+        selectedAircraftID   = nil
+        yellowConflictIDs    = []
+        redConflictIDs       = []
+        zoneConflictIDs      = []
+        fixConflictIDs       = []
+        blinkState           = false
+        isDrawing            = false
+        pendingStart         = nil
+        isDistanceMeasuring  = false
+        measurementAnchorA   = nil
+        measurementAnchorB   = nil
+        // Clear exercise config — applyExercise() will repopulate before next reset().
+        exerciseRunways      = nil
+        exerciseApproaches   = nil
+        fixes                = []
+        zones                = []
+        obstructions         = []
+        airlines             = []
+        aircraftTypes        = []
+        freqDeparture        = nil
+        freqArrival          = nil
+        freqEnroute          = nil
+        isMultiMode          = false
+        airspaceCapacity     = 1
+        aircraftSpawningCount = 1
+    }
+
     /// Full fresh start — clears radar state and re-spawns. Called each time the
     /// screen opens so reopening renders new.
     func reset() {
@@ -385,7 +435,7 @@ final class MapViewModel: ObservableObject {
         pendingStart = nil
         // Initial aircraft count toward the capacity and are distributed across
         // the active categories with the same priority logic as the lists.
-        aircraft = initialCategories().map { makeRandomAircraft(category: $0) }
+        aircraft = initialCategories().map { spawner.makeRandomAircraft(context: spawnContext, category: $0) }
         resetTraffic()
         startSimulation()
     }
@@ -460,486 +510,47 @@ final class MapViewModel: ObservableObject {
         }
     }
 
-    /// Advance every aircraft along its heading by the distance covered at its
-    /// speed during one tick. distance = speed × time.
     private func tick() {
         tickCount += 1
-
-        // Spawn traffic into the hangar lists per the exercise frequency.
         advanceSpawners()
 
         for index in aircraft.indices {
-            // Gradual, speed-dependent turn toward any commanded heading.
-            turnTowardTarget(&aircraft[index], dt: tickInterval)
-
-            // Gradual acceleration / deceleration toward any commanded speed.
-            adjustSpeed(&aircraft[index], dt: tickInterval)
-
-            // Gradual climb / descent toward any commanded altitude.
-            adjustAltitude(&aircraft[index], dt: tickInterval)
-
-            // Sample a history point for the trail.
+            physics.stepPhysics(&aircraft[index], dt: tickInterval)
             if tickCount % historySampleTicks == 0 {
                 aircraft[index].history.append(aircraft[index].position)
                 if aircraft[index].history.count > maxHistoryPoints {
                     aircraft[index].history.removeFirst()
                 }
             }
-
-            let metersPerSecond = aircraft[index].speedKnots * Distance.metersPerNauticalMile / 3600
-            let distance = metersPerSecond * tickInterval
-            aircraft[index].position = Geo.offset(
-                from: aircraft[index].position,
-                distanceMeters: distance,
-                bearingDegrees: aircraft[index].headingDegrees
-            )
-        }
-        detectConflicts()
-        detectZoneConflicts()
-        detectFixConflicts()
-        blinkState.toggle()
-    }
-
-    /// Checks every aircraft pair for separation loss and physical collisions.
-    /// Yellow = separation circles touching (< 5 NM).
-    /// Red    = critical separation (< 3 NM).
-    /// Destroy = body diamond or nose diamond overlap → both aircraft removed.
-    private func detectConflicts() {
-        var yellows  = Set<UUID>()
-        var reds     = Set<UUID>()
-        var bodyHits = Set<UUID>()
-
-        for i in 0..<aircraft.count {
-            for j in (i + 1)..<aircraft.count {
-                let a = aircraft[i], b = aircraft[j]
-
-                // Use a's position as flat-Earth origin for both.
-                let aXY = (x: 0.0, y: 0.0)
-                let bXY = flatXY(origin: a.position, target: b.position)
-                let aH  = a.headingDegrees * .pi / 180
-                let bH  = b.headingDegrees * .pi / 180
-
-                // Nose centres in the same flat space.
-                let nA = (x: aXY.x + a.noseOffsetNM * 1852 * sin(aH),
-                          y: aXY.y + a.noseOffsetNM * 1852 * cos(aH))
-                let nB = (x: bXY.x + b.noseOffsetNM * 1852 * sin(bH),
-                          y: bXY.y + b.noseOffsetNM * 1852 * cos(bH))
-
-                // Body–body (diamond), nose–body / body–nose (rect vs diamond), nose–nose (rect).
-                let hit = diamondsOverlap(cx1: aXY.x, cy1: aXY.y, f1: a.bodyForwardNM * 1852, s1: a.bodySideNM * 1852, h1: aH,
-                                          cx2: bXY.x, cy2: bXY.y, f2: b.bodyForwardNM * 1852, s2: b.bodySideNM * 1852, h2: bH)
-                       || rectDiamondOverlap(rx: nA.x, ry: nA.y, rf: a.noseForwardNM * 1852, rs: a.noseSideNM * 1852, rh: aH,
-                                             dx: bXY.x, dy: bXY.y, df: b.bodyForwardNM * 1852, ds: b.bodySideNM * 1852, dh: bH)
-                       || rectDiamondOverlap(rx: nB.x, ry: nB.y, rf: b.noseForwardNM * 1852, rs: b.noseSideNM * 1852, rh: bH,
-                                             dx: aXY.x, dy: aXY.y, df: a.bodyForwardNM * 1852, ds: a.bodySideNM * 1852, dh: aH)
-                       || rectsOverlap(cx1: nA.x, cy1: nA.y, f1: a.noseForwardNM * 1852, s1: a.noseSideNM * 1852, h1: aH,
-                                       cx2: nB.x, cy2: nB.y, f2: b.noseForwardNM * 1852, s2: b.noseSideNM * 1852, h2: bH)
-                if hit {
-                    bodyHits.insert(a.id); bodyHits.insert(b.id)
-                    continue
-                }
-
-                let hDistNM = hypot(bXY.x, bXY.y) / 1852.0
-                let vDistFt = abs(a.altitudeFeet - b.altitudeFeet)
-                guard vDistFt < 1000 else { continue }
-                if hDistNM < (a.colliderRadiusNM + b.colliderRadiusNM) {
-                    yellows.insert(a.id); yellows.insert(b.id)
-                }
-                if hDistNM < 3.0 {
-                    reds.insert(a.id); reds.insert(b.id)
-                }
-            }
         }
 
-        if !bodyHits.isEmpty {
-            aircraft.removeAll { bodyHits.contains($0.id) }
-            traffic.removeAll  { bodyHits.contains($0.id) }
-            yellows.subtract(bodyHits)
-            reds.subtract(bodyHits)
+        // Aircraft-to-aircraft collisions.
+        let acResult = collision.detectConflicts(in: aircraft)
+        if !acResult.destroyed.isEmpty {
+            if let sel = selectedAircraftID, acResult.destroyed.contains(sel) { selectedAircraftID = nil }
+            aircraft.removeAll { acResult.destroyed.contains($0.id) }
+            traffic.removeAll  { acResult.destroyed.contains($0.id) }
         }
-
+        let yellows = acResult.yellows.subtracting(acResult.destroyed)
+        let reds    = acResult.reds.subtracting(acResult.destroyed)
         if yellows != yellowConflictIDs { yellowConflictIDs = yellows }
         if reds    != redConflictIDs    { redConflictIDs    = reds    }
-    }
 
-    // MARK: - Diamond collision helpers
-
-    /// True if point (px, py) lies inside a diamond centred at (cx, cy).
-    /// The diamond has half-extents `forwardM` (along heading) and `sideM` (perpendicular).
-    private func pointInDiamond(px: Double, py: Double,
-                                 cx: Double, cy: Double,
-                                 forwardM: Double, sideM: Double,
-                                 headingRad: Double) -> Bool {
-        let dx = px - cx, dy = py - cy
-        let fwd   = dx * sin(headingRad) + dy * cos(headingRad)
-        let right = dx * cos(headingRad) - dy * sin(headingRad)
-        return abs(fwd) / forwardM + abs(right) / sideM <= 1.0
-    }
-
-    /// The 4 vertices of a diamond in flat-Earth metres.
-    private func diamondVerts(cx: Double, cy: Double,
-                               forwardM: Double, sideM: Double,
-                               headingRad: Double) -> [(Double, Double)] {
-        let sinH = sin(headingRad), cosH = cos(headingRad)
-        return [
-            (cx + forwardM * sinH,  cy + forwardM * cosH),   // front
-            (cx + sideM   * cosH,   cy - sideM   * sinH),   // right
-            (cx - forwardM * sinH,  cy - forwardM * cosH),   // back
-            (cx - sideM   * cosH,   cy + sideM   * sinH),   // left
-        ]
-    }
-
-    /// True if two diamonds overlap (centre-in-other + vertex-in-other tests).
-    private func diamondsOverlap(cx1: Double, cy1: Double, f1: Double, s1: Double, h1: Double,
-                                  cx2: Double, cy2: Double, f2: Double, s2: Double, h2: Double) -> Bool {
-        // Centre of each inside the other.
-        if pointInDiamond(px: cx2, py: cy2, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
-        if pointInDiamond(px: cx1, py: cy1, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
-        // Vertices of each inside the other.
-        for (vx, vy) in diamondVerts(cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) {
-            if pointInDiamond(px: vx, py: vy, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
+        // Zone boundary collisions.
+        let zoneResult = collision.detectZoneConflicts(aircraft: aircraft, zoneShapes: zoneShapes())
+        if !zoneResult.destroyed.isEmpty {
+            if let sel = selectedAircraftID, zoneResult.destroyed.contains(sel) { selectedAircraftID = nil }
+            aircraft.removeAll { zoneResult.destroyed.contains($0.id) }
+            traffic.removeAll  { zoneResult.destroyed.contains($0.id) }
         }
-        for (vx, vy) in diamondVerts(cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) {
-            if pointInDiamond(px: vx, py: vy, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
-        }
-        return false
-    }
+        let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
+        if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
 
-    /// True if point lies inside an OBB rectangle aligned to `headingRad`.
-    private func pointInRect(px: Double, py: Double,
-                              cx: Double, cy: Double,
-                              forwardM: Double, sideM: Double,
-                              headingRad: Double) -> Bool {
-        let dx = px - cx, dy = py - cy
-        let fwd   = dx * sin(headingRad) + dy * cos(headingRad)
-        let right = dx * cos(headingRad) - dy * sin(headingRad)
-        return abs(fwd) <= forwardM && abs(right) <= sideM
-    }
+        // Fix collisions.
+        let fixConflicts = collision.detectFixConflicts(aircraft: aircraft, fixes: fixes)
+        if fixConflicts != fixConflictIDs { fixConflictIDs = fixConflicts }
 
-    /// The 4 corner vertices of an OBB rectangle in flat-Earth metres.
-    private func rectVerts(cx: Double, cy: Double,
-                            forwardM: Double, sideM: Double,
-                            headingRad: Double) -> [(Double, Double)] {
-        let sinH = sin(headingRad), cosH = cos(headingRad)
-        return [
-            (cx + forwardM * sinH + sideM * cosH, cy + forwardM * cosH - sideM * sinH),
-            (cx + forwardM * sinH - sideM * cosH, cy + forwardM * cosH + sideM * sinH),
-            (cx - forwardM * sinH - sideM * cosH, cy - forwardM * cosH + sideM * sinH),
-            (cx - forwardM * sinH + sideM * cosH, cy - forwardM * cosH - sideM * sinH),
-        ]
-    }
-
-    /// True if two OBB rectangles overlap (centre + vertex containment tests).
-    private func rectsOverlap(cx1: Double, cy1: Double, f1: Double, s1: Double, h1: Double,
-                               cx2: Double, cy2: Double, f2: Double, s2: Double, h2: Double) -> Bool {
-        if pointInRect(px: cx2, py: cy2, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
-        if pointInRect(px: cx1, py: cy1, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
-        for (vx, vy) in rectVerts(cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) {
-            if pointInRect(px: vx, py: vy, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
-        }
-        for (vx, vy) in rectVerts(cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) {
-            if pointInRect(px: vx, py: vy, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
-        }
-        return false
-    }
-
-    /// True if an OBB rectangle and a diamond overlap.
-    private func rectDiamondOverlap(rx: Double, ry: Double, rf: Double, rs: Double, rh: Double,
-                                     dx: Double, dy: Double, df: Double, ds: Double, dh: Double) -> Bool {
-        if pointInDiamond(px: rx, py: ry, cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) { return true }
-        if pointInRect(px: dx, py: dy, cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh)    { return true }
-        for (vx, vy) in rectVerts(cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh) {
-            if pointInDiamond(px: vx, py: vy, cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) { return true }
-        }
-        for (vx, vy) in diamondVerts(cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) {
-            if pointInRect(px: vx, py: vy, cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh) { return true }
-        }
-        return false
-    }
-
-    /// Checks every aircraft against every zone polygon.
-    /// Altitude-independent — zone colliders extend from ground to infinity.
-    ///
-    /// Two levels:
-    ///  • Collider ring touches zone edge → `zoneConflictIDs` (datablock blinks red)
-    ///  • Aircraft body (position) enters polygon → aircraft is destroyed and removed
-    private func detectZoneConflicts() {
-        let shapes = zoneShapes()
-        var conflicts = Set<UUID>()
-        var toDestroy = Set<UUID>()
-
-        for ac in aircraft {
-            if shapes.contains(where: { polygonContains($0.coordinates, point: ac.position) }) {
-                toDestroy.insert(ac.id)
-            } else {
-                let thresholdM = ac.colliderRadiusNM * 1852.0
-                let touchesBoundary = shapes.contains { shape in
-                    let coords = shape.coordinates
-                    guard coords.count >= 2 else { return false }
-                    for i in 0..<coords.count {
-                        let a = coords[i], b = coords[(i + 1) % coords.count]
-                        if distanceToSegmentMeters(point: ac.position, segA: a, segB: b) < thresholdM {
-                            return true
-                        }
-                    }
-                    return false
-                }
-                if touchesBoundary { conflicts.insert(ac.id) }
-            }
-        }
-
-        // Destroy aircraft whose body entered a zone — remove from map and hangar.
-        if !toDestroy.isEmpty {
-            aircraft.removeAll { toDestroy.contains($0.id) }
-            traffic.removeAll  { toDestroy.contains($0.id) }
-            conflicts.subtract(toDestroy)
-        }
-
-        if conflicts != zoneConflictIDs { zoneConflictIDs = conflicts }
-    }
-
-    private let fixColliderRadiusNM = 1.0   // HOLDING circle radius — matches 20pt icon at zoom 8.8
-    private let fixColliderSizeNM   = 1.0   // WAYPOINT/other triangle: NM from centre to vertex
-
-    /// Checks every aircraft position against every fix collider.
-    /// HOLDING fixes use a circular collider; all others use a north-pointing equilateral triangle.
-    private func detectFixConflicts() {
-        var conflicts = Set<UUID>()
-        for ac in aircraft {
-            for fix in fixes {
-                guard let lat = fix.latitude, let lon = fix.longitude else { continue }
-                let fixPos = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-                if fix.type?.uppercased() == "HOLDING" {
-                    if Geo.distanceMeters(from: ac.position, to: fixPos) < fixColliderRadiusNM * 1852 {
-                        conflicts.insert(ac.id)
-                    }
-                } else {
-                    if pointInFixTriangle(point: ac.position, center: fixPos,
-                                         sizeM: fixColliderSizeNM * 1852) {
-                        conflicts.insert(ac.id)
-                    }
-                }
-            }
-        }
-        if conflicts != fixConflictIDs { fixConflictIDs = conflicts }
-    }
-
-    /// Ray-cast point-in-equilateral-triangle: north-pointing, vertices at `sizeM` from centre.
-    private func pointInFixTriangle(point: CLLocationCoordinate2D,
-                                     center: CLLocationCoordinate2D,
-                                     sizeM: Double) -> Bool {
-        let p = flatXY(origin: center, target: point)
-        let v0 = (x: 0.0,              y: sizeM)          // north tip
-        let v1 = (x:  sizeM * 0.866,   y: -sizeM * 0.5)  // bottom-right
-        let v2 = (x: -sizeM * 0.866,   y: -sizeM * 0.5)  // bottom-left
-        func cross(_ a: (x: Double, y: Double), _ b: (x: Double, y: Double),
-                   _ c: (x: Double, y: Double)) -> Double {
-            (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y)
-        }
-        let d1 = cross(p, v0, v1), d2 = cross(p, v1, v2), d3 = cross(p, v2, v0)
-        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
-    }
-
-    /// Minimum distance (metres) from `point` to the line segment [segA, segB].
-    /// Uses a flat-Earth projection centred on segA — accurate enough for radar scales.
-    private func distanceToSegmentMeters(
-        point: CLLocationCoordinate2D,
-        segA: CLLocationCoordinate2D,
-        segB: CLLocationCoordinate2D
-    ) -> Double {
-        let p  = flatXY(origin: segA, target: point)
-        let ab = flatXY(origin: segA, target: segB)
-        let lenSq = ab.x * ab.x + ab.y * ab.y
-        guard lenSq > 0 else { return hypot(p.x, p.y) }
-        let t = max(0, min(1, (p.x * ab.x + p.y * ab.y) / lenSq))
-        return hypot(p.x - ab.x * t, p.y - ab.y * t)
-    }
-
-    /// Flat-Earth XY offset (metres) from `origin` to `target`.
-    private func flatXY(origin: CLLocationCoordinate2D,
-                        target: CLLocationCoordinate2D) -> (x: Double, y: Double) {
-        let R = 6_371_000.0
-        let dLat = (target.latitude  - origin.latitude)  * .pi / 180
-        let dLon = (target.longitude - origin.longitude) * .pi / 180
-        let meanLat = (origin.latitude + target.latitude) / 2 * .pi / 180
-        return (x: dLon * cos(meanLat) * R, y: dLat * R)
-    }
-
-    /// Standard bank angle for the turn-rate model (heavier transport ~25°).
-    private let maxBankDegrees = 25.0
-
-    /// Turn the aircraft toward its commanded heading at a bank-limited rate.
-    /// Rate of turn (°/s) = 1091 × tan(bank) / TAS(kt) — so faster aircraft turn
-    /// more slowly (larger radius), like a real radar target.
-    private func turnTowardTarget(_ aircraft: inout Aircraft, dt: Double) {
-        guard let target = aircraft.targetHeading else { return }
-
-        let current = aircraft.headingDegrees
-        var diff = (target - current).truncatingRemainder(dividingBy: 360)
-        if diff > 180 { diff -= 360 } else if diff < -180 { diff += 360 }
-
-        // A forced direction (TLH/TRH/relative) overrides the shortest path.
-        if let direction = aircraft.turnDirection {
-            if direction == .right, diff < 0 { diff += 360 }
-            if direction == .left, diff > 0 { diff -= 360 }
-        }
-
-        let rate = 1091.0 * tan(maxBankDegrees * .pi / 180.0) / max(aircraft.speedKnots, 1)
-        let step = rate * dt
-
-        if abs(diff) <= step {
-            aircraft.headingDegrees = normalizeHeading(target)
-            aircraft.targetHeading = nil   // reached
-            aircraft.turnDirection = nil
-        } else {
-            aircraft.headingDegrees = normalizeHeading(current + (diff >= 0 ? step : -step))
-        }
-    }
-
-    private func normalizeHeading(_ heading: Double) -> Double {
-        let value = heading.truncatingRemainder(dividingBy: 360)
-        return value < 0 ? value + 360 : value
-    }
-
-    /// Typical jet rates: accelerates slowly, decelerates a bit faster (drag).
-    private let accelKnotsPerSecond = 1.5
-    private let decelKnotsPerSecond = 2.0
-
-    private func adjustSpeed(_ aircraft: inout Aircraft, dt: Double) {
-        guard let target = aircraft.targetSpeedKnots else { return }
-
-        let diff = target - aircraft.speedKnots
-        let step = (diff > 0 ? accelKnotsPerSecond : decelKnotsPerSecond) * dt
-
-        if abs(diff) <= step {
-            aircraft.speedKnots = target
-            aircraft.targetSpeedKnots = nil   // reached
-        } else {
-            aircraft.speedKnots += diff > 0 ? step : -step
-        }
-    }
-
-    /// Typical climb / descent rate (~2000 ft/min).
-    private let climbFeetPerSecond = 33.0
-    private let descentFeetPerSecond = 33.0
-
-    private func adjustAltitude(_ aircraft: inout Aircraft, dt: Double) {
-        guard let target = aircraft.targetAltitudeFeet else { return }
-
-        let diff = target - aircraft.altitudeFeet
-        let step = (diff > 0 ? climbFeetPerSecond : descentFeetPerSecond) * dt
-
-        if abs(diff) <= step {
-            aircraft.altitudeFeet = target
-            aircraft.targetAltitudeFeet = nil   // reached
-        } else {
-            aircraft.altitudeFeet += diff > 0 ? step : -step
-        }
-    }
-
-    /// Spawn an aircraft outside the 60 NM radius, heading roughly inbound so
-    /// it crosses the scope.
-    private func makeRandomAircraft(category: FlightCategory = .arrival) -> Aircraft {
-        var position: CLLocationCoordinate2D = center
-        var heading: Double = 0
-
-        // Retry up to 20 times to find a spawn point outside every zone.
-        for _ in 0..<20 {
-            let candidate: CLLocationCoordinate2D
-            let candidateHeading: Double
-
-            if category == .arrival, let radial = randomVORRadial() {
-                let spawnDistance = min(70 * Distance.metersPerNauticalMile, radial.lengthMeters)
-                candidate = Geo.offset(from: radial.origin,
-                                       distanceMeters: spawnDistance,
-                                       bearingDegrees: radial.angle)
-                candidateHeading = Geo.bearing(from: candidate, to: center)
-            } else {
-                let spawnBearing = Double.random(in: 0..<360)
-                let rangeNM = Double.random(in: 60..<70)
-                candidate = Geo.offset(from: center,
-                                       distanceMeters: rangeNM * Distance.metersPerNauticalMile,
-                                       bearingDegrees: spawnBearing)
-                let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
-                candidateHeading = (inbound + Double.random(in: -40...40) + 360)
-                    .truncatingRemainder(dividingBy: 360)
-            }
-
-            position = candidate
-            heading  = candidateHeading
-            if !isInsideAnyZone(candidate) { break }
-        }
-
-        var aircraft = Aircraft(
-            callsign: makeCallsign(),
-            position: position,
-            headingDegrees: heading
-        )
-        aircraft.category = category
-        aircraft.aircraftType = aircraftTypes.randomElement()?.icaoCode
-
-        // Pre-populate 6 history dots so the tail is visible from the moment
-        // the aircraft appears. Dots are spaced by the same distance the aircraft
-        // travels between two history samples (speed × sampleInterval).
-        let sampleDistMeters = aircraft.speedKnots * 1852.0 / 3600.0
-                               * Double(historySampleTicks) * tickInterval
-        let backBearing = (heading + 180).truncatingRemainder(dividingBy: 360)
-        for i in stride(from: 6, through: 1, by: -1) {
-            aircraft.history.append(
-                Geo.offset(from: position,
-                           distanceMeters: Double(i) * sampleDistMeters,
-                           bearingDegrees: backBearing)
-            )
-        }
-
-        return aircraft
-    }
-
-    /// True if `point` is inside any zone polygon (ray-casting, flat-Earth).
-    private func isInsideAnyZone(_ point: CLLocationCoordinate2D) -> Bool {
-        zoneShapes().contains { polygonContains($0.coordinates, point: point) }
-    }
-
-    /// Standard ray-casting point-in-polygon using lat/lon as a 2-D plane.
-    private func polygonContains(_ polygon: [CLLocationCoordinate2D],
-                                  point: CLLocationCoordinate2D) -> Bool {
-        guard polygon.count >= 3 else { return false }
-        var inside = false
-        var j = polygon.count - 1
-        for i in 0..<polygon.count {
-            let xi = polygon[i].longitude, yi = polygon[i].latitude
-            let xj = polygon[j].longitude, yj = polygon[j].latitude
-            let crossesY = (yi > point.latitude) != (yj > point.latitude)
-            let xIntersect = (xj - xi) * (point.latitude - yi) / (yj - yi) + xi
-            if crossesY && point.longitude < xIntersect { inside = !inside }
-            j = i
-        }
-        return inside
-    }
-
-    /// A random VOR-fix radial (origin, bearing, drawn length) — the radials
-    /// actually shown on the radar. Nil if the exercise has none.
-    private func randomVORRadial() -> (origin: CLLocationCoordinate2D, angle: Double, lengthMeters: Double)? {
-        var options: [(CLLocationCoordinate2D, Double, Double)] = []
-        for fix in fixes where fix.type?.uppercased() == "VOR" {
-            guard let lat = fix.latitude, let lon = fix.longitude, let radials = fix.radials else { continue }
-            let origin = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-            for r in radials {
-                guard let angle = r.angle, let distanceNM = r.distance, distanceNM > 0 else { continue }
-                // FixRadialRenderer draws each radial at 3× its reported distance.
-                options.append((origin, angle, distanceNM * 3 * Distance.metersPerNauticalMile))
-            }
-        }
-        return options.randomElement()
-    }
-
-    /// Callsign from the exercise airlines (ICAO code + flight number), or a
-    /// built-in fallback when the exercise has none.
-    private func makeCallsign() -> String {
-        if let code = airlines.compactMap({ $0.icaoCode }).filter({ !$0.isEmpty }).randomElement() {
-            return code + String(Int.random(in: 100...999))
-        }
-        return Self.randomCallsign()
+        blinkState.toggle()
     }
 
     /// Advance every spawner; add a list aircraft when its countdown elapses.
@@ -957,7 +568,7 @@ final class MapViewModel: ObservableObject {
 
             switch spawners[i].mode {
             case .custom(let interval):
-                traffic.append(makeListAircraft(category: spawners[i].category))
+                traffic.append(spawner.makeListAircraft(context: spawnContext, category: spawners[i].category))
                 spawners[i].countdown += interval
 
             case .random(let remaining):
@@ -965,33 +576,13 @@ final class MapViewModel: ObservableObject {
                     spawners[i].countdown = .infinity   // quota done — stop
                     continue
                 }
-                traffic.append(makeListAircraft(category: spawners[i].category))
+                traffic.append(spawner.makeListAircraft(context: spawnContext, category: spawners[i].category))
                 let left = remaining - 1
                 spawners[i].mode = .random(remaining: left)
                 // Pick a fresh random interval for the next one (or stop).
                 spawners[i].countdown = left > 0 ? (randomIntervals.randomElement() ?? 30) : .infinity
             }
         }
-    }
-
-    /// A hangar-list aircraft (not drawn on the map): callsign, FL, speed, runway.
-    private func makeListAircraft(category: FlightCategory) -> Aircraft {
-        var ac = Aircraft(callsign: Self.randomCallsign(),
-                          position: center,
-                          headingDegrees: 0)
-        ac.category = category
-        ac.altitudeFeet = Double(Int.random(in: 80...350)) * 100   // FL080–FL350
-        ac.speedKnots = Double(Int.random(in: 180...450))
-        if let runway = runways.randomElement() {
-            ac.assignedRunway = Bool.random() ? runway.endA.designator : runway.endB.designator
-        }
-        return ac
-    }
-
-    private static func randomCallsign() -> String {
-        let airlines = ["ACA", "AIC", "IGO", "VTI", "UAE", "SIA"]
-        let prefix = airlines.randomElement() ?? "ACA"
-        return prefix + String(Int.random(in: 10...99))
     }
 
     // MARK: - Approach enabling

@@ -31,6 +31,10 @@ struct Aircraft: Identifiable {
     var holdingName: String? = nil
     /// ICAO type code of the aircraft (e.g. "AT72"), from the exercise.
     var aircraftType: String? = nil
+    /// SSR squawk code (4 octal digits, e.g. "2301").
+    var squawk: String = "2000"
+    /// Free-text remarks line shown at the bottom of the data block (nil = hidden).
+    var remarks: String? = nil
     /// Commanded heading the aircraft is turning toward (nil = none).
     var targetHeading: Double? = nil
     /// Forced turn direction toward the target (nil = take the shortest way).
@@ -77,8 +81,10 @@ struct Aircraft: Identifiable {
         Int(altitudeFeet / 100)
     }
 
-    /// Radar data block, e.g. "ACA98 / FL180 250".
+    /// Cache key for change detection — encodes every field visible in the data block.
     var dataBlock: String {
-        "\(callsign)\nFL\(flightLevel) \(Int(speedKnots))"
+        let tfl  = targetAltitudeFeet.map { "\(Int($0 / 100))" } ?? ""
+        let tspd = targetSpeedKnots.map   { "\(Int($0))" }        ?? ""
+        return "\(callsign)|\(aircraftType ?? "")|\(tfl)|\(flightLevel)|\(tspd)|\(Int(speedKnots))|\(Int(headingDegrees.rounded()))|\(squawk)|\(remarks ?? "")"
     }
 }

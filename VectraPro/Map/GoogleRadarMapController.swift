@@ -450,7 +450,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 return m
             }()
             if labelTexts[aircraft.id] != labelKey {
-                label.icon = AircraftSymbol.label(text, conflictColor: conflictColor)
+                label.icon = AircraftSymbol.label(for: aircraft, conflictColor: conflictColor)
                 labelTexts[aircraft.id] = labelKey
             }
             if draggingLabelID != aircraft.id { label.position = offset }
