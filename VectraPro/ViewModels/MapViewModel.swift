@@ -18,7 +18,8 @@ final class MapViewModel: ObservableObject {
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
     /// Map-layer visibility (driven by the "Map Layers" menu toggles).
     @Published var layers: [String: Bool] = [
-        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true
+        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true,
+        "Trail": true
     ]
     func layerOn(_ name: String) -> Bool { layers[name] ?? false }
 
@@ -235,8 +236,8 @@ final class MapViewModel: ObservableObject {
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
     private var tickCount = 0
-    private let historySampleTicks = 3      // sample a trail dot every N ticks
-    private let maxHistoryPoints = 8
+    private let historySampleTicks = 3      // sample a trail point every N ticks
+    private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
 
     private let physics   = AircraftPhysics.shared
     private let collision = AircraftCollisionDetector.shared
@@ -247,6 +248,44 @@ final class MapViewModel: ObservableObject {
         SpawnContext(center: center, zoneShapes: zoneShapes(), fixes: fixes,
                      airlines: airlines, aircraftTypes: aircraftTypes, runways: runways,
                      historySampleTicks: historySampleTicks, tickInterval: tickInterval)
+    }
+
+    // MARK: - Distance measurement
+
+    enum MeasurementAnchor {
+        case fixed(CLLocationCoordinate2D)
+        case aircraft(UUID)
+    }
+
+    @Published private(set) var isDistanceMeasuring = false
+    private var measurementAnchorA: MeasurementAnchor?
+    private var measurementAnchorB: MeasurementAnchor?
+
+    var measurementPositionA: CLLocationCoordinate2D? { measurementAnchorA.flatMap { resolved($0) } }
+    var measurementPositionB: CLLocationCoordinate2D? { measurementAnchorB.flatMap { resolved($0) } }
+
+    private func resolved(_ anchor: MeasurementAnchor) -> CLLocationCoordinate2D? {
+        switch anchor {
+        case .fixed(let c):    return c
+        case .aircraft(let id): return aircraft.first { $0.id == id }?.position
+        }
+    }
+
+    func toggleDistanceMeasurement() {
+        isDistanceMeasuring.toggle()
+        if !isDistanceMeasuring { measurementAnchorA = nil; measurementAnchorB = nil }
+    }
+
+    func addMeasurementAnchor(_ anchor: MeasurementAnchor) {
+        if measurementAnchorA == nil {
+            measurementAnchorA = anchor
+        } else if measurementAnchorB == nil {
+            measurementAnchorB = anchor
+        } else {
+            measurementAnchorA = nil      // 3rd click → discard both, restart cycle
+            measurementAnchorB = nil
+        }
+        objectWillChange.send()
     }
 
     // MARK: - Drawing

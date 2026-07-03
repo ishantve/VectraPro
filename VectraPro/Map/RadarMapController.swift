@@ -52,6 +52,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var labelAnnotations: [UUID: ImageAnnotation] = [:]
     private var labelTexts: [UUID: String] = [:]
     private var trailAnnotations: [UUID: [ImageAnnotation]] = [:]
+    private var trailLineSource: MLNShapeSource?
+
+    private let trailIcons: [UIImage] = (0..<8).map {
+        AircraftSymbol.trailDot(fraction: Double($0) / 7)
+    }
     /// Fix icon markers — rebuilt only when the icon set (Fixes/Holding toggle, count) changes.
     private var fixIconAnnotations: [ImageAnnotation] = []
     /// Fix name labels — rebuilt only when the Fixes Names toggle changes (icons stay put).
@@ -75,9 +80,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Which aircraft's data block is being dragged (nil = none).
     private var draggingLabelID: UUID?
 
-    private let trailIcons: [UIImage] = (0..<8).map {
-        AircraftSymbol.trailDot(fraction: Double($0) / 7)
-    }
+    // Distance measurement
+    private var measurementLineSource: MLNShapeSource?
+    private var measurementDotA: ImageAnnotation?
+    private var measurementDotB: ImageAnnotation?
+    private var measurementLabelAnnotation: ImageAnnotation?
+    private var lastMeasurementText = ""
 
     init(viewModel: MapViewModel, styleURL: URL) {
         self.viewModel = viewModel
@@ -143,6 +151,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
         styleLoaded = true
+        setupMeasurementLayer(style)
+        setupTrailLayer(style)
         setupTetherLayer(style)
         setupBodyDiamondLayer(style)
         setupNoseDiamondLayer(style)
@@ -153,6 +163,28 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         setupFixColliderLayer(style)
         setupSelectionRingLayer(style)
         sync()
+    }
+
+    private func setupMeasurementLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "measurement-line", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "measurement-line", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.white)
+        layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        layer.lineDashPattern = NSExpression(forConstantValue: [6, 4])
+        style.addLayer(layer)
+        measurementLineSource = source
+    }
+
+    private func setupTrailLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "aircraft-trails", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "aircraft-trails", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor(red: 1.0, green: 0.65, blue: 0.2, alpha: 0.75))
+        layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        layer.lineDashPattern = NSExpression(forConstantValue: [4, 5])
+        style.addLayer(layer)
+        trailLineSource = source
     }
 
     private func setupTetherLayer(_ style: MLNStyle) {
@@ -317,6 +349,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         syncColliders()
         syncFixColliders()
         syncSelectionRing()
+        syncMeasurement()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -577,28 +610,46 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                 labelAnnotations[aircraft.id]?.coordinate = offset
             }
 
-            syncTrail(aircraft.history, id: aircraft.id, on: mapView)
+            syncTrailDots(aircraft.history, id: aircraft.id, on: mapView)
         }
 
+        syncTrailLines()
         updateTethers(on: mapView)
         // Apply current zoom scale to any newly created annotations immediately
         // so they never appear at the wrong size for even one frame.
         refreshAircraftScale()
     }
 
-    private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
+    private func syncTrailDots(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
         if let old = trailAnnotations[id] { mapView.removeAnnotations(old) }
+        let dots = Array(history.suffix(8))   // rolling window — always last 8 samples
         var annotations: [ImageAnnotation] = []
-        for index in history.indices {
-            let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
+        for index in dots.indices {
+            let fraction = dots.count > 1 ? Double(index) / Double(dots.count - 1) : 1
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
             let annotation = ImageAnnotation()
             annotation.image = trailIcons[step]
-            annotation.coordinate = history[index]
+            annotation.coordinate = dots[index]
             annotations.append(annotation)
             mapView.addAnnotation(annotation)
         }
         trailAnnotations[id] = annotations
+    }
+
+    /// Rebuilds the trail dashed-line source from all aircraft history arrays.
+    /// Each aircraft gets one polyline: history points (oldest→newest) + current position.
+    private func syncTrailLines() {
+        guard viewModel.layerOn("Trail") else {
+            trailLineSource?.shape = nil
+            return
+        }
+        var features: [MLNPolylineFeature] = []
+        for ac in viewModel.aircraft {
+            guard !ac.history.isEmpty else { continue }
+            var coords = ac.history + [ac.position]
+            features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+        }
+        trailLineSource?.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
     /// One tether line per aircraft, from its symbol to its data block.
@@ -851,8 +902,119 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
         var coords = circleCoords(center: ac.position, radiusNM: 0.4)
         coords.append(coords[0])
-        var feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
+        let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
         selectionRingSource?.shape = MLNShapeCollectionFeature(shapes: [feature])
+    }
+
+    // MARK: - Distance measurement
+
+    private func syncMeasurement() {
+        guard viewModel.isDistanceMeasuring else {
+            measurementLineSource?.shape = nil
+            [measurementDotA, measurementDotB, measurementLabelAnnotation].forEach {
+                if let a = $0 { mapView.removeAnnotation(a) }
+            }
+            measurementDotA = nil; measurementDotB = nil
+            measurementLabelAnnotation = nil; lastMeasurementText = ""
+            return
+        }
+
+        // --- dot A ---
+        if let posA = viewModel.measurementPositionA {
+            if measurementDotA == nil {
+                let dot = ImageAnnotation()
+                dot.image = measurementEndpointImage()
+                dot.coordinate = posA
+                mapView.addAnnotation(dot)
+                measurementDotA = dot
+            } else {
+                measurementDotA?.coordinate = posA
+            }
+        } else {
+            if let d = measurementDotA { mapView.removeAnnotation(d); measurementDotA = nil }
+        }
+
+        guard let posA = viewModel.measurementPositionA,
+              let posB = viewModel.measurementPositionB else {
+            // Only one point — clear line / label / dot B.
+            measurementLineSource?.shape = nil
+            if let d = measurementDotB { mapView.removeAnnotation(d); measurementDotB = nil }
+            if let l = measurementLabelAnnotation { mapView.removeAnnotation(l); measurementLabelAnnotation = nil }
+            lastMeasurementText = ""
+            return
+        }
+
+        // --- dot B ---
+        if measurementDotB == nil {
+            let dot = ImageAnnotation()
+            dot.image = measurementEndpointImage()
+            dot.coordinate = posB
+            mapView.addAnnotation(dot)
+            measurementDotB = dot
+        } else {
+            measurementDotB?.coordinate = posB
+        }
+
+        // --- line ---
+        var coords = [posA, posB]
+        let feature = MLNPolylineFeature(coordinates: &coords, count: 2)
+        measurementLineSource?.shape = MLNShapeCollectionFeature(shapes: [feature])
+
+        // --- distance label at midpoint ---
+        let distNM = Geo.distanceMeters(from: posA, to: posB) / 1852.0
+        let text   = String(format: "%.1f NM", distNM)
+        let mid    = CLLocationCoordinate2D(latitude:  (posA.latitude  + posB.latitude)  / 2,
+                                            longitude: (posA.longitude + posB.longitude) / 2)
+        if measurementLabelAnnotation == nil {
+            let label = ImageAnnotation()
+            label.image = measurementLabelImage(text)
+            label.coordinate = mid
+            mapView.addAnnotation(label)
+            measurementLabelAnnotation = label
+            lastMeasurementText = text
+        } else {
+            measurementLabelAnnotation?.coordinate = mid
+            if text != lastMeasurementText {
+                let prev = measurementLabelAnnotation!
+                let label = ImageAnnotation()
+                label.image = measurementLabelImage(text)
+                label.coordinate = mid
+                mapView.addAnnotation(label)
+                mapView.removeAnnotation(prev)
+                measurementLabelAnnotation = label
+                lastMeasurementText = text
+            }
+        }
+    }
+
+    private func measurementEndpointImage() -> UIImage {
+        let size: CGFloat = 10
+        UIGraphicsBeginImageContextWithOptions(CGSize(width: size, height: size), false, 0)
+        UIColor.white.setFill()
+        UIBezierPath(ovalIn: CGRect(x: 1, y: 1, width: size - 2, height: size - 2)).fill()
+        let img = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return img
+    }
+
+    private func measurementLabelImage(_ text: String) -> UIImage {
+        let font  = UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let pad   = CGSize(width: 12, height: 6)
+        let rect  = CGRect(origin: .zero,
+                           size: CGSize(width: textSize.width + pad.width,
+                                        height: textSize.height + pad.height))
+        UIGraphicsBeginImageContextWithOptions(rect.size, false, 0)
+        UIColor.black.withAlphaComponent(0.72).setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 4).fill()
+        UIColor.white.withAlphaComponent(0.35).setStroke()
+        UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4).stroke()
+        (text as NSString).draw(in: rect.insetBy(dx: pad.width / 2, dy: pad.height / 2),
+                                withAttributes: attrs)
+        let img = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return img
     }
 
     // MARK: Pan (map + data block)
@@ -861,6 +1023,18 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
         let point = gesture.location(in: mapView)
+
+        // In measurement mode taps set anchors, not selection.
+        if viewModel.isDistanceMeasuring {
+            if let id = labelHit(point, in: mapView) {
+                viewModel.addMeasurementAnchor(.aircraft(id))
+            } else {
+                let coord = mapView.convert(point, toCoordinateFrom: mapView)
+                viewModel.addMeasurementAnchor(.fixed(coord))
+            }
+            return
+        }
+
         if let id = labelHit(point, in: mapView) {
             let next: UUID? = viewModel.selectedAircraftID == id ? nil : id
             viewModel.selectAircraft(next)
