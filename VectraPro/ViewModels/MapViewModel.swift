@@ -83,6 +83,11 @@ final class MapViewModel: ObservableObject {
     /// Random-mode interval choices (seconds).
     private let randomIntervals: [Double] = [15, 20, 30, 45, 60, 90]
 
+    /// Countdown (seconds) until the next hangar-to-radar promotion.
+    /// Stays `.infinity` when the airspace is already at capacity.
+    private var radarPromotionCountdown: Double = .infinity
+    private let promotionIntervals: [Double] = [15, 20, 30, 45, 60, 90]
+
     /// Split `total` into `parts` descending whole numbers (priority gets more),
     /// e.g. (15, 3) → [6,5,4]; (15, 2) → [8,7]; (15, 1) → [15].
     private func descendingSplit(total: Int, parts: Int) -> [Int] {
@@ -421,6 +426,7 @@ final class MapViewModel: ObservableObject {
         isMultiMode          = false
         airspaceCapacity     = 1
         aircraftSpawningCount = 1
+        radarPromotionCountdown = .infinity
     }
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
@@ -435,8 +441,13 @@ final class MapViewModel: ObservableObject {
         pendingStart = nil
         // Initial aircraft count toward the capacity and are distributed across
         // the active categories with the same priority logic as the lists.
+        spawner.resetRadialCycle(fixes: fixes)
         aircraft = initialCategories().map { spawner.makeRandomAircraft(context: spawnContext, category: $0) }
         resetTraffic()
+        // Start filling toward capacity if initial spawn didn't reach it.
+        radarPromotionCountdown = aircraft.count < airspaceCapacity
+            ? (promotionIntervals.randomElement() ?? 30)
+            : .infinity
         startSimulation()
     }
 
@@ -513,6 +524,7 @@ final class MapViewModel: ObservableObject {
     private func tick() {
         tickCount += 1
         advanceSpawners()
+        advanceRadarPromotion()
 
         for index in aircraft.indices {
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
@@ -542,6 +554,12 @@ final class MapViewModel: ObservableObject {
             if let sel = selectedAircraftID, zoneResult.destroyed.contains(sel) { selectedAircraftID = nil }
             aircraft.removeAll { zoneResult.destroyed.contains($0.id) }
             traffic.removeAll  { zoneResult.destroyed.contains($0.id) }
+        }
+
+        // After any destruction, arm a short-delay promotion so the slot refills quickly.
+        if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
+            let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
+            radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
         }
         let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
         if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
@@ -583,6 +601,37 @@ final class MapViewModel: ObservableObject {
                 spawners[i].countdown = left > 0 ? (randomIntervals.randomElement() ?? 30) : .infinity
             }
         }
+    }
+
+    /// Counts down and promotes one hangar aircraft to the radar when the
+    /// airspace has room. Rearms itself for the next promotion automatically.
+    private func advanceRadarPromotion() {
+        guard aircraft.count < airspaceCapacity else {
+            radarPromotionCountdown = .infinity
+            return
+        }
+        radarPromotionCountdown -= tickInterval
+        guard radarPromotionCountdown <= 0 else { return }
+        promoteFromHangar()
+    }
+
+    /// Moves one arrival or enroute aircraft from the hangar onto the radar.
+    /// Falls back to a fresh spawn when the hangar has no eligible aircraft.
+    private func promoteFromHangar() {
+        let eligibleIndices = traffic.indices.filter {
+            traffic[$0].category == .arrival || traffic[$0].category == .enroute
+        }
+        let category: FlightCategory
+        if let idx = eligibleIndices.randomElement() {
+            category = traffic[idx].category
+            traffic.remove(at: idx)
+        } else {
+            category = Bool.random() ? .arrival : .enroute
+        }
+        aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category))
+        radarPromotionCountdown = aircraft.count < airspaceCapacity
+            ? (promotionIntervals.randomElement() ?? 30)
+            : .infinity
     }
 
     // MARK: - Approach enabling

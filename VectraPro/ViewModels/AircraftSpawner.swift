@@ -30,6 +30,29 @@ final class AircraftSpawner {
     static let shared = AircraftSpawner()
     private init() {}
 
+    // MARK: - Radial cycle (round-robin for arrival spawns)
+
+    private typealias Radial = (origin: CLLocationCoordinate2D, angle: Double, lengthMeters: Double)
+
+    /// Shuffled list of all VOR radials for the active exercise.
+    private var radialCycle: [Radial] = []
+    private var radialCycleIndex = 0
+
+    /// Build and shuffle the radial list from the exercise fixes.
+    /// Call this once at `reset()` so every exercise gets a fresh, consistent order.
+    func resetRadialCycle(fixes: [ExerciseDetail.Fix]) {
+        radialCycle = buildRadialList(fixes: fixes).shuffled()
+        radialCycleIndex = 0
+    }
+
+    /// Next radial in round-robin order; nil when the cycle is empty.
+    private func nextCycledRadial() -> Radial? {
+        guard !radialCycle.isEmpty else { return nil }
+        let radial = radialCycle[radialCycleIndex % radialCycle.count]
+        radialCycleIndex += 1
+        return radial
+    }
+
     // MARK: - Public: spawn
 
     /// Spawns a radar aircraft outside the 60–63 NM radius, heading roughly inbound.
@@ -42,7 +65,7 @@ final class AircraftSpawner {
             let candidate: CLLocationCoordinate2D
             let candidateHeading: Double
 
-            if category == .arrival, let radial = randomVORRadial(fixes: context.fixes) {
+            if category == .arrival, let radial = nextCycledRadial() ?? randomVORRadial(fixes: context.fixes) {
                 let spawnDistance = min(63 * Distance.metersPerNauticalMile, radial.lengthMeters)
                 candidate = Geo.offset(from: radial.origin,
                                        distanceMeters: spawnDistance,
@@ -125,19 +148,24 @@ final class AircraftSpawner {
         zoneShapes.contains { polygonContains($0.coordinates, point: point) }
     }
 
-    private func randomVORRadial(fixes: [ExerciseDetail.Fix])
-        -> (origin: CLLocationCoordinate2D, angle: Double, lengthMeters: Double)? {
-        var options: [(CLLocationCoordinate2D, Double, Double)] = []
+    /// All VOR radials from the given fixes, in declaration order.
+    private func buildRadialList(fixes: [ExerciseDetail.Fix]) -> [Radial] {
+        var list: [Radial] = []
         for fix in fixes where fix.type?.uppercased() == "VOR" {
             guard let lat = fix.latitude, let lon = fix.longitude, let radials = fix.radials else { continue }
             let origin = CLLocationCoordinate2D(latitude: lat, longitude: lon)
             for r in radials {
                 guard let angle = r.angle, let distNM = r.distance, distNM > 0 else { continue }
                 // FixRadialRenderer draws each radial at 3× its reported distance.
-                options.append((origin, angle, distNM * 3 * Distance.metersPerNauticalMile))
+                list.append((origin, angle, distNM * 3 * Distance.metersPerNauticalMile))
             }
         }
-        return options.randomElement()
+        return list
+    }
+
+    /// Random radial pick — fallback when the cycle is empty (e.g. no fixes loaded yet).
+    private func randomVORRadial(fixes: [ExerciseDetail.Fix]) -> Radial? {
+        buildRadialList(fixes: fixes).randomElement()
     }
 
     private func polygonContains(_ polygon: [CLLocationCoordinate2D],
