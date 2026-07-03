@@ -849,14 +849,14 @@ final class MapViewModel: ObservableObject {
             let candidateHeading: Double
 
             if category == .arrival, let radial = randomVORRadial() {
-                let spawnDistance = min(70 * Distance.metersPerNauticalMile, radial.lengthMeters)
+                let spawnDistance = min(63 * Distance.metersPerNauticalMile, radial.lengthMeters)
                 candidate = Geo.offset(from: radial.origin,
                                        distanceMeters: spawnDistance,
                                        bearingDegrees: radial.angle)
                 candidateHeading = Geo.bearing(from: candidate, to: center)
             } else {
                 let spawnBearing = Double.random(in: 0..<360)
-                let rangeNM = Double.random(in: 60..<70)
+                let rangeNM = Double.random(in: 60..<63)
                 candidate = Geo.offset(from: center,
                                        distanceMeters: rangeNM * Distance.metersPerNauticalMile,
                                        bearingDegrees: spawnBearing)
