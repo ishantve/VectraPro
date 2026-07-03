@@ -497,17 +497,46 @@ final class MapViewModel: ObservableObject {
         blinkState.toggle()
     }
 
-    /// Checks every aircraft pair for separation loss.
-    /// Yellow = circles touching (distance < 5 NM).
-    /// Red    = critical separation loss (distance < 3 NM).
-    /// Both levels also require < 1 000 ft vertical separation.
+    /// Checks every aircraft pair for separation loss and physical collisions.
+    /// Yellow = separation circles touching (< 5 NM).
+    /// Red    = critical separation (< 3 NM).
+    /// Destroy = body diamond or nose diamond overlap → both aircraft removed.
     private func detectConflicts() {
-        var yellows = Set<UUID>()
-        var reds    = Set<UUID>()
+        var yellows  = Set<UUID>()
+        var reds     = Set<UUID>()
+        var bodyHits = Set<UUID>()
+
         for i in 0..<aircraft.count {
             for j in (i + 1)..<aircraft.count {
                 let a = aircraft[i], b = aircraft[j]
-                let hDistNM = Geo.distanceMeters(from: a.position, to: b.position) / 1852.0
+
+                // Use a's position as flat-Earth origin for both.
+                let aXY = (x: 0.0, y: 0.0)
+                let bXY = flatXY(origin: a.position, target: b.position)
+                let aH  = a.headingDegrees * .pi / 180
+                let bH  = b.headingDegrees * .pi / 180
+
+                // Nose centres in the same flat space.
+                let nA = (x: aXY.x + a.noseOffsetNM * 1852 * sin(aH),
+                          y: aXY.y + a.noseOffsetNM * 1852 * cos(aH))
+                let nB = (x: bXY.x + b.noseOffsetNM * 1852 * sin(bH),
+                          y: bXY.y + b.noseOffsetNM * 1852 * cos(bH))
+
+                // Body–body (diamond), nose–body / body–nose (rect vs diamond), nose–nose (rect).
+                let hit = diamondsOverlap(cx1: aXY.x, cy1: aXY.y, f1: a.bodyForwardNM * 1852, s1: a.bodySideNM * 1852, h1: aH,
+                                          cx2: bXY.x, cy2: bXY.y, f2: b.bodyForwardNM * 1852, s2: b.bodySideNM * 1852, h2: bH)
+                       || rectDiamondOverlap(rx: nA.x, ry: nA.y, rf: a.noseForwardNM * 1852, rs: a.noseSideNM * 1852, rh: aH,
+                                             dx: bXY.x, dy: bXY.y, df: b.bodyForwardNM * 1852, ds: b.bodySideNM * 1852, dh: bH)
+                       || rectDiamondOverlap(rx: nB.x, ry: nB.y, rf: b.noseForwardNM * 1852, rs: b.noseSideNM * 1852, rh: bH,
+                                             dx: aXY.x, dy: aXY.y, df: a.bodyForwardNM * 1852, ds: a.bodySideNM * 1852, dh: aH)
+                       || rectsOverlap(cx1: nA.x, cy1: nA.y, f1: a.noseForwardNM * 1852, s1: a.noseSideNM * 1852, h1: aH,
+                                       cx2: nB.x, cy2: nB.y, f2: b.noseForwardNM * 1852, s2: b.noseSideNM * 1852, h2: bH)
+                if hit {
+                    bodyHits.insert(a.id); bodyHits.insert(b.id)
+                    continue
+                }
+
+                let hDistNM = hypot(bXY.x, bXY.y) / 1852.0
                 let vDistFt = abs(a.altitudeFeet - b.altitudeFeet)
                 guard vDistFt < 1000 else { continue }
                 if hDistNM < (a.colliderRadiusNM + b.colliderRadiusNM) {
@@ -518,8 +547,111 @@ final class MapViewModel: ObservableObject {
                 }
             }
         }
+
+        if !bodyHits.isEmpty {
+            aircraft.removeAll { bodyHits.contains($0.id) }
+            traffic.removeAll  { bodyHits.contains($0.id) }
+            yellows.subtract(bodyHits)
+            reds.subtract(bodyHits)
+        }
+
         if yellows != yellowConflictIDs { yellowConflictIDs = yellows }
         if reds    != redConflictIDs    { redConflictIDs    = reds    }
+    }
+
+    // MARK: - Diamond collision helpers
+
+    /// True if point (px, py) lies inside a diamond centred at (cx, cy).
+    /// The diamond has half-extents `forwardM` (along heading) and `sideM` (perpendicular).
+    private func pointInDiamond(px: Double, py: Double,
+                                 cx: Double, cy: Double,
+                                 forwardM: Double, sideM: Double,
+                                 headingRad: Double) -> Bool {
+        let dx = px - cx, dy = py - cy
+        let fwd   = dx * sin(headingRad) + dy * cos(headingRad)
+        let right = dx * cos(headingRad) - dy * sin(headingRad)
+        return abs(fwd) / forwardM + abs(right) / sideM <= 1.0
+    }
+
+    /// The 4 vertices of a diamond in flat-Earth metres.
+    private func diamondVerts(cx: Double, cy: Double,
+                               forwardM: Double, sideM: Double,
+                               headingRad: Double) -> [(Double, Double)] {
+        let sinH = sin(headingRad), cosH = cos(headingRad)
+        return [
+            (cx + forwardM * sinH,  cy + forwardM * cosH),   // front
+            (cx + sideM   * cosH,   cy - sideM   * sinH),   // right
+            (cx - forwardM * sinH,  cy - forwardM * cosH),   // back
+            (cx - sideM   * cosH,   cy + sideM   * sinH),   // left
+        ]
+    }
+
+    /// True if two diamonds overlap (centre-in-other + vertex-in-other tests).
+    private func diamondsOverlap(cx1: Double, cy1: Double, f1: Double, s1: Double, h1: Double,
+                                  cx2: Double, cy2: Double, f2: Double, s2: Double, h2: Double) -> Bool {
+        // Centre of each inside the other.
+        if pointInDiamond(px: cx2, py: cy2, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
+        if pointInDiamond(px: cx1, py: cy1, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
+        // Vertices of each inside the other.
+        for (vx, vy) in diamondVerts(cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) {
+            if pointInDiamond(px: vx, py: vy, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
+        }
+        for (vx, vy) in diamondVerts(cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) {
+            if pointInDiamond(px: vx, py: vy, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
+        }
+        return false
+    }
+
+    /// True if point lies inside an OBB rectangle aligned to `headingRad`.
+    private func pointInRect(px: Double, py: Double,
+                              cx: Double, cy: Double,
+                              forwardM: Double, sideM: Double,
+                              headingRad: Double) -> Bool {
+        let dx = px - cx, dy = py - cy
+        let fwd   = dx * sin(headingRad) + dy * cos(headingRad)
+        let right = dx * cos(headingRad) - dy * sin(headingRad)
+        return abs(fwd) <= forwardM && abs(right) <= sideM
+    }
+
+    /// The 4 corner vertices of an OBB rectangle in flat-Earth metres.
+    private func rectVerts(cx: Double, cy: Double,
+                            forwardM: Double, sideM: Double,
+                            headingRad: Double) -> [(Double, Double)] {
+        let sinH = sin(headingRad), cosH = cos(headingRad)
+        return [
+            (cx + forwardM * sinH + sideM * cosH, cy + forwardM * cosH - sideM * sinH),
+            (cx + forwardM * sinH - sideM * cosH, cy + forwardM * cosH + sideM * sinH),
+            (cx - forwardM * sinH - sideM * cosH, cy - forwardM * cosH + sideM * sinH),
+            (cx - forwardM * sinH + sideM * cosH, cy - forwardM * cosH - sideM * sinH),
+        ]
+    }
+
+    /// True if two OBB rectangles overlap (centre + vertex containment tests).
+    private func rectsOverlap(cx1: Double, cy1: Double, f1: Double, s1: Double, h1: Double,
+                               cx2: Double, cy2: Double, f2: Double, s2: Double, h2: Double) -> Bool {
+        if pointInRect(px: cx2, py: cy2, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
+        if pointInRect(px: cx1, py: cy1, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
+        for (vx, vy) in rectVerts(cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) {
+            if pointInRect(px: vx, py: vy, cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) { return true }
+        }
+        for (vx, vy) in rectVerts(cx: cx2, cy: cy2, forwardM: f2, sideM: s2, headingRad: h2) {
+            if pointInRect(px: vx, py: vy, cx: cx1, cy: cy1, forwardM: f1, sideM: s1, headingRad: h1) { return true }
+        }
+        return false
+    }
+
+    /// True if an OBB rectangle and a diamond overlap.
+    private func rectDiamondOverlap(rx: Double, ry: Double, rf: Double, rs: Double, rh: Double,
+                                     dx: Double, dy: Double, df: Double, ds: Double, dh: Double) -> Bool {
+        if pointInDiamond(px: rx, py: ry, cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) { return true }
+        if pointInRect(px: dx, py: dy, cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh)    { return true }
+        for (vx, vy) in rectVerts(cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh) {
+            if pointInDiamond(px: vx, py: vy, cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) { return true }
+        }
+        for (vx, vy) in diamondVerts(cx: dx, cy: dy, forwardM: df, sideM: ds, headingRad: dh) {
+            if pointInRect(px: vx, py: vy, cx: rx, cy: ry, forwardM: rf, sideM: rs, headingRad: rh) { return true }
+        }
+        return false
     }
 
     /// Checks every aircraft against every zone polygon.

@@ -62,6 +62,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var zoneKey = ""
     private var zoneFillColors: [ObjectIdentifier: UIColor] = [:]
     private var tetherSource: MLNShapeSource?
+    private var bodyDiamondSource: MLNShapeSource?
+    private var noseDiamondSource: MLNShapeSource?
     private var normalCircleSource: MLNShapeSource?
     private var yellowCircleSource: MLNShapeSource?
     private var redCircleSource: MLNShapeSource?
@@ -136,6 +138,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
         styleLoaded = true
         setupTetherLayer(style)
+        setupBodyDiamondLayer(style)
+        setupNoseDiamondLayer(style)
         setupNormalCircleLayer(style)
         setupYellowCircleLayer(style)
         setupRedCircleLayer(style)
@@ -154,6 +158,26 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         style.addLayer(layer)
 
         tetherSource = source
+    }
+
+    private func setupBodyDiamondLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "body-diamonds", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "body-diamonds", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.cyan.withAlphaComponent(0.9))
+        layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        style.addLayer(layer)
+        bodyDiamondSource = source
+    }
+
+    private func setupNoseDiamondLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "nose-diamonds", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "nose-diamonds", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.magenta.withAlphaComponent(0.9))
+        layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        style.addLayer(layer)
+        noseDiamondSource = source
     }
 
     private func setupNormalCircleLayer(_ style: MLNStyle) {
@@ -553,6 +577,26 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// dashed ring replaces it during each blink-on phase when in conflict.
     /// Zone proximity ring (orange) is drawn separately.
     private func syncColliders() {
+        // Body diamonds (cyan) and nose diamonds (magenta).
+        var bodyDiamonds: [MLNPolylineFeature] = []
+        var noseDiamonds: [MLNPolylineFeature] = []
+        for ac in viewModel.aircraft {
+            var bd = diamondCoords(center: ac.position,
+                                   forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
+                                   headingDeg: ac.headingDegrees)
+            bodyDiamonds.append(MLNPolylineFeature(coordinates: &bd, count: UInt(bd.count)))
+
+            let noseCenter = Geo.offset(from: ac.position,
+                                        distanceMeters: ac.noseOffsetNM * 1852,
+                                        bearingDegrees: ac.headingDegrees)
+            var nd = noseRectCoords(center: noseCenter,
+                                    forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
+                                    headingDeg: ac.headingDegrees)
+            noseDiamonds.append(MLNPolylineFeature(coordinates: &nd, count: UInt(nd.count)))
+        }
+        bodyDiamondSource?.shape = MLNShapeCollectionFeature(shapes: bodyDiamonds)
+        noseDiamondSource?.shape = MLNShapeCollectionFeature(shapes: noseDiamonds)
+
         var normalFeatures: [MLNPolylineFeature] = []
         var yellowFeatures: [MLNPolylineFeature] = []
         var redFeatures:    [MLNPolylineFeature] = []
@@ -580,6 +624,34 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             zoneFeatures.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
         }
         zoneColliderSource?.shape = MLNShapeCollectionFeature(shapes: zoneFeatures)
+    }
+
+    /// 4 geographic vertices of a diamond (front, right, back, left) + closing point.
+    private func diamondCoords(center: CLLocationCoordinate2D,
+                                forwardNM: Double, sideNM: Double,
+                                headingDeg: Double) -> [CLLocationCoordinate2D] {
+        let offsets: [(Double, Double)] = [
+            (forwardNM * 1852, headingDeg),
+            (sideNM    * 1852, headingDeg + 90),
+            (forwardNM * 1852, headingDeg + 180),
+            (sideNM    * 1852, headingDeg + 270),
+        ]
+        var pts = offsets.map { Geo.offset(from: center, distanceMeters: $0.0, bearingDegrees: $0.1) }
+        pts.append(pts[0])
+        return pts
+    }
+
+    /// 4 geographic corners of a rectangle aligned to `headingDeg` + closing point.
+    private func noseRectCoords(center: CLLocationCoordinate2D,
+                                 forwardNM: Double, sideNM: Double,
+                                 headingDeg: Double) -> [CLLocationCoordinate2D] {
+        let front = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg)
+        let back  = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg + 180)
+        let fR = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
+        let fL = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
+        let bR = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
+        let bL = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
+        return [fL, fR, bR, bL, fL]
     }
 
     private func circleCoords(center: CLLocationCoordinate2D, radiusNM: Double, steps: Int = 36) -> [CLLocationCoordinate2D] {
