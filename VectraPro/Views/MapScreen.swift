@@ -240,7 +240,7 @@ struct MapScreen: View {
                 vm?.handleVoiceCommand(transcript)
             }
         }
-        .onDisappear { viewModel.stopSimulation() }
+        .onDisappear { viewModel.clearOnExit() }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —

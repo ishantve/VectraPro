@@ -387,6 +387,42 @@ final class MapViewModel: ObservableObject {
         simulationTimer = nil
     }
 
+    /// Wipes all live state when leaving the radar screen so there is no stale
+    /// flash if the user re-enters. applyExercise() will be called again before
+    /// onAppear fires, so exercise config (fixes, zones, etc.) is safe to clear.
+    func clearOnExit() {
+        stopSimulation()
+        tickCount = 0
+        aircraft = []
+        traffic  = []
+        spawners = []
+        selectedAircraftID   = nil
+        yellowConflictIDs    = []
+        redConflictIDs       = []
+        zoneConflictIDs      = []
+        fixConflictIDs       = []
+        blinkState           = false
+        isDrawing            = false
+        pendingStart         = nil
+        isDistanceMeasuring  = false
+        measurementAnchorA   = nil
+        measurementAnchorB   = nil
+        // Clear exercise config — applyExercise() will repopulate before next reset().
+        exerciseRunways      = nil
+        exerciseApproaches   = nil
+        fixes                = []
+        zones                = []
+        obstructions         = []
+        airlines             = []
+        aircraftTypes        = []
+        freqDeparture        = nil
+        freqArrival          = nil
+        freqEnroute          = nil
+        isMultiMode          = false
+        airspaceCapacity     = 1
+        aircraftSpawningCount = 1
+    }
+
     /// Full fresh start — clears radar state and re-spawns. Called each time the
     /// screen opens so reopening renders new.
     func reset() {

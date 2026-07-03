@@ -69,6 +69,7 @@ final class AircraftSpawner {
                           headingDegrees: heading)
         ac.category = category
         ac.aircraftType = context.aircraftTypes.randomElement()?.icaoCode
+        ac.squawk = randomSquawk()
 
         // Pre-populate 6 history dots so the trail is visible immediately at spawn.
         // Dot spacing = TAS × sampleInterval (distance between consecutive history samples).
@@ -115,6 +116,10 @@ final class AircraftSpawner {
     }
 
     // MARK: - Private
+
+    private func randomSquawk() -> String {
+        (0..<4).map { _ in String(Int.random(in: 0...7)) }.joined()
+    }
 
     private func isInsideAnyZone(_ point: CLLocationCoordinate2D, zoneShapes: [ZoneShape]) -> Bool {
         zoneShapes.contains { polygonContains($0.coordinates, point: point) }

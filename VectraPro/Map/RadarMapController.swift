@@ -597,7 +597,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != labelKey {
                 let previous = labelAnnotations[aircraft.id]
                 let a = ImageAnnotation()
-                a.image = AircraftSymbol.label(text, conflictColor: labelColor)
+                a.image = AircraftSymbol.label(for: aircraft, conflictColor: labelColor)
                 if let img = a.image {
                     a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
                 }
