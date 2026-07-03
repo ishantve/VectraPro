@@ -247,6 +247,8 @@ final class MapViewModel: ObservableObject {
     @Published private(set) var redConflictIDs: Set<UUID> = []
     /// Aircraft IDs whose collider ring is touching a zone boundary (approaching wall).
     @Published private(set) var zoneConflictIDs: Set<UUID> = []
+    /// Aircraft IDs whose position is inside a fix collider (circle for HOLDING, triangle for others).
+    @Published private(set) var fixConflictIDs: Set<UUID> = []
     /// Alternates true/false every simulation tick — drives data-block blink for zone conflicts.
     @Published private(set) var blinkState: Bool = false
 
@@ -494,6 +496,7 @@ final class MapViewModel: ObservableObject {
         }
         detectConflicts()
         detectZoneConflicts()
+        detectFixConflicts()
         blinkState.toggle()
     }
 
@@ -693,6 +696,48 @@ final class MapViewModel: ObservableObject {
         }
 
         if conflicts != zoneConflictIDs { zoneConflictIDs = conflicts }
+    }
+
+    private let fixColliderRadiusNM = 1.0   // HOLDING circle radius — matches 20pt icon at zoom 8.8
+    private let fixColliderSizeNM   = 1.0   // WAYPOINT/other triangle: NM from centre to vertex
+
+    /// Checks every aircraft position against every fix collider.
+    /// HOLDING fixes use a circular collider; all others use a north-pointing equilateral triangle.
+    private func detectFixConflicts() {
+        var conflicts = Set<UUID>()
+        for ac in aircraft {
+            for fix in fixes {
+                guard let lat = fix.latitude, let lon = fix.longitude else { continue }
+                let fixPos = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                if fix.type?.uppercased() == "HOLDING" {
+                    if Geo.distanceMeters(from: ac.position, to: fixPos) < fixColliderRadiusNM * 1852 {
+                        conflicts.insert(ac.id)
+                    }
+                } else {
+                    if pointInFixTriangle(point: ac.position, center: fixPos,
+                                         sizeM: fixColliderSizeNM * 1852) {
+                        conflicts.insert(ac.id)
+                    }
+                }
+            }
+        }
+        if conflicts != fixConflictIDs { fixConflictIDs = conflicts }
+    }
+
+    /// Ray-cast point-in-equilateral-triangle: north-pointing, vertices at `sizeM` from centre.
+    private func pointInFixTriangle(point: CLLocationCoordinate2D,
+                                     center: CLLocationCoordinate2D,
+                                     sizeM: Double) -> Bool {
+        let p = flatXY(origin: center, target: point)
+        let v0 = (x: 0.0,              y: sizeM)          // north tip
+        let v1 = (x:  sizeM * 0.866,   y: -sizeM * 0.5)  // bottom-right
+        let v2 = (x: -sizeM * 0.866,   y: -sizeM * 0.5)  // bottom-left
+        func cross(_ a: (x: Double, y: Double), _ b: (x: Double, y: Double),
+                   _ c: (x: Double, y: Double)) -> Double {
+            (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y)
+        }
+        let d1 = cross(p, v0, v1), d2 = cross(p, v1, v2), d3 = cross(p, v2, v0)
+        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
     }
 
     /// Minimum distance (metres) from `point` to the line segment [segA, segB].

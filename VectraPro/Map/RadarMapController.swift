@@ -68,6 +68,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var yellowCircleSource: MLNShapeSource?
     private var redCircleSource: MLNShapeSource?
     private var zoneColliderSource: MLNShapeSource?
+    private var fixColliderSource: MLNShapeSource?
     private var radialNameAnnotations: [ImageAnnotation] = []
     private var radialNameKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -144,6 +145,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         setupYellowCircleLayer(style)
         setupRedCircleLayer(style)
         setupZoneColliderLayer(style)
+        setupFixColliderLayer(style)
         sync()
     }
 
@@ -224,7 +226,17 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         zoneColliderSource = source
     }
-    
+
+    private func setupFixColliderLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "fix-colliders", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "fix-colliders", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.white.withAlphaComponent(0.45))
+        layer.lineWidth = NSExpression(forConstantValue: 1.2)
+        layer.lineDashPattern = NSExpression(forConstantValue: [3, 3])
+        style.addLayer(layer)
+        fixColliderSource = source
+    }
 
     func mapViewDidFinishRenderingMapFullyRendered(_ mapView: MLNMapView) {
         handleViewEnvironmentChangeIfNeeded(mapView)
@@ -252,10 +264,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     func mapViewRegionIsChanging(_ mapView: MLNMapView) {
         refreshAircraftScale()
+        syncFixColliders()
     }
 
     func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
         refreshAircraftScale()
+        syncFixColliders()
         if isClamping { isClamping = false; return }
         let clamped = clampToRadius(mapView.centerCoordinate)
         guard clamped.latitude != mapView.centerCoordinate.latitude
@@ -284,6 +298,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         syncFixes(mapView)
         syncAircraft(mapView)
         syncColliders()
+        syncFixColliders()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -652,6 +667,41 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let bR = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
         let bL = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
         return [fL, fR, bR, bL, fL]
+    }
+
+    /// Draws fix colliders: circle for HOLDING fixes, north-pointing triangle for all others.
+    /// NM size is scaled inversely with zoom so the collider stays constant in screen pixels.
+    private func syncFixColliders() {
+        let zoomScale    = pow(2.0, 8.8 - mapView.zoomLevel)
+        let circleNM     = 1.0 * zoomScale
+        let triangleNM   = 1.0 * zoomScale
+        let showFixes    = viewModel.layerOn("Fixes")
+        let showHolding  = viewModel.layerOn("Holding")
+        var features: [MLNPolylineFeature] = []
+        for fix in viewModel.fixes {
+            guard let lat = fix.latitude, let lon = fix.longitude else { continue }
+            let center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            if fix.type?.uppercased() == "HOLDING" {
+                guard showHolding else { continue }
+                var coords = circleCoords(center: center, radiusNM: circleNM)
+                coords.append(coords[0])
+                features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+            } else {
+                guard showFixes else { continue }
+                var coords = triangleColliderCoords(center: center, sizeNM: triangleNM)
+                features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+            }
+        }
+        fixColliderSource?.shape = MLNShapeCollectionFeature(shapes: features)
+    }
+
+    /// North-pointing equilateral triangle: vertices at `sizeNM` from centre, closed.
+    private func triangleColliderCoords(center: CLLocationCoordinate2D,
+                                         sizeNM: Double) -> [CLLocationCoordinate2D] {
+        let top   = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 0)
+        let right = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 120)
+        let left  = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 240)
+        return [top, right, left, top]
     }
 
     private func circleCoords(center: CLLocationCoordinate2D, radiusNM: Double, steps: Int = 36) -> [CLLocationCoordinate2D] {
