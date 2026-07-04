@@ -57,6 +57,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private let trailIcons: [UIImage] = (0..<8).map {
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
     }
+    /// true  = dot gap scales with aircraft speed (faster → wider gaps)
+    /// false = fixed gap between every dot regardless of speed (default)
+    private let dynamicTrailSpacing: Bool   = false
+    /// Gap between trail dots when dynamicTrailSpacing is false (nautical miles).
+    private let fixedTrailSpacingNM: Double = 0.60
     /// Fix icon markers — rebuilt only when the icon set (Fixes/Holding toggle, count) changes.
     private var fixIconAnnotations: [ImageAnnotation] = []
     /// Fix name labels — rebuilt only when the Fixes Names toggle changes (icons stay put).
@@ -226,8 +231,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let source = MLNShapeSource(identifier: "body-diamonds", shape: nil, options: nil)
         style.addSource(source)
         let layer = MLNLineStyleLayer(identifier: "body-diamonds", source: source)
-        layer.lineColor = NSExpression(forConstantValue: UIColor.cyan.withAlphaComponent(0.9))
+        layer.lineColor = NSExpression(forConstantValue: UIColor.cyan)
         layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        layer.lineOpacity = NSExpression(forConstantValue: 0)
         style.addLayer(layer)
         bodyDiamondSource = source
     }
@@ -236,8 +242,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let source = MLNShapeSource(identifier: "nose-diamonds", shape: nil, options: nil)
         style.addSource(source)
         let layer = MLNLineStyleLayer(identifier: "nose-diamonds", source: source)
-        layer.lineColor = NSExpression(forConstantValue: UIColor.magenta.withAlphaComponent(0.9))
+        layer.lineColor = NSExpression(forConstantValue: UIColor.magenta)
         layer.lineWidth = NSExpression(forConstantValue: 1.5)
+        layer.lineOpacity = NSExpression(forConstantValue: 0)
         style.addLayer(layer)
         noseDiamondSource = source
     }
@@ -643,27 +650,110 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     }
 
     private func syncTrailDots(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
-        let dots = Array(history.suffix(8))   // rolling window — always last 8 samples
-        var existing = trailAnnotations[id] ?? []
+        if let old = trailAnnotations[id], !old.isEmpty {
+            mapView.removeAnnotations(old)
+        }
 
-        // Grow the pool when new dots appear (rare: happens every historySampleTicks ticks).
-        while existing.count < dots.count {
-            let a = ImageAnnotation()
-            mapView.addAnnotation(a)
-            existing.append(a)
+        let positions = dynamicTrailSpacing
+            ? equalSpacedTrailPositions(from: history, count: 6)
+            : fixedSpacedTrailPositions(from: history, count: 6)
+        guard !positions.isEmpty else { trailAnnotations[id] = []; return }
+
+        let dots: [ImageAnnotation] = positions.indices.map { i in
+            let fraction = positions.count > 1 ? Double(i) / Double(positions.count - 1) : 1.0
+            let step     = Int((fraction * Double(trailIcons.count - 1)).rounded())
+            let a        = ImageAnnotation()
+            a.image      = trailIcons[step]
+            a.coordinate = positions[i]
+            return a
         }
-        // Shrink when dots are fewer (aircraft just spawned or history trimmed).
-        while existing.count > dots.count {
-            mapView.removeAnnotation(existing.removeLast())
+        mapView.addAnnotations(dots)
+        trailAnnotations[id] = dots
+    }
+
+    /// Returns `count` positions evenly spread along the recent flight path.
+    /// Uses the last 15 history samples so the tail window stays bounded.
+    /// Result is ordered oldest → newest (dot 0 = farthest, dot 5 = closest).
+    private func equalSpacedTrailPositions(from history: [CLLocationCoordinate2D],
+                                           count: Int) -> [CLLocationCoordinate2D] {
+        let window = Array(history.suffix(8))
+        guard window.count >= 2 else { return Array(window.suffix(count)) }
+
+        // Build cumulative arc-lengths along the window (index 0 = oldest end).
+        var cum = [Double](repeating: 0, count: window.count)
+        for i in 1..<window.count {
+            cum[i] = cum[i - 1] + Geo.distanceMeters(from: window[i - 1], to: window[i])
         }
-        // Update coordinates + icons in place — no add/remove, no UIView lifecycle cost.
-        for i in dots.indices {
-            let fraction = dots.count > 1 ? Double(i) / Double(dots.count - 1) : 1.0
-            let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
-            existing[i].image = trailIcons[step]
-            existing[i].coordinate = dots[i]
+        let total = cum.last!
+        guard total > 0 else { return [window.last!] }
+
+        // Place `count` dots at equal fractions of the total arc length.
+        // k=1 → farthest from aircraft (oldest); k=count → closest (newest).
+        var result: [CLLocationCoordinate2D] = []
+        for k in 1...count {
+            let target = total * Double(k) / Double(count)
+
+            // Find the segment that contains `target`.
+            var seg = window.count - 2          // safe default = last segment
+            for i in 0..<window.count - 1 {
+                if cum[i + 1] >= target { seg = i; break }
+            }
+            let seg1   = min(seg + 1, window.count - 1)
+            let segLen = cum[seg1] - cum[seg]
+            let t      = segLen > 0 ? (target - cum[seg]) / segLen : 0.0
+            let lat    = window[seg].latitude  + t * (window[seg1].latitude  - window[seg].latitude)
+            let lon    = window[seg].longitude + t * (window[seg1].longitude - window[seg].longitude)
+            result.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
         }
-        trailAnnotations[id] = existing
+        return result   // already ordered oldest → newest
+    }
+
+    /// Returns exactly `count` positions spaced `fixedTrailSpacingNM` NM apart,
+    /// walking backward from the newest history point. If history is too short,
+    /// remaining dots are projected backward from the oldest point so all `count`
+    /// dots are visible from the moment the aircraft first appears.
+    /// Result is ordered oldest → newest (farthest → closest to aircraft).
+    private func fixedSpacedTrailPositions(from history: [CLLocationCoordinate2D],
+                                           count: Int) -> [CLLocationCoordinate2D] {
+        guard history.count >= 2 else { return [] }
+        let spacingMeters = fixedTrailSpacingNM * 1852.0
+
+        var result  = [CLLocationCoordinate2D]()
+        var walked  = 0.0       // distance walked backward from newest point
+        var dotNum  = 1         // next dot falls at dotNum × spacingMeters from newest
+        var i       = history.count - 1
+
+        while i > 0, result.count < count {
+            let segTo   = history[i]
+            let segFrom = history[i - 1]
+            let segLen  = Geo.distanceMeters(from: segFrom, to: segTo)
+
+            while Double(dotNum) * spacingMeters <= walked + segLen, result.count < count {
+                let t   = segLen > 0 ? (Double(dotNum) * spacingMeters - walked) / segLen : 0
+                let lat = segTo.latitude  + t * (segFrom.latitude  - segTo.latitude)
+                let lon = segTo.longitude + t * (segFrom.longitude - segTo.longitude)
+                result.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                dotNum += 1
+            }
+
+            walked += segLen
+            i -= 1
+        }
+
+        // History too short — project the remaining dots backward from the oldest
+        // point using the heading of the first history segment.
+        if result.count < count {
+            let backBearing = Geo.bearing(from: history[1], to: history[0])
+            while result.count < count {
+                let extra = Double(dotNum) * spacingMeters - walked
+                result.append(Geo.offset(from: history[0],
+                                         distanceMeters: extra,
+                                         bearingDegrees: backBearing))
+                dotNum += 1
+            }
+        }
+
+        return result.reversed()    // oldest first (farthest from aircraft)
     }
 
     /// Rebuilds the trail dashed-line source from all aircraft history arrays.

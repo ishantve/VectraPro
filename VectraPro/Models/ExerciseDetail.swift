@@ -41,6 +41,8 @@ struct ExerciseDetail: Decodable {
     let isMultiMode: Bool?
     let airspaceCapacity: Int?
     let aircraftSpawningCount: Int?
+    /// Exercise duration in minutes (from gameEnd.time). nil = unlimited.
+    let gameEndTime: Int?
     let fixes: [Fix]
     let zones: [Zone]
     let obstructions: [Obstruction]
@@ -146,11 +148,14 @@ struct ExerciseDetail: Decodable {
         let isLighted: Bool?
     }
 
+    private struct GameEnd: Decodable { let time: Int? }
+
     enum CodingKeys: String, CodingKey {
         case id, exerciseName, icaoCode, airportName, vorName
         case mapLocation, isRunwayEnabled, runwaysResponse, aircrafts, airlines, commands, fixes, zone
         case obstruction
         case isMultiMode, airspaceCapacity, aircraftSpawningCount
+        case gameEnd
         case frequencyOfDeparture, frequencyOfArrival, frequencyOfEnroute
     }
 
@@ -172,6 +177,7 @@ struct ExerciseDetail: Decodable {
         isMultiMode          = try? c.decodeIfPresent(Bool.self, forKey: .isMultiMode)
         airspaceCapacity     = try? c.decodeIfPresent(Int.self, forKey: .airspaceCapacity)
         aircraftSpawningCount = try? c.decodeIfPresent(Int.self, forKey: .aircraftSpawningCount)
+        gameEndTime          = (try? c.decodeIfPresent(GameEnd.self, forKey: .gameEnd))?.time
         fixes           = (try? c.decodeIfPresent([Fix].self, forKey: .fixes)) ?? []
         zones           = (try? c.decodeIfPresent([Zone].self, forKey: .zone)) ?? []
         obstructions    = (try? c.decodeIfPresent([Obstruction].self, forKey: .obstruction)) ?? []
