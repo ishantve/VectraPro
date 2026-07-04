@@ -64,10 +64,10 @@ final class MapViewModel: ObservableObject {
     private var freqArrival: ExerciseDetail.FrequencyOfArrival?
     private var freqEnroute: ExerciseDetail.FrequencyOfEnroute?
 
-    /// How a category spawns: a fixed interval (Custom) or random intervals up
-    /// to a quota (Random).
+    /// How a category spawns: fixed interval up to quota (Custom), or random
+    /// intervals up to a quota (Random). Both modes stop when `remaining` hits 0.
     private enum SpawnMode {
-        case custom(interval: Double)
+        case custom(interval: Double, remaining: Int)
         case random(remaining: Int)
     }
     /// Active spawners (one per category that has Custom/Random frequency).
@@ -88,31 +88,32 @@ final class MapViewModel: ObservableObject {
     private var radarPromotionCountdown: Double = .infinity
     private let promotionIntervals: [Double] = [15, 20, 30, 45, 60, 90]
 
-    /// Split `total` into `parts` descending whole numbers (priority gets more),
-    /// e.g. (15, 3) → [6,5,4]; (15, 2) → [8,7]; (15, 1) → [15].
-    private func descendingSplit(total: Int, parts: Int) -> [Int] {
-        guard parts > 0 else { return [] }
-        guard total > 0 else { return Array(repeating: 0, count: parts) }
+    /// Fixed capacity weights: Arrival=40%, Departure=30%, Enroute=30%.
+    private let categoryWeights: [FlightCategory: Double] = [
+        .arrival: 40, .departure: 30, .enroute: 30
+    ]
 
-        // Descending-by-1 sequence centred to sum ≈ total, clamped ≥ 0.
-        let a = Double(total + parts * (parts - 1) / 2) / Double(parts)
-        var values = (0..<parts).map { max(0, Int((a - Double($0)).rounded())) }
-
-        // Fix the sum exactly, adjusting the highest-priority slots first.
-        var diff = total - values.reduce(0, +)
-        var i = 0
-        let safety = parts * (total + parts) + 1
-        while diff != 0, i < safety {
-            let idx = i % parts
-            if diff > 0 {
-                values[idx] += 1; diff -= 1
-            } else if values[idx] > 0 {
-                values[idx] -= 1; diff += 1
-            }
-            i += 1
+    /// Splits `total` across `categories` by their 40/30/30 weights,
+    /// renormalised to whichever categories are active.
+    /// The returned array always sums to exactly `total`.
+    private func weightedSplit(total: Int, categories: [FlightCategory]) -> [Int] {
+        guard total > 0, !categories.isEmpty else { return Array(repeating: 0, count: categories.count) }
+        let weights = categories.map { categoryWeights[$0] ?? 1.0 }
+        let totalWeight = weights.reduce(0, +)
+        var shares = weights.map { Int((Double(total) * $0 / totalWeight).rounded()) }
+        // Correct rounding by adjusting the largest share so sum == total.
+        let diff = total - shares.reduce(0, +)
+        if diff != 0, let idx = shares.indices.max(by: { shares[$0] < shares[$1] }) {
+            shares[idx] += diff
         }
-        return values
+        return shares
     }
+
+    /// Whether a category is active (Custom or Random). "None" or missing → inactive.
+    /// Used by the UI to hide hangar-list sections for disabled categories.
+    var isArrivalActive:   Bool { isActiveType(freqArrival?.type)   }
+    var isDepartureActive: Bool { isActiveType(freqDeparture?.type) }
+    var isEnrouteActive:   Bool { isActiveType(freqEnroute?.type)   }
 
     /// Radial lines for the exercise's VOR fixes (empty when none).
     func fixRadialLines() -> [MapLine] {
@@ -181,6 +182,9 @@ final class MapViewModel: ObservableObject {
         aircraftSpawningCount = detail.aircraftSpawningCount ?? 1
         airlines = detail.airlines
         aircraftTypes = detail.aircrafts
+        exerciseName = detail.exerciseName
+        // gameEndTime arrives in minutes from the API.
+        exerciseDurationSeconds = (detail.gameEndTime ?? 0) * 60
 
         #if DEBUG
         print("""
@@ -239,6 +243,17 @@ final class MapViewModel: ObservableObject {
     /// Approaches currently enabled (shown with runway + localizer). Driven
     /// locally for now; will be supplied by the backend later.
     @Published private(set) var enabledApproaches: Set<ApproachID> = []
+
+    // MARK: - Exercise timer
+
+    /// Display name of the active exercise (set by applyExercise).
+    @Published private(set) var exerciseName: String = ""
+    /// Seconds elapsed since the exercise started (counts up from 0).
+    @Published private(set) var elapsedSeconds: Int = 0
+    /// Total exercise duration in seconds (0 = unlimited).
+    @Published private(set) var exerciseDurationSeconds: Int = 0
+    /// True once the timer reaches the full duration; triggers the summary popup.
+    @Published private(set) var isExerciseFinished = false
 
     // MARK: - Aircraft
 
@@ -438,6 +453,10 @@ final class MapViewModel: ObservableObject {
         airspaceCapacity     = 1
         aircraftSpawningCount = 1
         radarPromotionCountdown = .infinity
+        exerciseName             = ""
+        elapsedSeconds           = 0
+        exerciseDurationSeconds  = 0
+        isExerciseFinished       = false
     }
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
@@ -452,6 +471,8 @@ final class MapViewModel: ObservableObject {
         pendingStart = nil
         // Initial aircraft count toward the capacity and are distributed across
         // the active categories with the same priority logic as the lists.
+        elapsedSeconds      = 0
+        isExerciseFinished  = false
         spawner.resetRadialCycle(fixes: fixes)
         aircraft = initialCategories().map { spawner.makeRandomAircraft(context: spawnContext, category: $0) }
         resetTraffic()
@@ -494,12 +515,13 @@ final class MapViewModel: ObservableObject {
         let count = initialSpawnCount()
         let cats = activeCategories().filter { $0 != .departure }
         guard !cats.isEmpty else { return Array(repeating: .arrival, count: count) }
-        let split = descendingSplit(total: count, parts: cats.count)
+        let split = weightedSplit(total: count, categories: cats)
         return zip(cats, split).flatMap { Array(repeating: $0.0, count: $0.1) }
     }
 
     /// Clear the hangar lists and rebuild the spawners from the exercise.
-    /// Priority order (most → least traffic): arrival, departure, enroute.
+    /// Capacity is divided 40% Arrival / 30% Departure / 30% Enroute among
+    /// the active categories; "none" (or missing) categories get no spawner.
     private func resetTraffic() {
         traffic = []
         spawners = []
@@ -510,21 +532,20 @@ final class MapViewModel: ObservableObject {
             (.enroute,   freqEnroute?.type,   freqEnroute?.enrouteFlights,     freqEnroute?.enrouteFlightsTimeValue)
         ]
 
-        // Random categories share the total cap, distributed by priority. A
-        // "none" (or missing) type spawns nothing, so its share goes to the rest.
-        let randomCats = configs.filter { $0.type?.lowercased() == "random" }.map(\.category)
-        let quotas = descendingSplit(total: airspaceCapacity, parts: randomCats.count)
-        let quotaForCategory = Dictionary(uniqueKeysWithValues: zip(randomCats, quotas))
+        // Per-category quota: 40/30/30 weighted split across all active categories.
+        let activeCats = configs.filter { isActiveType($0.type) }.map(\.category)
+        let quotas     = weightedSplit(total: airspaceCapacity, categories: activeCats)
+        let quotaMap   = Dictionary(uniqueKeysWithValues: zip(activeCats, quotas))
 
         for config in configs {
+            guard let quota = quotaMap[config.category], quota > 0 else { continue }
             switch config.type?.lowercased() {
             case "custom":
                 guard let flights = config.flights, flights > 0,
                       let minutes = config.minutes, minutes > 0 else { continue }
                 let interval = Double(minutes) * 60.0 / Double(flights)
-                spawners.append((config.category, .custom(interval: interval), interval))
+                spawners.append((config.category, .custom(interval: interval, remaining: quota), interval))
             case "random":
-                guard let quota = quotaForCategory[config.category], quota > 0 else { continue }
                 spawners.append((config.category, .random(remaining: quota), randomIntervals.randomElement() ?? 30))
             default:
                 continue   // "none" / missing → no spawner
@@ -580,6 +601,13 @@ final class MapViewModel: ObservableObject {
         if fixConflicts != fixConflictIDs { fixConflictIDs = fixConflicts }
 
         blinkState.toggle()
+
+        // Advance the exercise clock; finish when we reach the target duration.
+        elapsedSeconds += 1
+        if exerciseDurationSeconds > 0, elapsedSeconds >= exerciseDurationSeconds {
+            isExerciseFinished = true
+            stopSimulation()
+        }
     }
 
     /// Advance every spawner; add a list aircraft when its countdown elapses.
@@ -596,8 +624,10 @@ final class MapViewModel: ObservableObject {
             }
 
             switch spawners[i].mode {
-            case .custom(let interval):
+            case .custom(let interval, let remaining):
+                guard remaining > 0 else { spawners[i].countdown = .infinity; continue }
                 traffic.append(spawner.makeListAircraft(context: spawnContext, category: spawners[i].category))
+                spawners[i].mode = .custom(interval: interval, remaining: remaining - 1)
                 spawners[i].countdown += interval
 
             case .random(let remaining):

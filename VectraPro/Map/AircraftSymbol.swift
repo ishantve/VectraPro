@@ -84,7 +84,14 @@ enum AircraftSymbol {
     ///   Row 4  remarks  (optional)
     static func label(for aircraft: Aircraft, conflictColor: UIColor? = nil) -> UIImage {
         let font  = UIFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
-        let tint  = conflictColor ?? color
+        let categoryColor: UIColor = {
+            switch aircraft.category {
+            case .departure: return UIColor(red: 1.0, green: 0.95, blue: 0.45, alpha: 1.0)
+            case .arrival:   return UIColor(red: 1.0, green: 0.65, blue: 0.65, alpha: 1.0)
+            case .enroute:   return .white
+            }
+        }()
+        let tint  = conflictColor ?? categoryColor
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: tint]
 
         // col0 = target FL while climbing/descending, else current FL

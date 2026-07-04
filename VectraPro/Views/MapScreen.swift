@@ -124,19 +124,29 @@ struct MapScreen: View {
         }
         .animation(.easeInOut(duration: 0.25), value: speechViewModel.showField)
         .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.6), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.6), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                }
+
+                if viewModel.exerciseDurationSeconds > 0 {
+                    Text(viewModel.elapsedSeconds.asTimerString)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
+                }
             }
             .padding(.leading, 16)
-            // Drop below the native window controls only when windowed; keep the
-            // original placement in fullscreen.
             .padding(.top, isWindowed ? 44 : 8)
         }
         .overlay(alignment: .topTrailing) {
@@ -221,6 +231,11 @@ struct MapScreen: View {
             }
             .padding(.trailing, 16)
             .padding(.bottom, 12)
+        }
+        .overlay {
+            if viewModel.isExerciseFinished {
+                exerciseSummaryOverlay
+            }
         }
         .navigationBarBackButtonHidden(true)
         .disablesSwipeBack()
@@ -698,6 +713,48 @@ struct MapScreen: View {
         }
     }
 
+    @ViewBuilder
+    private var exerciseSummaryOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.75).ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+
+                Text("Exercise Complete")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+
+                VStack(spacing: 8) {
+                    Text(viewModel.exerciseName)
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.85))
+
+                    Text("Duration: \(viewModel.exerciseDurationSeconds.asTimerString)")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+
+                Button {
+                    viewModel.clearOnExit()
+                    dismiss()
+                } label: {
+                    Text("Exit")
+                        .font(.headline)
+                        .foregroundStyle(.black)
+                        .frame(width: 160, height: 44)
+                        .background(Color(red: 0.2, green: 1.0, blue: 0.4), in: Capsule())
+                }
+            }
+            .padding(40)
+            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.12), lineWidth: 1))
+            .padding(32)
+        }
+    }
+
     private var approachChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -715,6 +772,16 @@ struct MapScreen: View {
             }
             .padding(.horizontal, 2)
         }
+    }
+}
+
+private extension Int {
+    /// Formats seconds as "HH:MM:SS".
+    var asTimerString: String {
+        let h = self / 3600
+        let m = (self % 3600) / 60
+        let s = self % 60
+        return String(format: "%02d:%02d:%02d", h, m, s)
     }
 }
 
