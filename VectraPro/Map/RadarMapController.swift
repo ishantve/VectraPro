@@ -80,6 +80,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Which aircraft's data block is being dragged (nil = none).
     private var draggingLabelID: UUID?
 
+    // Sync throttling: objectWillChange just sets this flag; the CADisplayLink
+    // drains it at most once per display frame (60 fps) — prevents 7+ sync() calls
+    // per simulation tick from blocking the main thread.
+    private var needsSync = false
+    private var displayLink: CADisplayLink?
+
     // Distance measurement
     private var measurementLineSource: MLNShapeSource?
     private var measurementDotA: ImageAnnotation?
@@ -94,11 +100,17 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         setupMapView()
 
         // Drive updates from the model so the map refreshes regardless of which
-        // window currently hosts it.
+        // window currently hosts it. Setting a flag here (not calling sync() directly)
+        // lets the CADisplayLink drain it at most once per frame — collapses the 7+
+        // objectWillChange emissions that tick() produces into a single sync() call.
         viewModel.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.sync() }
+            .sink { [weak self] in self?.needsSync = true }
             .store(in: &cancellables)
+
+        let dl = CADisplayLink(target: self, selector: #selector(displayLinkFired))
+        dl.add(to: .main, forMode: .common)
+        displayLink = dl
 
         viewModel.zoomPublisher
             .sink { [weak self] delta in self?.applyZoom(delta) }
@@ -107,6 +119,16 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         viewModel.panPublisher
             .sink { [weak self] bearing in self?.panStep(towardBearing: bearing) }
             .store(in: &cancellables)
+    }
+
+    deinit {
+        displayLink?.invalidate()
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        guard needsSync else { return }
+        needsSync = false
+        sync()
     }
 
     private func panStep(towardBearing bearing: Double) {
@@ -621,19 +643,27 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     }
 
     private func syncTrailDots(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
-        if let old = trailAnnotations[id] { mapView.removeAnnotations(old) }
         let dots = Array(history.suffix(8))   // rolling window — always last 8 samples
-        var annotations: [ImageAnnotation] = []
-        for index in dots.indices {
-            let fraction = dots.count > 1 ? Double(index) / Double(dots.count - 1) : 1
-            let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
-            let annotation = ImageAnnotation()
-            annotation.image = trailIcons[step]
-            annotation.coordinate = dots[index]
-            annotations.append(annotation)
-            mapView.addAnnotation(annotation)
+        var existing = trailAnnotations[id] ?? []
+
+        // Grow the pool when new dots appear (rare: happens every historySampleTicks ticks).
+        while existing.count < dots.count {
+            let a = ImageAnnotation()
+            mapView.addAnnotation(a)
+            existing.append(a)
         }
-        trailAnnotations[id] = annotations
+        // Shrink when dots are fewer (aircraft just spawned or history trimmed).
+        while existing.count > dots.count {
+            mapView.removeAnnotation(existing.removeLast())
+        }
+        // Update coordinates + icons in place — no add/remove, no UIView lifecycle cost.
+        for i in dots.indices {
+            let fraction = dots.count > 1 ? Double(i) / Double(dots.count - 1) : 1.0
+            let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
+            existing[i].image = trailIcons[step]
+            existing[i].coordinate = dots[i]
+        }
+        trailAnnotations[id] = existing
     }
 
     /// Rebuilds the trail dashed-line source from all aircraft history arrays.

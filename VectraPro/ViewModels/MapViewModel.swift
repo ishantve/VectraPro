@@ -125,8 +125,17 @@ final class MapViewModel: ObservableObject {
     }
 
     /// Polygon shapes (border + fill + label) for the exercise's airspace zones.
+    /// Result is cached and only rebuilt when `zones` changes — called multiple
+    /// times per tick from collision detection and spawn context.
+    private var _cachedZoneShapes: [ZoneShape] = []
+    private var _zoneShapesDirty = true
+
     func zoneShapes() -> [ZoneShape] {
-        ZoneRenderer.shapes(zones: zones)
+        if _zoneShapesDirty {
+            _cachedZoneShapes = ZoneRenderer.shapes(zones: zones)
+            _zoneShapesDirty = false
+        }
+        return _cachedZoneShapes
     }
 
     /// Waypoint-type fixes, shown as triangle icons on the radar.
@@ -150,6 +159,7 @@ final class MapViewModel: ObservableObject {
         fixes = detail.fixes
         zones = detail.zones
         obstructions = detail.obstructions
+        _zoneShapesDirty = true
 
         #if DEBUG
         print("========== ZONES (\(zones.count)) ==========")
@@ -418,6 +428,7 @@ final class MapViewModel: ObservableObject {
         fixes                = []
         zones                = []
         obstructions         = []
+        _zoneShapesDirty     = true
         airlines             = []
         aircraftTypes        = []
         freqDeparture        = nil
