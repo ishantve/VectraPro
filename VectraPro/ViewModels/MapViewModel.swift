@@ -551,6 +551,12 @@ final class MapViewModel: ObservableObject {
                 continue   // "none" / missing → no spawner
             }
         }
+
+        // Seed one departure aircraft into the hangar immediately so the
+        // controller always has something to clear for takeoff at exercise start.
+        if spawners.contains(where: { $0.category == .departure }) {
+            traffic.append(spawner.makeListAircraft(context: spawnContext, category: .departure))
+        }
     }
 
     private func tick() {
@@ -704,12 +710,43 @@ final class MapViewModel: ObservableObject {
     }
 
     /// Resolves a departure callsign from an already-normalised voice transcript.
-    /// Tries direct ICAO code match first, then spoken airline-name + flight-number.
     func resolveDepartureCallsign(from normalizedText: String) -> String? {
+        resolveCallsign(from: normalizedText,
+                        among: traffic.filter { $0.category == .departure })
+    }
+
+    /// Resolves a live radar aircraft callsign from an already-normalised voice transcript.
+    func resolveRadarCallsign(from normalizedText: String) -> String? {
+        resolveCallsign(from: normalizedText, among: aircraft)
+    }
+
+    /// Applies commands to an aircraft found by callsign — no selection required.
+    func applyToCallsign(_ callsign: String, commands: [AircraftCommand]) {
+        guard let i = aircraft.firstIndex(where: {
+            $0.callsign.uppercased() == callsign.uppercased()
+        }) else {
+            CommandFeedbackManager.shared.aircraftNotFound()
+            return
+        }
+        physics.apply(commands, to: &aircraft[i])
+        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign,
+                                                      commands: commands)
+    }
+
+    /// Shared resolver: direct ICAO match → spoken airline name + flight number.
+    private func resolveCallsign(from normalizedText: String,
+                                 among candidates: [Aircraft]) -> String? {
         let text = normalizedText.lowercased()
-        // 1. Direct match — e.g. "aic235" somewhere in the text.
-        for ac in traffic where ac.category == .departure {
-            if text.contains(ac.callsign.lowercased()) { return ac.callsign }
+        // 1. Direct match — "aic235" or spaced form "aca 29" both match callsign "ACA29".
+        for ac in candidates {
+            let cs = ac.callsign.lowercased()
+            if text.contains(cs) { return ac.callsign }
+            // Spoken callsigns often have a space between letter prefix and digits.
+            let letters = String(cs.prefix(while: { $0.isLetter }))
+            let digits  = String(cs.drop(while:  { $0.isLetter }))
+            if !letters.isEmpty && !digits.isEmpty && text.contains("\(letters) \(digits)") {
+                return ac.callsign
+            }
         }
         // 2. Airline spoken name + flight number — e.g. "air india 235".
         for airline in airlines {
@@ -722,9 +759,9 @@ final class MapViewModel: ObservableObject {
                                      .filter(\.isNumber).prefix(4))
             guard !digits.isEmpty else { continue }
             let candidate = icao + digits
-            if traffic.contains(where: {
-                $0.callsign.uppercased() == candidate && $0.category == .departure
-            }) { return candidate }
+            if candidates.contains(where: { $0.callsign.uppercased() == candidate }) {
+                return candidate
+            }
         }
         return nil
     }
