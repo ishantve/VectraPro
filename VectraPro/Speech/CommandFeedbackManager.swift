@@ -2,53 +2,79 @@
 //  CommandFeedbackManager.swift
 //  VectraPro
 //
-//  Central manager for all ATC command audio feedback.
+//  Central manager for all ATC command audio feedback and the on-screen log.
 //  Both the keyboard and voice command paths route every sound and TTS
 //  utterance through here — nothing else calls FeedbackSound directly.
 //
 
+import Combine
 import Foundation
 
-final class CommandFeedbackManager {
+// MARK: - FeedbackEntry
+
+struct FeedbackEntry: Identifiable {
+    let id      = UUID()
+    let text:    String
+    let isError: Bool
+}
+
+// MARK: - CommandFeedbackManager
+
+final class CommandFeedbackManager: ObservableObject {
 
     static let shared = CommandFeedbackManager()
     private init() {}
 
+    /// Recent feedback entries (newest first). Auto-expires after 8 s each.
+    @Published var feedbackLog: [FeedbackEntry] = []
+    private let maxLogEntries = 8
+
     // MARK: - PTT mic lifecycle tones
 
-    /// Short "mic open" tone — call when voice recording starts.
-    func micStarted() {
-        FeedbackSound.micOn()
-    }
-
-    /// Short "mic closed" tone — call when voice recording stops.
-    func micStopped() {
-        FeedbackSound.micOff()
-    }
+    func micStarted() { FeedbackSound.micOn() }
+    func micStopped() { FeedbackSound.micOff() }
 
     // MARK: - Command results
 
     /// ATC-style readback after a command is successfully applied.
-    /// Joins multiple commands with a comma, prefixed with the callsign.
-    /// e.g. "ACA98, turn left heading 270, speed 250 knots"
     func commandAccepted(callsign: String, commands: [AircraftCommand]) {
-        let text = commands.map { readback(for: $0) }.joined(separator: ", ")
-        FeedbackSound.speak("\(callsign), \(text)")
+        let detail = commands.isEmpty
+            ? "wilco"
+            : commands.map { readback(for: $0) }.joined(separator: ", ")
+        let text = "\(callsign), \(detail)"
+        log(text, isError: false)
+        FeedbackSound.speak(text)
     }
 
     /// Speaks an error phrase when a command cannot be applied.
     func commandError(_ phrase: String) {
+        log(phrase, isError: true)
         FeedbackSound.speak(phrase)
     }
 
-    /// Standard error: no aircraft is selected when a command is issued.
+    /// Standard error: no aircraft selected / found when a command is issued.
     func aircraftNotFound() {
         commandError("Aircraft not found")
     }
 
+    // MARK: - Log management
+
+    private func log(_ text: String, isError: Bool) {
+        let entry = FeedbackEntry(text: text, isError: isError)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.feedbackLog.insert(entry, at: 0)
+            if self.feedbackLog.count > self.maxLogEntries {
+                self.feedbackLog = Array(self.feedbackLog.prefix(self.maxLogEntries))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            self?.feedbackLog.removeAll { $0.id == entry.id }
+        }
+    }
+
     // MARK: - Readback text per command type
 
-    /// Converts a single command into a natural-language ATC readback phrase.
     private func readback(for command: AircraftCommand) -> String {
         switch command {
         case .heading(let h):

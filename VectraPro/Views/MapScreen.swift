@@ -12,6 +12,7 @@ struct MapScreen: View {
     @ObservedObject private var viewModel = MapViewModel.shared
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
     @ObservedObject private var presentation = RadarPresentation.shared
+    @ObservedObject private var feedbackManager = CommandFeedbackManager.shared
     @State private var isLandscape = false
     @State private var isWindowed = false
     @State private var activeLayers: Set<RadarLayer> = []
@@ -210,6 +211,11 @@ struct MapScreen: View {
             zoomButtons
                 .padding(.leading, 24)
                 .padding(.bottom, 12)
+        }
+        .overlay(alignment: .bottomLeading) {
+            feedbackLogView
+                .padding(.leading, 24)
+                .padding(.bottom, 90)
         }
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
@@ -690,6 +696,40 @@ struct MapScreen: View {
                 .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(layerBorder, lineWidth: 1))
         }
+    }
+
+    // MARK: - Voice feedback log
+
+    private var feedbackLogView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(feedbackManager.feedbackLog) { entry in
+                HStack(spacing: 6) {
+                    Image(systemName: entry.isError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(entry.isError
+                            ? Color(red: 1.0, green: 0.35, blue: 0.35)
+                            : Color(red: 0.2, green: 1.0, blue: 0.4))
+                    Text(entry.text)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(
+                            entry.isError
+                                ? Color(red: 1.0, green: 0.35, blue: 0.35).opacity(0.4)
+                                : Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.3),
+                            lineWidth: 1
+                        )
+                )
+            }
+        }
+        .frame(maxWidth: 280, alignment: .leading)
+        .animation(.easeInOut(duration: 0.25), value: feedbackManager.feedbackLog.map(\.id))
     }
 
     private var zoomButtons: some View {
