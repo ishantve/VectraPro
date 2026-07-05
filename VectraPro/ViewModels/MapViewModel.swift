@@ -675,6 +675,80 @@ final class MapViewModel: ObservableObject {
             : .infinity
     }
 
+    // MARK: - Departure clearance
+
+    /// Moves a departure aircraft from the hangar to its assigned runway threshold
+    /// and starts the takeoff ground roll.
+    func clearForTakeoff(callsign: String) {
+        guard let idx = traffic.firstIndex(where: {
+            $0.callsign.uppercased() == callsign.uppercased() && $0.category == .departure
+        }) else {
+            CommandFeedbackManager.shared.aircraftNotFound()
+            return
+        }
+        var ac = traffic[idx]
+        let (threshold, heading) = departureThreshold(for: ac)
+
+        ac.position           = threshold
+        ac.headingDegrees     = heading
+        ac.speedKnots         = 0
+        ac.altitudeFeet       = 0
+        ac.targetSpeedKnots   = Aircraft.defaultSpeedKnots
+        ac.targetAltitudeFeet = 5000   // climb to FL050 after liftoff
+        ac.takeoffState       = .groundRoll(runwayHeading: heading)
+        ac.history            = []
+
+        traffic.remove(at: idx)
+        aircraft.append(ac)
+        CommandFeedbackManager.shared.commandAccepted(callsign: ac.callsign, commands: [])
+    }
+
+    /// Resolves a departure callsign from an already-normalised voice transcript.
+    /// Tries direct ICAO code match first, then spoken airline-name + flight-number.
+    func resolveDepartureCallsign(from normalizedText: String) -> String? {
+        let text = normalizedText.lowercased()
+        // 1. Direct match — e.g. "aic235" somewhere in the text.
+        for ac in traffic where ac.category == .departure {
+            if text.contains(ac.callsign.lowercased()) { return ac.callsign }
+        }
+        // 2. Airline spoken name + flight number — e.g. "air india 235".
+        for airline in airlines {
+            guard let spoken = airline.callSign?.lowercased().trimmingCharacters(in: .whitespaces),
+                  !spoken.isEmpty,
+                  let icao = airline.icaoCode?.uppercased(), !icao.isEmpty,
+                  let nameRange = text.range(of: spoken) else { continue }
+            let after  = String(text[nameRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            let digits = String(after.prefix(while: { $0.isNumber || $0 == " " })
+                                     .filter(\.isNumber).prefix(4))
+            guard !digits.isEmpty else { continue }
+            let candidate = icao + digits
+            if traffic.contains(where: {
+                $0.callsign.uppercased() == candidate && $0.category == .departure
+            }) { return candidate }
+        }
+        return nil
+    }
+
+    /// Returns the threshold coordinate and takeoff heading for an aircraft's
+    /// assigned runway. Falls back to the first available runway, then the center.
+    private func departureThreshold(for ac: Aircraft) -> (CLLocationCoordinate2D, Double) {
+        for runway in runways {
+            if runway.endA.designator == ac.assignedRunway {
+                return (runway.endA.coordinate,
+                        Geo.bearing(from: runway.endA.coordinate, to: runway.endB.coordinate))
+            }
+            if runway.endB.designator == ac.assignedRunway {
+                return (runway.endB.coordinate,
+                        Geo.bearing(from: runway.endB.coordinate, to: runway.endA.coordinate))
+            }
+        }
+        if let rwy = runways.first {
+            return (rwy.endA.coordinate,
+                    Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
+        }
+        return (center, 0)
+    }
+
     // MARK: - Approach enabling
 
     /// Every approach across all runways (both ends), for the toggle UI.

@@ -13,6 +13,15 @@ enum TurnDirection {
     case left, right
 }
 
+/// Departure takeoff phase. Set by clearForTakeoff(); nil once the aircraft is
+/// at normal cruise and fully under ATC control.
+enum TakeoffState: Equatable {
+    /// Aircraft is rolling on the runway accelerating to rotation speed.
+    case groundRoll(runwayHeading: Double)
+    /// Airborne but still in initial climb-out (until >1 000 ft).
+    case climbout
+}
+
 /// Which radar list (hangar) an aircraft belongs to.
 enum FlightCategory {
     case arrival, departure, enroute
@@ -29,6 +38,8 @@ struct Aircraft: Identifiable {
     var assignedRunway: String? = nil
     /// Holding fix this aircraft is holding at (nil = not holding).
     var holdingName: String? = nil
+    /// Takeoff phase; nil when the aircraft is airborne and under normal ATC control.
+    var takeoffState: TakeoffState? = nil
     /// ICAO type code of the aircraft (e.g. "AT72"), from the exercise.
     var aircraftType: String? = nil
     /// SSR squawk code (4 octal digits, e.g. "2301").
