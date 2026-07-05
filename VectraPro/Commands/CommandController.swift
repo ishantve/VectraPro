@@ -25,9 +25,23 @@ final class CommandController {
 
     /// Parse a transcript and apply any recognised commands to the aircraft.
     func process(_ transcript: String) {
+        let normalized = normalizeDigits(transcript.lowercased())
+
+        // Departure clearance: "Air India 235 cleared for takeoff"
+        if isTakeoffClearance(normalized),
+           let callsign = mapViewModel?.resolveDepartureCallsign(from: normalized) {
+            mapViewModel?.clearForTakeoff(callsign: callsign)
+            return
+        }
+
         let commands = parse(transcript)
         guard !commands.isEmpty else { return }
         mapViewModel?.apply(commands)
+    }
+
+    private func isTakeoffClearance(_ normalized: String) -> Bool {
+        normalized.contains("clear") &&
+        (normalized.contains("takeoff") || normalized.contains("take off"))
     }
 
     // MARK: - Parsing

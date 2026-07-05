@@ -15,10 +15,13 @@ final class AircraftPhysics {
 
     // MARK: - Constants
 
-    private let accelKnotsPerSecond  = 4.0    // engine spool-up (gradual)
-    private let decelKnotsPerSecond  = 6.0    // throttle + drag (faster)
-    private let climbFeetPerSecond   = 33.0   // 2000 ft/min
-    private let descentFeetPerSecond = 33.0   // 2000 ft/min
+    private let accelKnotsPerSecond      = 4.0    // engine spool-up (gradual)
+    private let decelKnotsPerSecond      = 6.0    // throttle + drag (faster)
+    private let climbFeetPerSecond       = 33.0   // 2000 ft/min
+    private let descentFeetPerSecond     = 33.0   // 2000 ft/min
+    private let takeoffAccelKnotsPerSec  = 8.0    // full takeoff thrust
+    private let rotationSpeedKnots       = 150.0  // Vr — transition to climbout
+    private let climboutAltitudeFt       = 1000.0 // feet AGL — end of climbout phase
 
     // MARK: - Command application
 
@@ -74,11 +77,43 @@ final class AircraftPhysics {
     /// Advances one aircraft through one simulation tick:
     /// turns, accelerates/decelerates, climbs/descends, then moves forward.
     func stepPhysics(_ aircraft: inout Aircraft, dt: Double) {
+        switch aircraft.takeoffState {
+
+        case .groundRoll(let runwayHeading):
+            // Lock heading to runway — no turning during roll.
+            aircraft.headingDegrees = runwayHeading
+            aircraft.targetHeading  = nil
+
+            // Full-thrust acceleration toward rotation speed.
+            aircraft.speedKnots = min(
+                aircraft.speedKnots + takeoffAccelKnotsPerSec * dt,
+                rotationSpeedKnots
+            )
+            let mps = aircraft.speedKnots * Distance.metersPerNauticalMile / 3600
+            aircraft.position = Geo.offset(from: aircraft.position,
+                                           distanceMeters: mps * dt,
+                                           bearingDegrees: runwayHeading)
+
+            if aircraft.speedKnots >= rotationSpeedKnots {
+                aircraft.takeoffState = .climbout
+            }
+            return  // skip normal physics during ground roll
+
+        case .climbout:
+            // Normal physics resumes; clear phase once safely airborne.
+            if aircraft.altitudeFeet >= climboutAltitudeFt {
+                aircraft.takeoffState = nil
+            }
+
+        case nil:
+            break
+        }
+
+        // Normal flight physics.
         turnTowardTarget(&aircraft, dt: dt)
         adjustSpeed(&aircraft, dt: dt)
         adjustAltitude(&aircraft, dt: dt)
 
-        // distance = TAS (m/s) × dt;  1 kt = 1852 m/hr
         let metersPerSecond = aircraft.speedKnots * Distance.metersPerNauticalMile / 3600
         aircraft.position = Geo.offset(
             from: aircraft.position,
