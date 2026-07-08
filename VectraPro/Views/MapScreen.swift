@@ -138,13 +138,19 @@ struct MapScreen: View {
                 }
 
                 if viewModel.exerciseDurationSeconds > 0 {
-                    Text(viewModel.elapsedSeconds.asTimerString)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.black.opacity(0.6), in: Capsule())
-                        .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
+                    HStack(spacing: 6) {
+                        Image("timer_icon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                        Text(viewModel.elapsedSeconds.asTimerString)
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    }
+                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
                 }
             }
             .padding(.leading, 16)
