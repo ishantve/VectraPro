@@ -331,6 +331,8 @@ final class MapViewModel: ObservableObject {
     @Published private(set) var fixConflictIDs: Set<UUID> = []
     /// Alternates true/false every simulation tick — drives data-block blink for zone conflicts.
     @Published private(set) var blinkState: Bool = false
+    /// Aircraft IDs currently in destroyed state — shown with destroyed icon for 1.5 s before removal.
+    @Published private(set) var destroyedAircraftIDs: Set<UUID> = []
 
     /// The aircraft the controller has selected — keyboard commands apply to this one.
     @Published private(set) var selectedAircraftID: UUID? = nil
@@ -431,6 +433,7 @@ final class MapViewModel: ObservableObject {
         redConflictIDs       = []
         zoneConflictIDs      = []
         fixConflictIDs       = []
+        destroyedAircraftIDs = []
         blinkState           = false
         isDrawing            = false
         pendingStart         = nil
@@ -565,6 +568,7 @@ final class MapViewModel: ObservableObject {
         advanceRadarPromotion()
 
         for index in aircraft.indices {
+            guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
             if tickCount % historySampleTicks == 0 {
                 aircraft[index].history.append(aircraft[index].position)
@@ -577,9 +581,17 @@ final class MapViewModel: ObservableObject {
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
         if !acResult.destroyed.isEmpty {
-            if let sel = selectedAircraftID, acResult.destroyed.contains(sel) { selectedAircraftID = nil }
-            aircraft.removeAll { acResult.destroyed.contains($0.id) }
-            traffic.removeAll  { acResult.destroyed.contains($0.id) }
+            let fresh = acResult.destroyed.subtracting(destroyedAircraftIDs)
+            if !fresh.isEmpty {
+                destroyedAircraftIDs.formUnion(fresh)
+                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    self.aircraft.removeAll { fresh.contains($0.id) }
+                    self.traffic.removeAll  { fresh.contains($0.id) }
+                    self.destroyedAircraftIDs.subtract(fresh)
+                }
+            }
         }
         let yellows = acResult.yellows.subtracting(acResult.destroyed)
         let reds    = acResult.reds.subtracting(acResult.destroyed)
@@ -589,9 +601,17 @@ final class MapViewModel: ObservableObject {
         // Zone boundary collisions.
         let zoneResult = collision.detectZoneConflicts(aircraft: aircraft, zoneShapes: zoneShapes())
         if !zoneResult.destroyed.isEmpty {
-            if let sel = selectedAircraftID, zoneResult.destroyed.contains(sel) { selectedAircraftID = nil }
-            aircraft.removeAll { zoneResult.destroyed.contains($0.id) }
-            traffic.removeAll  { zoneResult.destroyed.contains($0.id) }
+            let fresh = zoneResult.destroyed.subtracting(destroyedAircraftIDs)
+            if !fresh.isEmpty {
+                destroyedAircraftIDs.formUnion(fresh)
+                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    self.aircraft.removeAll { fresh.contains($0.id) }
+                    self.traffic.removeAll  { fresh.contains($0.id) }
+                    self.destroyedAircraftIDs.subtract(fresh)
+                }
+            }
         }
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.

@@ -25,6 +25,7 @@ struct VectraProApp: App {
         WindowGroup(id: "radar") {
             RadarWindowScene()
         }
+        .defaultSize(CGSize(width: 800, height: 600))
     }
 }
 
