@@ -48,7 +48,7 @@ final class AudioRecorder {
     func stop() -> URL? {
         recorder?.stop()
         recorder = nil
-        try? AVAudioSession.sharedInstance().setActive(false)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         return fileURL
     }
 
@@ -58,6 +58,6 @@ final class AudioRecorder {
         recorder = nil
         if let url = fileURL { try? FileManager.default.removeItem(at: url) }
         fileURL = nil
-        try? AVAudioSession.sharedInstance().setActive(false)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }

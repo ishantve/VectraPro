@@ -164,6 +164,13 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         tap.delegate = self
         mapView.addGestureRecognizer(tap)
 
+        // Mouse wheel / trackpad scroll → zoom (pointer device only, no touch fingers).
+        let scrollZoom = UIPanGestureRecognizer(target: self, action: #selector(handleScrollZoom(_:)))
+        scrollZoom.allowedScrollTypesMask = [.discrete, .continuous]
+        scrollZoom.maximumNumberOfTouches = 0
+        scrollZoom.delegate = self
+        mapView.addGestureRecognizer(scrollZoom)
+
         lastKnownSize = mapView.bounds.size
         lastScreen = mapView.window?.screen
     }
@@ -650,13 +657,23 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     }
 
     private func syncTrailDots(_ history: [CLLocationCoordinate2D], id: UUID, on mapView: MLNMapView) {
-        if let old = trailAnnotations[id], !old.isEmpty {
-            mapView.removeAnnotations(old)
-        }
-
         let positions = dynamicTrailSpacing
             ? equalSpacedTrailPositions(from: history, count: 6)
             : fixedSpacedTrailPositions(from: history, count: 6)
+
+        let existing = trailAnnotations[id] ?? []
+
+        // Fast path: dot count unchanged — just reposition existing annotations.
+        // Images never change, so no remove/add needed; only coordinate update.
+        if existing.count == positions.count, !existing.isEmpty {
+            for (dot, pos) in zip(existing, positions) {
+                dot.coordinate = pos
+            }
+            return
+        }
+
+        // Slow path: count changed (spawn / first appear) — rebuild from scratch.
+        if !existing.isEmpty { mapView.removeAnnotations(existing) }
         guard !positions.isEmpty else { trailAnnotations[id] = []; return }
 
         let dots: [ImageAnnotation] = positions.indices.map { i in
@@ -1211,6 +1228,17 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         default:
             break
         }
+    }
+
+    @objc private func handleScrollZoom(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .changed else { return }
+        let delta = gesture.translation(in: mapView)
+        gesture.setTranslation(.zero, in: mapView)
+        // Scroll up (delta.y < 0) = zoom in; scroll down = zoom out.
+        let zoomDelta = -delta.y * 0.02
+        let target = max(mapView.minimumZoomLevel,
+                         min(mapView.maximumZoomLevel, mapView.zoomLevel + zoomDelta))
+        mapView.setZoomLevel(target, animated: false)
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { true }

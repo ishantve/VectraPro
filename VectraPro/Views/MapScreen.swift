@@ -87,8 +87,6 @@ struct MapScreen: View {
     private let layerBG = Color(red: 0/255, green: 36/255, blue: 68/255).opacity(0.5)   // #002444
     private let layerBorder = Color(red: 110/255, green: 220/255, blue: 255/255)         // #6EDCFF
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
 
     private var provider: MapProvider { MapProvider(rawValue: providerRaw) ?? .mapLibre }
@@ -260,8 +258,12 @@ struct MapScreen: View {
             speechViewModel.onCommand = { [weak vm] transcript in
                 vm?.handleVoiceCommand(transcript)
             }
+            ExternalDisplayManager.shared.exerciseStarted()
         }
-        .onDisappear { viewModel.clearOnExit() }
+        .onDisappear {
+            viewModel.clearOnExit()
+            ExternalDisplayManager.shared.exerciseEnded()
+        }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
@@ -571,14 +573,10 @@ struct MapScreen: View {
         .buttonStyle(.plain)
     }
 
-    /// Open the radar in its own window, or merge it back into this screen.
+    /// Window toggle — UIKit ExternalDisplayManager auto-handles external screen.
     private var windowToggleButton: some View {
         Button {
-            if presentation.isMapDetached {
-                dismissWindow(id: "radar")
-            } else {
-                openWindow(id: "radar")
-            }
+            // SwiftUI openWindow disabled — external screen managed by ExternalDisplayManager.
         } label: {
             Image(systemName: presentation.isMapDetached ? "rectangle.on.rectangle.slash" : "rectangle.on.rectangle")
                 .font(.system(size: 16, weight: .semibold))

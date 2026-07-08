@@ -30,7 +30,7 @@ final class AzureLiveRecognizer: LiveTranscribing {
     func stop() {
         try? recognizer?.stopContinuousRecognition()
         recognizer = nil
-        try? AVAudioSession.sharedInstance().setActive(false)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     // MARK: - Private

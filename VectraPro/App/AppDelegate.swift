@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         GMSServices.provideAPIKey(AppConfiguration.googleMapsAPIKey)
+        ExternalDisplayManager.shared.startObserving()
         return true
     }
 }

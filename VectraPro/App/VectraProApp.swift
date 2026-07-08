@@ -19,12 +19,6 @@ struct VectraProApp: App {
         }
         .modelContainer(ConfigStore.shared.container)
 
-        // Radar in its own window. Opened manually from MapScreen; the user
-        // drags it onto the external monitor (Stage Manager), where it stays a
-        // normal interactive window — mouse + keyboard work there.
-        WindowGroup(id: "radar") {
-            RadarWindowScene()
-        }
     }
 }
 
