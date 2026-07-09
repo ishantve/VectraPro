@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        WindowPresentation.shared.startObservingDisplays()
+        ExternalDisplayManager.shared.startObserving()
         return true
     }
 }
