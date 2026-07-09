@@ -163,7 +163,7 @@ private struct Star: Shape {
     }
 }
 
-private struct GridBackground: View {
+struct GridBackground: View {
     var body: some View {
         Canvas { context, size in
             let spacing: CGFloat = 40
