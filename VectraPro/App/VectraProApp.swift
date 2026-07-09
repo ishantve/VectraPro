@@ -80,6 +80,12 @@ struct MainWindowView: View {
                 Spacer()
             }
         }
+        // Auto-open the content window whenever an external display connects.
+        .onChange(of: presentation.externalDisplayConnectTrigger) { _, _ in
+            guard !presentation.isRadarOpen else { return }
+            openWindow(id: "radar")
+            presentation.isRadarOpen = true
+        }
     }
 }
 
