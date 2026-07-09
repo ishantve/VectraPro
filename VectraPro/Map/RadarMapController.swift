@@ -594,6 +594,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
 
         for aircraft in current {
+            let isDestroyed = viewModel.destroyedAircraftIDs.contains(aircraft.id)
+
             // Symbol.
             let symbol = aircraftAnnotations[aircraft.id] ?? {
                 let a = ImageAnnotation()
@@ -603,6 +605,13 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                 mapView.addAnnotation(a)
                 return a
             }()
+            if isDestroyed {
+                symbol.image = UIImage(named: "destroyed_Aircraft")
+                symbol.coordinate = aircraft.position
+                // Skip label, trail and rotation updates for destroyed aircraft.
+                continue
+            }
+            symbol.image = AircraftSymbol.image()
             symbol.coordinate = aircraft.position
             updateRotation(of: symbol, degrees: aircraft.headingDegrees, on: mapView)
 
