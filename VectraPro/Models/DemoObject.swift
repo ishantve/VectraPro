@@ -97,6 +97,25 @@ final class ObjectsStore: ObservableObject {
     private init() {}
 
     @Published var objects: [DemoObject] = ObjectsStore.seed()
+    /// Currently selected object (moved by the control-panel arrows).
+    @Published var selectedID: UUID?
+
+    func select(_ id: UUID?) { selectedID = id }
+
+    /// Nudge the selected object by a delta (used by the arrow buttons).
+    func nudgeSelected(dx: CGFloat, dy: CGFloat) {
+        guard let id = selectedID,
+              let i = objects.firstIndex(where: { $0.id == id }) else { return }
+        objects[i].x += dx
+        objects[i].y += dy
+    }
+
+    /// Resize the selected object by a delta (used by the +/- buttons).
+    func resizeSelected(by delta: CGFloat) {
+        guard let id = selectedID,
+              let i = objects.firstIndex(where: { $0.id == id }) else { return }
+        objects[i].size = max(30, min(220, objects[i].size + delta))
+    }
 
     /// Move an object to a display at a given position (used on cross-window drop).
     func move(id: UUID, to display: DisplayID, at point: CGPoint) {
@@ -117,10 +136,11 @@ final class ObjectsStore: ObservableObject {
 
     private static func seed() -> [DemoObject] {
         [
+            // Main objects — these also appear on the Extended display.
             DemoObject(id: UUID(), shape: .circle,   colorName: "green",  origin: .main,        display: .main,        x: 120, y: 160, size: 80),
             DemoObject(id: UUID(), shape: .square,   colorName: "orange", origin: .main,        display: .main,        x: 280, y: 130, size: 74),
-            DemoObject(id: UUID(), shape: .triangle, colorName: "cyan",   origin: .extended,    display: .extended,    x: 130, y: 180, size: 90),
-            DemoObject(id: UUID(), shape: .capsule,  colorName: "pink",   origin: .extended,    display: .extended,    x: 180, y: 320, size: 96),
+            DemoObject(id: UUID(), shape: .triangle, colorName: "cyan",   origin: .main,        display: .main,        x: 200, y: 300, size: 90),
+            // Interactive display — its own separate objects.
             DemoObject(id: UUID(), shape: .circle,   colorName: "purple", origin: .interactive, display: .interactive, x: 130, y: 150, size: 80),
             DemoObject(id: UUID(), shape: .square,   colorName: "yellow", origin: .interactive, display: .interactive, x: 260, y: 260, size: 74),
         ]

@@ -184,33 +184,8 @@ struct StageManagerDemoView: View {
     let dismissWindow: () -> Void
 
     var body: some View {
-        ZStack {
-            WorkspaceLayoutView()
-
-            // Top bar — back to home only (window toggle lives inside panel 1)
-            VStack {
-                HStack {
-                    Button {
-                        if presentation.isRadarOpen {
-                            dismissWindow()
-                            presentation.isRadarOpen = false
-                        }
-                        presentation.selectedMode = nil
-                    } label: {
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.black.opacity(0.6), in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                    }
-                    .padding(.leading, 16)
-                    Spacer()
-                }
-                .padding(.top, 8)
-                Spacer()
-            }
-        }
+        // Home button now lives in the bottom control bar.
+        WorkspaceLayoutView()
     }
 }
 
@@ -283,8 +258,8 @@ struct HDMIAutoStatusView: View {
 struct RadarWindowScene: View {
     var body: some View {
         HStack(spacing: 0) {
-            // Left half — extended display with its objects
-            ObjectCanvas(display: .extended)
+            // Left half — extended display shows the SAME objects as Main
+            ObjectCanvas(display: .main)
                 .overlay(alignment: .top) {
                     displayTitle("Extended Display")
                 }

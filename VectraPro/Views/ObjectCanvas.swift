@@ -27,16 +27,21 @@ struct ObjectCanvas: View {
 
             // Objects on this display
             ForEach(store.objects(on: display)) { obj in
-                ObjectMark(object: obj)
+                ObjectMark(object: obj, isSelected: store.selectedID == obj.id)
                     .position(obj.position)
+                    // Tap to select.
+                    .onTapGesture { store.select(obj.id) }
                     // Continuous in-window movement with mouse / finger.
                     .simultaneousGesture(
                         DragGesture(coordinateSpace: .named("canvas"))
-                            .onChanged { store.setPosition(id: obj.id, $0.location) }
+                            .onChanged {
+                                store.select(obj.id)
+                                store.setPosition(id: obj.id, $0.location)
+                            }
                     )
                     // Press-and-hold lift for cross-window drag-and-drop.
                     .draggable(obj) {
-                        ObjectMark(object: obj)
+                        ObjectMark(object: obj, isSelected: false)
                             .frame(width: obj.size, height: obj.size)
                     }
             }
@@ -56,6 +61,7 @@ struct ObjectCanvas: View {
 
 private struct ObjectMark: View {
     let object: DemoObject
+    var isSelected: Bool = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -66,6 +72,13 @@ private struct ObjectMark: View {
                                    startPoint: .top, endPoint: .bottom)
                 )
                 .shadow(color: object.color.opacity(0.5), radius: 10)
+                // Selection ring
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(.white, lineWidth: isSelected ? 3 : 0)
+                        .padding(-8)
+                        .opacity(isSelected ? 1 : 0)
+                )
 
             // Origin badge — which display generated this object
             Text(object.origin.tag)

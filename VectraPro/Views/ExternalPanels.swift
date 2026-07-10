@@ -39,6 +39,11 @@ struct InfoPanelView: View {
 // MARK: - Bottom control bar
 
 struct ControlBarView: View {
+
+    @ObservedObject private var store = ObjectsStore.shared
+    @Environment(\.dismissWindow) private var dismissWindow
+    private let step: CGFloat = 20
+
     var body: some View {
         ZStack {
             LinearGradient(
@@ -48,17 +53,70 @@ struct ControlBarView: View {
             )
             .ignoresSafeArea()
 
-            HStack(spacing: 24) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.green.opacity(0.7))
+            HStack(spacing: 20) {
+                // Home — back to mode selection
+                Button {
+                    if WindowPresentation.shared.isRadarOpen {
+                        dismissWindow(id: "radar")
+                        WindowPresentation.shared.isRadarOpen = false
+                    }
+                    WindowPresentation.shared.selectedMode = nil
+                } label: {
+                    Image(systemName: "house.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.08), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
                 Text("Controls")
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.8))
+
                 Spacer()
+
+                // Direction pad — moves the selected object
+                let disabled = store.selectedID == nil
+                HStack(spacing: 10) {
+                    arrow("arrow.left")  { store.nudgeSelected(dx: -step, dy: 0) }
+                    VStack(spacing: 10) {
+                        arrow("arrow.up")   { store.nudgeSelected(dx: 0, dy: -step) }
+                        arrow("arrow.down") { store.nudgeSelected(dx: 0, dy:  step) }
+                    }
+                    arrow("arrow.right") { store.nudgeSelected(dx:  step, dy: 0) }
+                }
+                .opacity(disabled ? 0.35 : 1)
+                .disabled(disabled)
+
+                Divider()
+                    .frame(height: 44)
+                    .overlay(Color.white.opacity(0.15))
+
+                // Resize — grows / shrinks the selected object
+                HStack(spacing: 10) {
+                    arrow("minus") { store.resizeSelected(by: -12) }
+                    arrow("plus")  { store.resizeSelected(by:  12) }
+                }
+                .opacity(disabled ? 0.35 : 1)
+                .disabled(disabled)
             }
             .padding(.horizontal, 28)
         }
+    }
+
+    private func arrow(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.green.opacity(0.4), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 

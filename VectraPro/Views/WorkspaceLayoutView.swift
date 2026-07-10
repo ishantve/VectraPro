@@ -26,11 +26,12 @@ struct WorkspaceLayoutView: View {
             let W = geo.size.width  - outerPadding * 2
             let H = geo.size.height - outerPadding * 2
 
-            // Bottom control bar takes a fixed share of the height.
-            let bottomH = H * 0.16
-            let topH    = H - bottomH - gap
+            // Top row gets 84% of the height; the bottom control bar takes the rest.
+            let topH    = H * 0.84
+            let bottomH = H - topH - gap
 
             // Left window is a square: as large as fits, capped at 70% of width.
+            // Since it's square, its width grows in step with the top height.
             let leftSide = min(W * 0.70, topH)
             let rightW   = W - leftSide - gap
 
