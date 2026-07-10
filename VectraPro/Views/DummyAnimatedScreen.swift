@@ -28,18 +28,6 @@ struct DummyAnimatedScreen: View {
                 GridBackground()
                     .opacity(0.15)
 
-                // Title / hint
-                VStack {
-                    Text("Drag the shapes")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.85))
-                    Text("Move them anywhere with your mouse or finger")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                .padding(.top, 40)
-                .frame(maxHeight: .infinity, alignment: .top)
-
                 // Draggable shapes
                 ForEach($shapes) { $shape in
                     ShapeView(shape: shape, pulse: pulse)

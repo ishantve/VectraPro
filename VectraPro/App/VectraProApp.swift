@@ -20,7 +20,7 @@ struct VectraProApp: App {
         WindowGroup(id: "radar") {
             RadarWindowScene()
         }
-        .defaultSize(CGSize(width: 800, height: 800))
+        .defaultSize(CGSize(width: 700, height: 700))
     }
 }
 
@@ -185,25 +185,11 @@ struct StageManagerDemoView: View {
 
     var body: some View {
         ZStack {
-            if presentation.isRadarOpen {
-                // Content moved to its own window
-                Color.black.ignoresSafeArea()
-                VStack(spacing: 16) {
-                    Image(systemName: "rectangle.on.rectangle.fill")
-                        .font(.system(size: 52))
-                        .foregroundStyle(.green.opacity(0.6))
-                    Text("Content is on external window")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-            } else {
-                DummyAnimatedScreen()
-            }
+            WorkspaceLayoutView()
 
-            // Top bar
+            // Top bar — back to home only (window toggle lives inside panel 1)
             VStack {
                 HStack {
-                    // Back to home
                     Button {
                         if presentation.isRadarOpen {
                             dismissWindow()
@@ -219,32 +205,7 @@ struct StageManagerDemoView: View {
                             .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
                     }
                     .padding(.leading, 16)
-
                     Spacer()
-
-                    // Window toggle
-                    Button {
-                        if presentation.isRadarOpen {
-                            dismissWindow()
-                            presentation.isRadarOpen = false
-                        } else {
-                            openWindow()
-                            presentation.isRadarOpen = true
-                        }
-                    } label: {
-                        Image(systemName: presentation.isRadarOpen
-                              ? "rectangle.on.rectangle.fill"
-                              : "rectangle.on.rectangle")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(presentation.isRadarOpen ? .black : .green)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                presentation.isRadarOpen ? Color.green : Color.black.opacity(0.6),
-                                in: Circle()
-                            )
-                            .overlay(Circle().stroke(Color.green.opacity(0.4), lineWidth: 1))
-                    }
-                    .padding(.trailing, 16)
                 }
                 .padding(.top, 8)
                 Spacer()
@@ -321,14 +282,50 @@ struct HDMIAutoStatusView: View {
 
 struct RadarWindowScene: View {
     var body: some View {
-        DummyAnimatedScreen()
-            .overlay(
-                Rectangle()
-                    .stroke(Color.green, lineWidth: 6)
-                    .ignoresSafeArea()
-            )
-            // Keep state honest if the window is closed by the system / user.
-            .onAppear    { WindowPresentation.shared.isRadarOpen = true  }
-            .onDisappear { WindowPresentation.shared.isRadarOpen = false }
+        HStack(spacing: 0) {
+            // Left half — extended display with the objects
+            DummyAnimatedScreen()
+                .overlay(alignment: .top) {
+                    displayTitle("Extended Display")
+                }
+
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 1)
+
+            // Right half — interactive display (placeholder for now)
+            ZStack {
+                Color.black
+                VStack(spacing: 14) {
+                    Image(systemName: "hand.tap.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.orange.opacity(0.6))
+                    Text("Panel content coming soon")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .overlay(alignment: .top) {
+                displayTitle("Interactive Display")
+            }
+        }
+        .overlay(
+            Rectangle()
+                .stroke(Color.green, lineWidth: 6)
+                .ignoresSafeArea()
+        )
+        // Keep state honest if the window is closed by the system / user.
+        .onAppear    { WindowPresentation.shared.isRadarOpen = true  }
+        .onDisappear { WindowPresentation.shared.isRadarOpen = false }
+    }
+
+    private func displayTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(.top, 12)
     }
 }
