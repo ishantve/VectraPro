@@ -16,5 +16,20 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 	</dict>
+
+	<!-- Custom drag type so demo objects can be dragged between windows. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.vectrapro.demoobject</string>
+			<key>UTTypeDescription</key>
+			<string>Demo Object</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

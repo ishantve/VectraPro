@@ -75,7 +75,7 @@ struct WorkspaceLayoutView: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             } else {
-                DummyAnimatedScreen()
+                ObjectCanvas(display: .main)
             }
 
             // Heading — always visible on the main panel

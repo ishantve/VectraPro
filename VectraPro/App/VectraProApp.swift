@@ -283,8 +283,8 @@ struct HDMIAutoStatusView: View {
 struct RadarWindowScene: View {
     var body: some View {
         HStack(spacing: 0) {
-            // Left half — extended display with the objects
-            DummyAnimatedScreen()
+            // Left half — extended display with its objects
+            ObjectCanvas(display: .extended)
                 .overlay(alignment: .top) {
                     displayTitle("Extended Display")
                 }
@@ -293,27 +293,21 @@ struct RadarWindowScene: View {
                 .fill(Color.white.opacity(0.15))
                 .frame(width: 1)
 
-            // Right half — interactive display (placeholder for now)
-            ZStack {
-                Color.black
-                VStack(spacing: 14) {
-                    Image(systemName: "hand.tap.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.orange.opacity(0.6))
-                    Text("Panel content coming soon")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+            // Right half — interactive display with its objects
+            ObjectCanvas(display: .interactive)
+                .overlay(alignment: .top) {
+                    displayTitle("Interactive Display")
                 }
-            }
-            .overlay(alignment: .top) {
-                displayTitle("Interactive Display")
-            }
         }
+        .background(Color.black)
+        .ignoresSafeArea()
         .overlay(
             Rectangle()
                 .stroke(Color.green, lineWidth: 6)
                 .ignoresSafeArea()
         )
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         // Keep state honest if the window is closed by the system / user.
         .onAppear    { WindowPresentation.shared.isRadarOpen = true  }
         .onDisappear { WindowPresentation.shared.isRadarOpen = false }
