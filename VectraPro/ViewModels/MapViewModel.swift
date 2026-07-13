@@ -655,25 +655,24 @@ final class MapViewModel: ObservableObject {
         // the radar and enter the holding hangar.
         captureAircraftAtHold()
 
-        // Fly the holding racetracks (only while the layer is visible). The
-        // aircraft is moved along the exact racetrack path so it always tracks
-        // the drawn oval.
-        if layerOn("Holding racetrack") {
-            for i in traffic.indices where traffic[i].holdingName != nil {
-                guard let ic = traffic[i].holdingInboundCourse,
-                      let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
-                let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                             speedKnots: traffic[i].speedKnots)
-                let vmps = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
-                traffic[i].holdingProgressM += vmps * tickInterval
-                let s = track.sample(at: traffic[i].holdingProgressM)
-                traffic[i].position       = s.position
-                traffic[i].headingDegrees = s.heading
-                if tickCount % historySampleTicks == 0 {
-                    traffic[i].history.append(traffic[i].position)
-                    if traffic[i].history.count > maxHistoryPoints {
-                        traffic[i].history.removeFirst()
-                    }
+        // Fly the holding racetracks. This runs every tick regardless of the
+        // layer's visibility, so an aircraft keeps orbiting while hidden and
+        // reappears at its up-to-date position when the layer is turned back on.
+        // Only the drawing (radarAircraft) is gated by the layer toggle.
+        for i in traffic.indices where traffic[i].holdingName != nil {
+            guard let ic = traffic[i].holdingInboundCourse,
+                  let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
+            let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
+                                         speedKnots: traffic[i].speedKnots)
+            let vmps = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
+            traffic[i].holdingProgressM += vmps * tickInterval
+            let s = track.sample(at: traffic[i].holdingProgressM)
+            traffic[i].position       = s.position
+            traffic[i].headingDegrees = s.heading
+            if tickCount % historySampleTicks == 0 {
+                traffic[i].history.append(traffic[i].position)
+                if traffic[i].history.count > maxHistoryPoints {
+                    traffic[i].history.removeFirst()
                 }
             }
         }
