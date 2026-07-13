@@ -29,6 +29,8 @@ struct CommandKeyboard: View {
     var onPreview: (String) -> Void = { _ in }
     /// Left the numeric level — applied (commit) or cancelled (clear).
     var onDismissPreview: (Bool) -> Void = { _ in }
+    /// Optional mic button shown to the left of the toggle arrow.
+    var micViewModel: SpeechViewModel? = nil
 
     @State private var expanded = true
     /// Non-nil when the numeric level is open for this command.
@@ -92,6 +94,10 @@ struct CommandKeyboard: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            // Mic button sits just left of the toggle arrow
+            if let mic = micViewModel {
+                PushToTalkMicButton(viewModel: mic)
+            }
             toggle
             if expanded {
                 Group {

@@ -94,18 +94,178 @@ struct MapScreen: View {
     private var provider: MapProvider { MapProvider(rawValue: providerRaw) ?? .mapLibre }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Always-black base so the navigation transition / map init never
-            // flashes white before the map paints.
-            Color.black.ignoresSafeArea()
+        GeometryReader { geo in
+            let totalW = geo.size.width
+            let totalH = geo.size.height
+            // Guarantee right panel at least 280pt so keyboard (260pt) fits with padding.
+            let sq     = min(totalH, totalW - 280)
+            let rightW = totalW - sq - 1
 
-            if !presentation.isMapDetached {
-                mapView
-                    .ignoresSafeArea()
-                    .id(providerRaw)   // recreate when the provider changes
+            HStack(spacing: 0) {
+
+                // ── Left: Radar square (full height) ─────────────────────
+                ZStack {
+                    Color.black
+
+                    if !presentation.isMapDetached {
+                        mapView.id(providerRaw)
+                    }
+
+                    // Back button + timer
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(.black.opacity(0.6), in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                        }
+                        if viewModel.exerciseDurationSeconds > 0 {
+                            HStack(spacing: 6) {
+                                Image("timer_icon")
+                                    .resizable().scaledToFit()
+                                    .frame(width: 16, height: 16)
+                                Text(viewModel.elapsedSeconds.asTimerString)
+                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            }
+                            .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(.black.opacity(0.6), in: Capsule())
+                            .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
+                        }
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.leading, 16)
+                    .padding(.top, isWindowed ? 44 : 8)
+
+                    // Left toolbar
+                    leftToolbar
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .padding(.leading, 16)
+
+                    // Left-tool menus
+                    if anyLeftMenuOpen {
+                        GeometryReader { inner in
+                            let toolbarTop = max(8, (inner.size.height - toolbarHeight) / 2)
+                            let menuTop    = toolbarTop + activeMenuTopY
+                            let clearance: CGFloat = openLeftMenu == .display ? 70 : 100
+                            let maxH = max(140, inner.size.height - menuTop - clearance)
+                            activeMenuView(maxHeight: maxH)
+                                .offset(x: 68, y: menuTop)
+                        }
+                    }
+
+                    // Transcription field
+                    if speechViewModel.showField {
+                        VStack {
+                            TranscriptionField(viewModel: speechViewModel)
+                                .frame(maxWidth: 600)
+                                .padding(.horizontal)
+                                .padding(.top, isLandscape ? -12 : 8)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                            Spacer()
+                        }
+                    }
+
+                    // Zoom buttons — bottom-left of radar
+                    VStack {
+                        Spacer()
+                        HStack {
+                            zoomButtons
+                                .padding(.leading, 24)
+                                .padding(.bottom, 16)
+                            Spacer()
+                        }
+                    }
+                }
+                .frame(width: sq, height: sq)
+                .animation(.easeInOut(duration: 0.25), value: speechViewModel.showField)
+
+                // Vertical divider
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(width: 1)
+
+                // ── Right: All controls (full height) ────────────────────
+                // Keyboard natural width: toggle(36) + gap(8) + grid(216) = 260
+                VStack(alignment: .trailing, spacing: 0) {
+
+                    // Top: window toggle + action buttons + layers + hangar
+                    VStack(alignment: .trailing, spacing: 10) {
+                        HStack(spacing: 8) {
+                            windowToggleButton
+                            topActionButton("flag.fill") { /* TODO */ }
+                            topActionButton("person.2.fill") { /* TODO */ }
+                            topActionButton("globe", isOn: showLayers) {
+                                withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                            }
+                        }
+
+                        if showLayers {
+                            layerButtons
+
+                            if activeLayers.contains(.holdingPattern) {
+                                let holdings = viewModel.holdingFixes
+                                HoldingHangarPanel(
+                                    tabs: holdings.map { $0.fixName ?? "—" },
+                                    aircraftByHolding: holdings.map { fix in
+                                        viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                                    }
+                                )
+                            } else if let category = activeFlightList {
+                                HangarPanel(
+                                    title: category.title,
+                                    aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory }
+                                )
+                            }
+
+                            if let layer = buttonAnchoredLayer {
+                                listPanel(for: layer)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    Spacer()
+
+                    // Bottom: feedback log + keyboard (mic is inside keyboard)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        feedbackLogView
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+
+                        CommandKeyboard(
+                            onCommand: { CommandKeyboardHandler.shared.perform($0) },
+                            requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
+                            promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
+                            onValue: { command, value in
+                                CommandKeyboardHandler.shared.perform(command, value: value)
+                            },
+                            onBlock: { command, low, high in
+                                CommandKeyboardHandler.shared.perform(command, low: low, high: high)
+                            },
+                            valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
+                            onPreview: { text in speechViewModel.previewCommand(text) },
+                            onDismissPreview: { _ in speechViewModel.clearPreview() },
+                            micViewModel: speechViewModel
+                        )
+                    }
+                    .padding(.bottom, 12)
+                }
+                .frame(width: rightW, height: sq)
+                .clipped()
+                .background(Color(red: 0.04, green: 0.06, blue: 0.12))
             }
-
-            controlPanel
+        }
+        .ignoresSafeArea()
+        .overlay {
+            if viewModel.isExerciseFinished {
+                exerciseSummaryOverlay
+            }
         }
         .background {
             GeometryReader { proxy in
@@ -114,153 +274,18 @@ struct MapScreen: View {
                     .onChange(of: proxy.size) { _, size in updateLayout(for: size) }
             }
         }
-        .overlay(alignment: .top) {
-            if speechViewModel.showField {
-                TranscriptionField(viewModel: speechViewModel)
-                    .frame(maxWidth: 600)
-                    .padding(.horizontal)
-                    .padding(.top, isLandscape ? -12 : 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: speechViewModel.showField)
-        .overlay(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(.black.opacity(0.6), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
-                }
-
-                if viewModel.exerciseDurationSeconds > 0 {
-                    HStack(spacing: 6) {
-                        Image("timer_icon")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 16, height: 16)
-                        Text(viewModel.elapsedSeconds.asTimerString)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    }
-                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.6), in: Capsule())
-                    .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
-                }
-            }
-            .padding(.leading, 16)
-            .padding(.top, isWindowed ? 44 : 8)
-        }
-        .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 10) {
-                // Always-visible top icons; the globe toggles the layer buttons.
-                HStack(spacing: 12) {
-                    windowToggleButton
-                    topActionButton("flag.fill") { /* TODO */ }
-                    topActionButton("person.2.fill") { /* TODO */ }
-                    topActionButton("globe", isOn: showLayers) {
-                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
-                    }
-                }
-
-                if showLayers {
-                    layerButtons
-                    // Holding + flight lists open here, right-aligned under the row.
-                    if activeLayers.contains(.holdingPattern) {
-                        let holdings = viewModel.holdingFixes
-                        HoldingHangarPanel(
-                            tabs: holdings.map { $0.fixName ?? "—" },
-                            aircraftByHolding: holdings.map { fix in
-                                viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
-                            }
-                        )
-                    } else if let category = activeFlightList {
-                        HangarPanel(title: category.title,
-                                    aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
-                    }
-                }
-            }
-            .padding(.trailing, 16)
-            .padding(.top, 8)
-        }
-        .overlay(alignment: .leading) {
-            leftToolbar.padding(.leading, 16)
-        }
-        // Left-tool menus: aligned with their button, capped + scrollable so they
-        // never run off-screen or under the bottom controls.
-        .overlay {
-            if anyLeftMenuOpen {
-                GeometryReader { geo in
-                    let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
-                    let menuTop = toolbarTop + activeMenuTopY
-                    // Display (Map Layers) gets a bit more height; others keep clearance.
-                    let bottomClearance: CGFloat = openLeftMenu == .display ? 70 : 100
-                    let maxH = max(140, geo.size.height - menuTop - bottomClearance)
-                    activeMenuView(maxHeight: maxH)
-                        .offset(x: 68, y: menuTop)   // 16 pad + 48 button + 4 gap
-                }
-            }
-        }
-        // Obstacle & Zone lists open directly below their own button, left-aligned.
-        .overlay(alignment: .topTrailing) {
-            if showLayers, let layer = buttonAnchoredLayer {
-                listPanel(for: layer)
-                    .offset(x: buttonAnchoredPanelX(layer), y: layerRowBottom)
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            zoomButtons
-                .padding(.leading, 24)
-                .padding(.bottom, 12)
-        }
-        .overlay(alignment: .bottomLeading) {
-            feedbackLogView
-                .padding(.leading, 24)
-                .padding(.bottom, 90)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            HStack(alignment: .bottom, spacing: 16) {
-                PushToTalkMicButton(viewModel: speechViewModel)
-                CommandKeyboard(
-                    onCommand: { CommandKeyboardHandler.shared.perform($0) },
-                    requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
-                    promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
-                    onValue: { command, value in
-                        CommandKeyboardHandler.shared.perform(command, value: value)
-                    },
-                    onBlock: { command, low, high in
-                        CommandKeyboardHandler.shared.perform(command, low: low, high: high)
-                    },
-                    valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
-                    onPreview: { text in speechViewModel.previewCommand(text) },
-                    onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
-                )
-            }
-            .padding(.trailing, 16)
-            .padding(.bottom, 12)
-        }
-        .overlay {
-            if viewModel.isExerciseFinished {
-                exerciseSummaryOverlay
-            }
-        }
         .navigationBarBackButtonHidden(true)
         .disablesSwipeBack()
         .focusable()
-        .onKeyPress(.upArrow) { viewModel.pan(towardBearing: 0); return .handled }
-        .onKeyPress(.downArrow) { viewModel.pan(towardBearing: 180); return .handled }
-        .onKeyPress(.rightArrow) { viewModel.pan(towardBearing: 90); return .handled }
-        .onKeyPress(.leftArrow) { viewModel.pan(towardBearing: 270); return .handled }
-        .onKeyPress("=") { viewModel.zoom(by: 1); return .handled }   // "=" / "+"
-        .onKeyPress("+") { viewModel.zoom(by: 1); return .handled }
+        .onKeyPress(.upArrow)    { viewModel.pan(towardBearing: 0);   return .handled }
+        .onKeyPress(.downArrow)  { viewModel.pan(towardBearing: 180); return .handled }
+        .onKeyPress(.rightArrow) { viewModel.pan(towardBearing: 90);  return .handled }
+        .onKeyPress(.leftArrow)  { viewModel.pan(towardBearing: 270); return .handled }
+        .onKeyPress("=") { viewModel.zoom(by: 1);  return .handled }
+        .onKeyPress("+") { viewModel.zoom(by: 1);  return .handled }
         .onKeyPress("-") { viewModel.zoom(by: -1); return .handled }
         .onAppear {
-            viewModel.reset()   // fresh radar each time the screen opens
+            viewModel.reset()
             speechViewModel.prepare()
             let vm = viewModel
             speechViewModel.onCommand = { [weak vm] transcript in
