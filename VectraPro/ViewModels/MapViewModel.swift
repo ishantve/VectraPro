@@ -334,6 +334,29 @@ final class MapViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let tickInterval = 1.0          // seconds
 
+    // MARK: - Simulation speed (fast-forward)
+
+    /// Available fast-forward multipliers.
+    static let speedOptions = [1, 2, 3, 5, 10, 15, 20, 30]
+    /// Current simulation speed multiplier (1× = real time).
+    @Published private(set) var simulationSpeed = 1
+
+    /// Step up to the next faster multiplier.
+    func increaseSpeed() {
+        guard let i = Self.speedOptions.firstIndex(of: simulationSpeed),
+              i + 1 < Self.speedOptions.count else { return }
+        simulationSpeed = Self.speedOptions[i + 1]
+        restartTimerIfRunning()
+    }
+
+    /// Step down to the previous slower multiplier.
+    func decreaseSpeed() {
+        guard let i = Self.speedOptions.firstIndex(of: simulationSpeed),
+              i - 1 >= 0 else { return }
+        simulationSpeed = Self.speedOptions[i - 1]
+        restartTimerIfRunning()
+    }
+
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
     private var tickCount = 0
@@ -478,16 +501,31 @@ final class MapViewModel: ObservableObject {
 
     func startSimulation() {
         guard simulationTimer == nil else { return }
-        let timer = Timer(timeInterval: tickInterval, repeats: true) { [weak self] _ in
+        scheduleTimer()
+    }
+
+    func stopSimulation() {
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+    }
+
+    /// (Re)creates the timer at the current speed. Fast-forward fires the timer
+    /// more often (interval = tickInterval / speed) and advances ONE sim-second
+    /// per fire, so the clock counts up smoothly instead of jumping by N.
+    private func scheduleTimer() {
+        simulationTimer?.invalidate()
+        let interval = tickInterval / Double(max(1, simulationSpeed))
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.tick()
         }
         RunLoop.main.add(timer, forMode: .common)
         simulationTimer = timer
     }
 
-    func stopSimulation() {
-        simulationTimer?.invalidate()
-        simulationTimer = nil
+    /// Restart the timer with a new cadence when the speed changes mid-run.
+    private func restartTimerIfRunning() {
+        guard simulationTimer != nil else { return }
+        scheduleTimer()
     }
 
     /// Wipes all live state when leaving the radar screen so there is no stale
@@ -531,6 +569,7 @@ final class MapViewModel: ObservableObject {
         elapsedSeconds           = 0
         exerciseDurationSeconds  = 0
         isExerciseFinished       = false
+        simulationSpeed          = 1
     }
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
@@ -633,7 +672,16 @@ final class MapViewModel: ObservableObject {
         }
     }
 
+    /// Timer callback. Fires every `tickInterval / speed` real seconds and
+    /// advances exactly one sim-second, so the clock counts up smoothly (fast,
+    /// but without skipping numbers). Blink stays on a ~1 s real-time cadence.
     private func tick() {
+        guard !isExerciseFinished else { return }
+        advanceStep()
+        if tickCount % max(1, simulationSpeed) == 0 { blinkState.toggle() }
+    }
+
+    private func advanceStep() {
         tickCount += 1
         advanceSpawners()
         advanceRadarPromotion()
@@ -724,8 +772,6 @@ final class MapViewModel: ObservableObject {
         // Fix collisions.
         let fixConflicts = collision.detectFixConflicts(aircraft: aircraft, fixes: fixes)
         if fixConflicts != fixConflictIDs { fixConflictIDs = fixConflicts }
-
-        blinkState.toggle()
 
         // Advance the exercise clock; finish when we reach the target duration.
         elapsedSeconds += 1

@@ -215,9 +215,12 @@ struct MapScreen: View {
             }
         }
         .overlay(alignment: .bottomLeading) {
-            zoomButtons
-                .padding(.leading, 24)
-                .padding(.bottom, 12)
+            HStack(spacing: 12) {
+                zoomButtons
+                speedButtons
+            }
+            .padding(.leading, 24)
+            .padding(.bottom, 12)
         }
         .overlay(alignment: .bottomLeading) {
             feedbackLogView
@@ -758,6 +761,39 @@ struct MapScreen: View {
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
         }
+    }
+
+    // MARK: - Simulation speed (fast-forward)
+
+    private var speedButtons: some View {
+        HStack(spacing: 1) {
+            speedButton(systemImage: "backward.fill",
+                        enabled: viewModel.simulationSpeed != MapViewModel.speedOptions.first) {
+                viewModel.decreaseSpeed()
+            }
+            Divider().frame(height: 44).background(.white.opacity(0.2))
+            Text("\(viewModel.simulationSpeed)X")
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                .frame(width: 52, height: 44)
+            Divider().frame(height: 44).background(.white.opacity(0.2))
+            speedButton(systemImage: "forward.fill",
+                        enabled: viewModel.simulationSpeed != MapViewModel.speedOptions.last) {
+                viewModel.increaseSpeed()
+            }
+        }
+        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 1))
+    }
+
+    private func speedButton(systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(enabled ? .white : .white.opacity(0.3))
+                .frame(width: 44, height: 44)
+        }
+        .disabled(!enabled)
     }
 
     @ViewBuilder
