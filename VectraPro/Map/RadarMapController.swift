@@ -786,7 +786,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             return
         }
         var features: [MLNPolylineFeature] = []
-        for ac in viewModel.aircraft {
+        for ac in viewModel.radarAircraft {
             guard !ac.history.isEmpty else { continue }
             var coords = ac.history + [ac.position]
             features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
@@ -797,7 +797,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// One tether line per aircraft, from its symbol to its data block.
     private func updateTethers(on mapView: MLNMapView) {
         var features: [MLNPolylineFeature] = []
-        for aircraft in viewModel.aircraft {
+        for aircraft in viewModel.radarAircraft {
             guard let label = labelAnnotations[aircraft.id] else { continue }
             var coords = [aircraft.position, label.coordinate]
             features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
