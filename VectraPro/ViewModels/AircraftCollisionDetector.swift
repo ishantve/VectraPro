@@ -88,7 +88,13 @@ final class AircraftCollisionDetector {
         var destroyed = Set<UUID>()
 
         for ac in aircraft {
-            if zoneShapes.contains(where: { polygonContains($0.coordinates, point: ac.position) }) {
+            // Destroy when ANY part of the aircraft collider (nose OR body side)
+            // crosses a zone boundary — test every collider vertex.
+            let colliderPoints = aircraftColliderPoints(ac)
+            let hit = zoneShapes.contains { shape in
+                colliderPoints.contains { polygonContains(shape.coordinates, point: $0) }
+            }
+            if hit {
                 destroyed.insert(ac.id)
             } else {
                 let thresholdM = ac.colliderRadiusNM * 1852.0
@@ -108,6 +114,23 @@ final class AircraftCollisionDetector {
         }
 
         return ZoneConflictResult(warnings: warnings, destroyed: destroyed)
+    }
+
+    /// Geographic vertices of an aircraft's collider: the 4 body-diamond corners
+    /// (front / right / back / left) plus the nose tip. Used for zone-boundary
+    /// crossing so a side/nose touch — not just the centre — triggers a hit.
+    private func aircraftColliderPoints(_ ac: Aircraft) -> [CLLocationCoordinate2D] {
+        let h = ac.headingDegrees
+        func p(_ nm: Double, _ bearing: Double) -> CLLocationCoordinate2D {
+            Geo.offset(from: ac.position, distanceMeters: nm * 1852.0, bearingDegrees: bearing)
+        }
+        return [
+            p(ac.bodyForwardNM, h),                       // front
+            p(ac.bodySideNM,    h + 90),                  // right
+            p(ac.bodyForwardNM, h + 180),                 // back
+            p(ac.bodySideNM,    h + 270),                 // left
+            p(ac.noseOffsetNM + ac.noseForwardNM, h),     // nose tip
+        ]
     }
 
     func detectFixConflicts(aircraft: [Aircraft], fixes: [ExerciseDetail.Fix]) -> Set<UUID> {

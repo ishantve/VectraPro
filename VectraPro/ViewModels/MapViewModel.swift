@@ -196,7 +196,13 @@ final class MapViewModel: ObservableObject {
             guard let name = aircraft[index].holdingTargetName,
                   let fix = holdingFix(named: name),
                   let fixPos = coordinate(of: fix) else { continue }
-            guard Geo.distanceMeters(from: aircraft[index].position, to: fixPos) < holdCaptureRadiusM
+            // Capture as soon as the NOSE reaches the fix collider (not the body).
+            let ac0 = aircraft[index]
+            let noseReachM = (ac0.noseOffsetNM + ac0.noseForwardNM) * Distance.metersPerNauticalMile
+            let nose = Geo.offset(from: ac0.position,
+                                  distanceMeters: noseReachM,
+                                  bearingDegrees: ac0.headingDegrees)
+            guard Geo.distanceMeters(from: nose, to: fixPos) < holdCaptureRadiusM
             else { continue }
 
             var ac = aircraft[index]
