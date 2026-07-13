@@ -15,8 +15,7 @@ import SwiftUI
 struct WorkspaceLayoutView: View {
 
     @ObservedObject private var presentation = WindowPresentation.shared
-    @Environment(\.openWindow)    private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
     private let gap: CGFloat = 14
     private let outerPadding: CGFloat = 14
@@ -97,8 +96,7 @@ struct WorkspaceLayoutView: View {
                     Spacer()
                     Button {
                         if presentation.isRadarOpen {
-                            dismissWindow(id: "radar")
-                            presentation.isRadarOpen = false
+                            presentation.closeRadarWindow()
                         } else {
                             openWindow(id: "radar")
                             presentation.isRadarOpen = true

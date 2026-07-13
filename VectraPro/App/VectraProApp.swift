@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 @main
 struct VectraProApp: App {
@@ -283,6 +284,8 @@ struct RadarWindowScene: View {
         )
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        // Capture the hosting scene so it can be fully destroyed on close.
+        .background(SceneCapture { WindowPresentation.shared.radarScene = $0 })
         // Keep state honest if the window is closed by the system / user.
         .onAppear    { WindowPresentation.shared.isRadarOpen = true  }
         .onDisappear { WindowPresentation.shared.isRadarOpen = false }
@@ -296,5 +299,29 @@ struct RadarWindowScene: View {
             .padding(.vertical, 8)
             .background(.black.opacity(0.55), in: Capsule())
             .padding(.top, 12)
+    }
+}
+
+// MARK: - Scene capture helper
+
+/// Captures the UIWindowScene hosting this SwiftUI view so it can be destroyed.
+struct SceneCapture: UIViewRepresentable {
+    let onCapture: (UIWindowScene) -> Void
+
+    func makeUIView(context: Context) -> UIView { CaptureView(onCapture: onCapture) }
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    private final class CaptureView: UIView {
+        let onCapture: (UIWindowScene) -> Void
+        init(onCapture: @escaping (UIWindowScene) -> Void) {
+            self.onCapture = onCapture
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let scene = window?.windowScene { onCapture(scene) }
+        }
     }
 }

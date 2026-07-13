@@ -33,6 +33,19 @@ final class WindowPresentation: ObservableObject {
     /// Holds the UIKit window shown on the external screen (HDMI Auto mode).
     private var externalWindow: UIWindow?
 
+    /// The window scene hosting the radar/extended window (Stage Manager mode).
+    /// Captured on appear so we can fully destroy it on close.
+    weak var radarScene: UIWindowScene?
+
+    /// Fully close + destroy the radar window scene so it reopens fresh.
+    func closeRadarWindow() {
+        if let scene = radarScene {
+            UIApplication.shared.requestSceneSessionDestruction(scene.session, options: nil)
+            radarScene = nil
+        }
+        isRadarOpen = false
+    }
+
     // MARK: - Display observation
 
     /// Start listening for HDMI / external display connect + disconnect.

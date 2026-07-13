@@ -41,7 +41,6 @@ struct InfoPanelView: View {
 struct ControlBarView: View {
 
     @ObservedObject private var store = ObjectsStore.shared
-    @Environment(\.dismissWindow) private var dismissWindow
     private let step: CGFloat = 20
 
     var body: some View {
@@ -57,8 +56,7 @@ struct ControlBarView: View {
                 // Home — back to mode selection
                 Button {
                     if WindowPresentation.shared.isRadarOpen {
-                        dismissWindow(id: "radar")
-                        WindowPresentation.shared.isRadarOpen = false
+                        WindowPresentation.shared.closeRadarWindow()
                     }
                     WindowPresentation.shared.selectedMode = nil
                 } label: {
