@@ -80,6 +80,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var zoneColliderSource: MLNShapeSource?
     private var fixColliderSource: MLNShapeSource?
     private var selectionRingSource: MLNShapeSource?
+    private var holdingRacetrackSource: MLNShapeSource?
     private var radialNameAnnotations: [ImageAnnotation] = []
     private var radialNameKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -189,6 +190,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         setupZoneColliderLayer(style)
         setupFixColliderLayer(style)
         setupSelectionRingLayer(style)
+        setupHoldingRacetrackLayer(style)
         sync()
     }
 
@@ -279,6 +281,16 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         layer.lineDashPattern = NSExpression(forConstantValue: [4, 3])
         style.addLayer(layer)
         redCircleSource = source
+    }
+
+    private func setupHoldingRacetrackLayer(_ style: MLNStyle) {
+        let source = MLNShapeSource(identifier: "holding-racetracks", shape: nil, options: nil)
+        style.addSource(source)
+        let layer = MLNLineStyleLayer(identifier: "holding-racetracks", source: source)
+        layer.lineColor = NSExpression(forConstantValue: UIColor.cyan.withAlphaComponent(0.85))
+        layer.lineWidth = NSExpression(forConstantValue: 1.6)
+        style.addLayer(layer)
+        holdingRacetrackSource = source
     }
 
     private func setupZoneColliderLayer(_ style: MLNStyle) {
@@ -378,6 +390,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         syncColliders()
         syncFixColliders()
         syncSelectionRing()
+        syncHoldingRacetracks()
         syncMeasurement()
     }
 
@@ -581,7 +594,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     // MARK: Aircraft
 
     private func syncAircraft(_ mapView: MLNMapView) {
-        let current = viewModel.aircraft
+        let current = viewModel.radarAircraft
         let liveIDs = Set(current.map(\.id))
 
         // Remove annotations for aircraft that no longer exist.
@@ -843,6 +856,28 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             zoneFeatures.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
         }
         zoneColliderSource?.shape = MLNShapeCollectionFeature(shapes: zoneFeatures)
+    }
+
+    // MARK: Holding racetracks
+
+    /// Draws one oval racetrack per holding aircraft when the layer is on.
+    private func syncHoldingRacetracks() {
+        guard let source = holdingRacetrackSource else { return }
+        guard viewModel.layerOn("Holding racetrack") else {
+            source.shape = nil
+            return
+        }
+        var features: [MLNPolylineFeature] = []
+        for ac in viewModel.traffic where ac.holdingName != nil {
+            guard let name = ac.holdingName,
+                  let ic = ac.holdingInboundCourse,
+                  let fix = viewModel.holdingFixPosition(named: name) else { continue }
+            let track = HoldingRacetrack(fix: fix, inboundCourse: ic, speedKnots: ac.speedKnots)
+            var coords = track.outline()
+            guard coords.count > 1 else { continue }
+            features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
+        }
+        source.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
     /// Builds the 4 geographic vertices of a heading-aligned diamond + a closing point.

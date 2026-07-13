@@ -31,6 +31,7 @@ struct MapScreen: View {
         ("exclamationmark.triangle.fill", "NOTAM"),
         ("nosign", "Zone"),
         ("smallcircle.filled.circle", "Holding"),
+        ("oval", "Holding racetrack"),
         ("point.3.connected.trianglepath.dotted", "Trail"),
         ("mountain.2.fill", "Obstacles"),
         ("wind", "Wind"),

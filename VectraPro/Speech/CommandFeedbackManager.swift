@@ -95,6 +95,8 @@ final class CommandFeedbackManager: ObservableObject {
             return "maintain \(Int(kts)) knots or greater"
         case .maxSpeed(let kts):
             return "do not exceed \(Int(kts)) knots"
+        case .hold(let fix):
+            return "hold at \(fix.uppercased())"
         }
     }
 }

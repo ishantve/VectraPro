@@ -402,7 +402,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     // MARK: Aircraft
 
     private func syncAircraft() {
-        let current = viewModel.aircraft
+        let current = viewModel.radarAircraft
         let liveIDs = Set(current.map(\.id))
 
         // Remove markers for aircraft that no longer exist.

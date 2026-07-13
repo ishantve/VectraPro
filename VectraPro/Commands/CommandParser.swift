@@ -155,11 +155,49 @@ struct CommandParser {
     static func parse(_ normalized: String) -> [AircraftCommand] {
         var commands: [AircraftCommand] = []
         if normalized.contains("present heading")  { commands.append(AircraftCommand.presentHeading) }
+        if let c = parseHold(normalized)            { commands.append(c) }
         if let c = parseHeading(normalized)         { commands.append(c) }
         if let c = parseFlightLevel(normalized)     { commands.append(c) }
         if let c = parseSpeed(normalized)           { commands.append(c) }
         return commands
     }
+
+    // ─────────────────────────────────────────────
+    // MARK: Hold
+    // ─────────────────────────────────────────────
+
+    /// "hold at papa juliet" → .hold("PJ"), "hold at bravo romeo" → .hold("BR"),
+    /// "hold at pj" → .hold("pj"). The fix name is the text after "hold [at]";
+    /// spoken ICAO phonetic words are folded into a letter code.
+    private static func parseHold(_ text: String) -> AircraftCommand? {
+        guard let r = text.range(of: "hold") else { return nil }
+        var rest = String(text[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+        if rest.hasPrefix("at ") {
+            rest = String(rest.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else if rest == "at" {
+            rest = ""
+        }
+        guard !rest.isEmpty else { return nil }
+
+        // If the name is spoken as ICAO phonetic words ("papa juliet"), fold
+        // them into a compact letter code ("PJ"). A single token is left as-is
+        // (it may already be a code like "pj" or a full fix name).
+        let words = rest.split(separator: " ").map(String.init)
+        if words.count > 1, words.allSatisfy({ phoneticMap[$0] != nil }) {
+            return .hold(words.compactMap { phoneticMap[$0] }.joined())
+        }
+        return .hold(words.joined())
+    }
+
+    /// ICAO phonetic alphabet → letter (spelling for callsigns / fix codes).
+    private static let phoneticMap: [String: String] = [
+        "alpha": "A", "alfa": "A", "bravo": "B", "charlie": "C", "delta": "D",
+        "echo": "E", "foxtrot": "F", "golf": "G", "hotel": "H", "india": "I",
+        "juliet": "J", "juliett": "J", "kilo": "K", "lima": "L", "mike": "M",
+        "november": "N", "oscar": "O", "papa": "P", "quebec": "Q", "romeo": "R",
+        "sierra": "S", "tango": "T", "uniform": "U", "victor": "V", "whiskey": "W",
+        "xray": "X", "yankee": "Y", "zulu": "Z"
+    ]
 
     // ─────────────────────────────────────────────
     // MARK: Heading

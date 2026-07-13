@@ -68,6 +68,11 @@ final class AircraftPhysics {
                 aircraft.minSpeedKnots = nil
                 aircraft.maxSpeedKnots = knots
                 if aircraft.speedKnots > knots { aircraft.targetSpeedKnots = knots }
+            case .hold(let fixName):
+                // Start navigating direct to the holding fix; the view model
+                // steers the heading toward it each tick (auto-turn).
+                aircraft.holdingTargetName = fixName
+                aircraft.turnDirection = nil
             }
         }
     }
