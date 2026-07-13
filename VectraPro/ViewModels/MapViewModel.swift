@@ -240,6 +240,21 @@ final class MapViewModel: ObservableObject {
         _zoneShapesDirty = true
 
         #if DEBUG
+        let holdings = detail.fixes.filter { $0.type?.uppercased() == "HOLDING" }
+        print("📡 HOLDING FIXES FROM API — \(holdings.count) found")
+        for f in holdings {
+            print("""
+              • fixId : \(f.fixId ?? "-")
+                name  : \(f.fixName ?? "-")
+                type  : \(f.type ?? "-")   fixType: \(f.fixType ?? "-")
+                lat   : \(f.latitude.map { String($0) } ?? "-")
+                lon   : \(f.longitude.map { String($0) } ?? "-")
+                radials: \(f.radials?.count ?? 0)
+            """)
+        }
+        #endif
+
+        #if DEBUG
         print("========== ZONES (\(zones.count)) ==========")
         for z in zones {
             print("  zone: id=\(z.zoneId ?? "—")  name=\(z.zoneName ?? "—")  type=\(z.zoneType ?? "—")  isActive=\(String(describing: z.isActive))  color=\(z.color ?? "—")  colliders=\(z.colliders?.count ?? 0)")
