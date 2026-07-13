@@ -258,22 +258,31 @@ struct HDMIAutoStatusView: View {
 
 struct RadarWindowScene: View {
     var body: some View {
-        HStack(spacing: 0) {
-            // Left half — extended display shows the SAME objects as Main
-            ObjectCanvas(display: .main)
-                .overlay(alignment: .top) {
-                    displayTitle("Extended Display")
-                }
+        VStack(spacing: 0) {
+            // Common header across both panels
+            commonHeader("Extended Display")
 
-            Rectangle()
-                .fill(Color.white.opacity(0.15))
-                .frame(width: 1)
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    // Left half — square sized to available height, Main Display content
+                    let squareSize = geo.size.height
+                    ObjectCanvas(display: .main)
+                        .frame(width: squareSize, height: squareSize)
+                        .overlay(alignment: .top) {
+                            panelTitle("Main Display")
+                        }
 
-            // Right half — interactive display with its objects
-            ObjectCanvas(display: .interactive)
-                .overlay(alignment: .top) {
-                    displayTitle("Interactive Display")
+                    Rectangle()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: 1)
+
+                    // Right half — fills remaining width, interactive display
+                    ObjectCanvas(display: .interactive)
+                        .overlay(alignment: .top) {
+                            panelTitle("Additional Screen Space")
+                        }
                 }
+            }
         }
         .background(Color.black)
         .ignoresSafeArea()
@@ -291,14 +300,33 @@ struct RadarWindowScene: View {
         .onDisappear { WindowPresentation.shared.isRadarOpen = false }
     }
 
-    private func displayTitle(_ text: String) -> some View {
+    /// Full-width top header shared across both panels.
+    private func commonHeader(_ text: String) -> some View {
+        ZStack {
+            Color.black.opacity(0.75)
+            Text(text)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 44)
+        .overlay(
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    /// Small title badge shown inside a single panel.
+    private func panelTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
             .background(.black.opacity(0.55), in: Capsule())
-            .padding(.top, 12)
+            .padding(.top, 10)
     }
 }
 
