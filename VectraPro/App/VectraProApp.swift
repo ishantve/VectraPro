@@ -269,7 +269,7 @@ struct RadarWindowScene: View {
                     ObjectCanvas(display: .main)
                         .frame(width: squareSize, height: squareSize)
                         .overlay(alignment: .top) {
-                            panelTitle("Main Display")
+                            panelTitle("Display 1")
                         }
 
                     Rectangle()

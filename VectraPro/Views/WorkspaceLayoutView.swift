@@ -17,6 +17,9 @@ struct WorkspaceLayoutView: View {
     @ObservedObject private var presentation = WindowPresentation.shared
     @Environment(\.openWindow) private var openWindow
 
+    /// Which display is currently shown in the left panel.
+    @State private var selectedDisplay: DisplayID = .main
+
     private let gap: CGFloat = 14
     private let outerPadding: CGFloat = 14
 
@@ -75,25 +78,18 @@ struct WorkspaceLayoutView: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             } else {
-                ObjectCanvas(display: .main)
+                ObjectCanvas(display: selectedDisplay)
             }
 
-            // Heading — always visible on the main panel
-            VStack {
-                Text("Main Display")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.55), in: Capsule())
-                    .padding(.top, 12)
-                Spacer()
-            }
-
-            // Window toggle button — top-right of the first panel
+            // Top bar: display selector (left) + window toggle (right)
             VStack {
                 HStack {
+                    // Display selector pill — hidden while radar window is open
+                    if !presentation.isRadarOpen {
+                        displaySelector
+                    }
                     Spacer()
+                    // Window toggle button
                     Button {
                         if presentation.isRadarOpen {
                             presentation.closeRadarWindow()
@@ -114,11 +110,38 @@ struct WorkspaceLayoutView: View {
                             )
                             .overlay(Circle().stroke(Color.green.opacity(0.4), lineWidth: 1))
                     }
-                    .padding(12)
                 }
+                .padding(12)
                 Spacer()
             }
         }
+    }
+
+    // MARK: - Display selector
+
+    private var displaySelector: some View {
+        HStack(spacing: 0) {
+            displayTab("Display 1", display: .main)
+            displayTab("Additional Screen", display: .interactive)
+        }
+        .background(.black.opacity(0.55), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+    }
+
+    private func displayTab(_ label: String, display: DisplayID) -> some View {
+        let isActive = selectedDisplay == display
+        return Button {
+            selectedDisplay = display
+        } label: {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(isActive ? .black : .white.opacity(0.6))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(isActive ? Color.green : Color.clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.2), value: selectedDisplay)
     }
 
     // MARK: - Panel chrome
