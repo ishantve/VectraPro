@@ -215,7 +215,7 @@ final class MapViewModel: ObservableObject {
             ac.holdingName          = fix.fixName   // canonical name → matches hangar filter
             ac.holdingTargetName    = nil
             ac.holdingInboundCourse = ac.headingDegrees   // course it arrived on = inbound leg
-            ac.holdingProgressM     = 0                   // start at the fix, entering turn 1
+            ac.holdingProgress      = 0                   // start at the fix, entering turn 1
             ac.targetHeading        = nil
             ac.turnDirection        = nil
             ac.history              = []
@@ -536,7 +536,7 @@ final class MapViewModel: ObservableObject {
                 ac.holdingName          = nil
                 ac.holdingTargetName    = nil
                 ac.holdingInboundCourse = nil
-                ac.holdingProgressM     = 0
+                ac.holdingProgress      = 0
                 ac.history              = []
                 aircraft.append(ac)
                 let last = aircraft.count - 1
@@ -780,14 +780,19 @@ final class MapViewModel: ObservableObject {
         for i in traffic.indices where traffic[i].holdingName != nil {
             guard let ic = traffic[i].holdingInboundCourse,
                   let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
-            // Apply any speed/altitude clearance while holding (aircraft stays
-            // in the pattern; the racetrack resizes as the speed converges).
+            // Apply any speed/altitude clearance while holding. The pattern is
+            // sized from the CURRENT speed (so the turn radius grows/shrinks
+            // realistically), and progress is a fraction, so speed changes —
+            // which converge gradually — morph the oval smoothly without jumps.
             physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
             let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
                                          speedKnots: traffic[i].speedKnots)
-            let vmps = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
-            traffic[i].holdingProgressM += vmps * tickInterval
-            let s = track.sample(at: traffic[i].holdingProgressM)
+            let vmps  = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
+            let total = track.totalLength
+            var prog  = traffic[i].holdingProgress + (vmps * tickInterval) / total
+            prog = prog.truncatingRemainder(dividingBy: 1)
+            traffic[i].holdingProgress = prog
+            let s = track.sample(at: prog * total)
             traffic[i].position       = s.position
             traffic[i].headingDegrees = s.heading
             if tickCount % historySampleTicks == 0 {

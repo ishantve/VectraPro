@@ -25,18 +25,25 @@ struct HoldingRacetrack {
     let radiusM: Double           // turn radius (metres)
     let legM: Double              // straight-leg length (metres, 1-minute rule)
 
+    /// Build the geometry from a holding speed (Rate-1 / 30°-bank turn radius,
+    /// 1-minute legs).
     init(fix: CLLocationCoordinate2D, inboundCourse: Double, speedKnots: Double) {
-        self.fix = fix
-        self.inboundCourse = inboundCourse
-
         let speed = max(speedKnots, 1)
         let neededBank    = atan(speed / 362.1) * 180 / .pi
         let bank          = min(neededBank, 30)
         let rateDegPerSec = 1091 * tan(bank * .pi / 180) / speed
         let omega         = rateDegPerSec * .pi / 180          // rad/s
         let vmps          = speed * 1852 / 3600
-        self.radiusM = vmps / omega
-        self.legM    = vmps * 60
+        self.init(fix: fix, inboundCourse: inboundCourse,
+                  radiusM: vmps / omega, legM: vmps * 60)
+    }
+
+    /// Build the geometry from explicit, fixed dimensions.
+    init(fix: CLLocationCoordinate2D, inboundCourse: Double, radiusM: Double, legM: Double) {
+        self.fix = fix
+        self.inboundCourse = inboundCourse
+        self.radiusM = radiusM
+        self.legM = legM
     }
 
     var totalLength: Double { 2 * legM + 2 * .pi * radiusM }
