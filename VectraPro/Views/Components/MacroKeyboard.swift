@@ -3,9 +3,8 @@
 //  VectraPro
 //
 //  The "Macro Keyboard" shown on the MAIN window while the radar is detached
-//  into its own window. Same collapsible chrome as CommandKeyboard, but its
-//  keys trigger macros (predefined actions/sequences).
-//  NOTE: the key set below is placeholder — final macros TBD.
+//  into its own window. Fills the blank main screen with an 8 × 9 grid of 72
+//  macro keys, grouped by category (Airborne / Ground / Vehicle / Instructor).
 //
 
 import SwiftUI
@@ -15,103 +14,117 @@ struct MacroKeyboard: View {
     /// Tapped a macro key (identified by its title).
     var onMacro: (String) -> Void = { _ in }
 
-    @State private var expanded = true
+    // MARK: - Key model
 
-    // MARK: Key model
-
-    private enum Style {
-        case blue, teal, purple, orange
-
-        var gradient: LinearGradient {
-            let colors: [Color]
+    private enum KC {
+        case yellow, cyan, cream, teal, green, tan, magenta, coral, pink, white, red, grey
+        var bg: Color {
             switch self {
-            case .blue:   colors = [Color(red: 0x57/255, green: 0xA6/255, blue: 0xF2/255), Color(red: 0x3B/255, green: 0x86/255, blue: 0xE0/255)]
-            case .teal:   colors = [Color(red: 0x77/255, green: 0xD9/255, blue: 0xB4/255), Color(red: 0x33/255, green: 0xA4/255, blue: 0x87/255)]
-            case .purple: colors = [Color(red: 0x9A/255, green: 0x6B/255, blue: 0xF2/255), Color(red: 0x5E/255, green: 0x32/255, blue: 0xC8/255)]
-            case .orange: colors = [Color(red: 0xFA/255, green: 0xA9/255, blue: 0x4E/255), Color(red: 0xE2/255, green: 0x61/255, blue: 0x1E/255)]
+            case .yellow:  return Color(red: 0.95, green: 0.83, blue: 0.30)
+            case .cyan:    return Color(red: 0.52, green: 0.83, blue: 0.92)
+            case .cream:   return Color(red: 0.96, green: 0.92, blue: 0.80)
+            case .teal:    return Color(red: 0.52, green: 0.85, blue: 0.73)
+            case .green:   return Color(red: 0.62, green: 0.82, blue: 0.35)
+            case .tan:     return Color(red: 0.91, green: 0.78, blue: 0.56)
+            case .magenta: return Color(red: 0.91, green: 0.36, blue: 0.78)
+            case .coral:   return Color(red: 0.94, green: 0.56, blue: 0.45)
+            case .pink:    return Color(red: 0.95, green: 0.83, blue: 0.90)
+            case .white:   return Color(red: 0.96, green: 0.96, blue: 0.93)
+            case .red:     return Color(red: 0.90, green: 0.30, blue: 0.24)
+            case .grey:    return Color(red: 0.80, green: 0.82, blue: 0.83)
             }
-            return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 
     private struct Key: Identifiable {
-        let id: String
-        let title: String
-        let style: Style
-        init(_ title: String, _ style: Style) { id = title; self.title = title; self.style = style }
+        let id = UUID()
+        let title: String?      // nil = blank filler cell
+        let color: KC
+        init(_ title: String?, _ color: KC) { self.title = title; self.color = color }
     }
 
-    // Placeholder macros — final set to be defined.
-    private let keys: [Key] = [
-        Key("Macro 1", .blue),   Key("Macro 2", .teal),
-        Key("Macro 3", .purple), Key("Macro 4", .orange),
-        Key("Macro 5", .blue),   Key("Macro 6", .teal),
+    /// Left-edge category labels, one per row (nil = no label).
+    private let rowLabels: [String?] = [
+        "Airborne", "Ground", "Vehicle", "Instructor",
+        nil, nil, nil, nil, nil
     ]
 
-    private let columns = [
-        GridItem(.fixed(100), spacing: 8),
-        GridItem(.fixed(100), spacing: 8)
+    /// 9 rows × 8 columns, matching the reference layout.
+    private let rows: [[Key]] = [
+        [ Key("LFT H230\nILS", .yellow), Key("LFT H290\nILS", .yellow), Key("DALD\n26", .cyan), Key("VOR DME\n26", .cyan), Key(nil, .grey), Key("RNP VIA\nCB702", .cream), Key("RGT H230\nILS", .yellow), Key("RGT H290\nILS", .yellow) ],
+        [ Key("RNP VIA\nCB 703", .cream), Key("RNP VIA\nCB 704", .cream), Key("RNP VIA\nCB 705", .cream), Key("RNP VIA\nCB 706", .cream), Key("Stop\nTurn", .green), Key("@FL70\n210 KTS", .cyan), Key("GO\nAround", .teal), Key("Touch\n&Go", .teal) ],
+        [ Key("SPEED\n160 KTS", .teal), Key("SPEED\n180 KTS", .teal), Key("SPEED\n210 KTS", .teal), Key("SPEED\n250 KTS", .teal), Key("ORBIT\nL", .white), Key("ORBIT\nR", .white), Key("360\nL", .white), Key("360\nR", .white) ],
+        [ Key("C/D Rate\n200'/m", .tan), Key("C/D Rate\n500'/m", .tan), Key("C/D Rate\n900'/m", .tan), Key("C/D Rate\n1400'/m", .tan), Key("C/D Rate\n2000'/m", .tan), Key("C/D Rate\n2500'/m", .tan), Key("HIDE", .cyan), Key("FREEZE", .cyan) ],
+        [ Key("SQK C\nON", .cyan), Key("SQK C\nOFF", .cyan), Key("SQK\nSTOP", .teal), Key("SQK\n7700", .magenta), Key("Force\nLand", .coral), Key("Own Nav\nCCB", .green), Key("UNHIDE", .cyan), Key("UNFREEZE", .cyan) ],
+        [ Key("HOLD\nNT", .pink), Key("HOLD\nPJ", .pink), Key("HOLD\nBR", .pink), Key("HOLD\nCCB", .pink), Key("HOLD\nCB 705", .pink), Key("HOLD\nCB 706", .pink), Key("via PJ\n—", .cream), Key("109 Tr\nPJ", .cream) ],
+        [ Key("DALD\n08", .yellow), Key("VOR DME\n08", .yellow), Key("DALD\n15", .cream), Key("NDB\n15", .cream), Key("DALD\n33", .coral), Key("VOR DME\n33", .coral), Key("DEST/\nVACB", .teal), Key("Fly to\nVACB", .teal) ],
+        [ Key("Direct\nBAMUL", .white), Key("Direct\nMANDU", .white), Key("Direct\nDUMAS", .white), Key("Direct\nELBIS", .white), Key("Direct\nMANUR", .white), Key("Direct\nSULEM", .white), Key("via\nCOLAB", .cyan), Key("VANISH", .red) ],
+        [ Key("PD\nCB703", .cream), Key("PD\nCB704", .cream), Key("PD\nCB705", .cream), Key("PD\nCB706", .cream), Key("PD TO\nCB 702", .cream), Key(nil, .grey), Key("Commn\nDesc NOW", .yellow), Key(nil, .grey) ],
     ]
+
+    private let textColor = Color(red: 0.42, green: 0.12, blue: 0.12)   // dark maroon
+    private let offWhite   = Color(red: 0.94, green: 0.93, blue: 0.90)
+
+    // Compact keys, ~4:3 (width:height) to match the reference and fit the text.
+    private let keyWidth: CGFloat  = 92
+    private let keyHeight: CGFloat = 68
+    private let gap: CGFloat = 6
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            toggle
-            if expanded {
-                grid
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-    }
+        VStack(spacing: gap) {
+            ForEach(rows.indices, id: \.self) { r in
+                HStack(spacing: gap) {
+                    // Left category label (rotated).
+                    Text(rowLabels[r] ?? "")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(textColor.opacity(0.7))
+                        .fixedSize()
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 16)
 
-    private var toggle: some View {
-        Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { expanded.toggle() }
-        } label: {
-            Image(systemName: expanded ? "chevron.right" : "chevron.left")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 56)
-                .background(Style.blue.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(0.25), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var grid: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 8) {
-                Text("MACRO")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .padding(.top, 4)
-
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(keys) { key in
-                        Button {
-                            onMacro(key.title)
-                        } label: {
-                            Text(key.title)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.7)
-                                .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
-                                .frame(width: 100, height: 48)
-                                .background(key.style.gradient,
-                                            in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .stroke(.white.opacity(0.25), lineWidth: 1))
-                                .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
-                        }
-                        .buttonStyle(.plain)
+                    ForEach(rows[r]) { key in
+                        keyView(key)
                     }
                 }
             }
-            .padding(4)
         }
-        .frame(width: 216, height: 560)
-        .fixedSize(horizontal: true, vertical: false)
+        .padding(14)
+        .background(offWhite, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(.black.opacity(0.15), lineWidth: 1))
+        .fixedSize()   // hug the grid; don't stretch to fill the screen
     }
+
+    @ViewBuilder
+    private func keyView(_ key: Key) -> some View {
+        if let title = key.title {
+            Button {
+                onMacro(title)
+            } label: {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(textColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.55)
+                    .frame(width: keyWidth, height: keyHeight)
+                    .background(key.color.bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(.black.opacity(0.12), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        } else {
+            // Blank filler — keeps the grid aligned.
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(key.color.bg)
+                .frame(width: keyWidth, height: keyHeight)
+        }
+    }
+}
+
+#Preview {
+    MacroKeyboard()
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black)
 }

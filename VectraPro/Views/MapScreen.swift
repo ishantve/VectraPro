@@ -101,13 +101,16 @@ struct MapScreen: View {
             Color.black.ignoresSafeArea()
 
             // Keep the map alive even while detached (just covered), so it
-            // reappears instantly on close instead of re-initialising.
+            // reappears instantly on close instead of re-initialising. While
+            // detached, the blank main screen shows the big Macro Keyboard.
             mapView
                 .ignoresSafeArea()
                 .id(providerRaw)   // recreate when the provider changes
                 .overlay {
                     if presentation.isMapDetached {
                         Color.black.ignoresSafeArea()
+                        // Compact macro grid centred in the blank main screen.
+                        MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
                     }
                 }
 
@@ -236,12 +239,9 @@ struct MapScreen: View {
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
                 PushToTalkMicButton(viewModel: speechViewModel)
-                if presentation.isMapDetached {
-                    // Radar is in its own window → show the Macro Keyboard here.
-                    MacroKeyboard(
-                        onMacro: { _ in /* TODO: macro actions */ }
-                    )
-                } else {
+                // Command keyboard only on the main (attached) view. While
+                // detached, the big Macro Keyboard fills the main screen instead.
+                if !presentation.isMapDetached {
                     CommandKeyboard(
                         onCommand: { CommandKeyboardHandler.shared.perform($0) },
                         requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
