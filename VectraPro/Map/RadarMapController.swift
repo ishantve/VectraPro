@@ -935,27 +935,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// At zoom 8.8 → zoomScale = 1.0  (no change)
     /// At zoom 9.8 → zoomScale = 0.5  (halve NM → same screen pixels as before)
     private func syncFixColliders() {
-        let zoomScale    = pow(2.0, 8.8 - mapView.zoomLevel)
-        let circleNM     = 1.0 * zoomScale
-        let triangleNM   = 1.0 * zoomScale
-        let showFixes    = viewModel.layerOn("Fixes")
-        let showHolding  = viewModel.layerOn("Holding")
-        var features: [MLNPolylineFeature] = []
-        for fix in viewModel.fixes {
-            guard let lat = fix.latitude, let lon = fix.longitude else { continue }
-            let center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-            if fix.type?.uppercased() == "HOLDING" {
-                guard showHolding else { continue }
-                var coords = circleCoords(center: center, radiusNM: circleNM)
-                coords.append(coords[0])
-                features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
-            } else {
-                guard showFixes else { continue }
-                var coords = triangleColliderCoords(center: center, sizeNM: triangleNM)
-                features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
-            }
-        }
-        fixColliderSource?.shape = MLNShapeCollectionFeature(shapes: features)
+        // Fix / holding colliders are hidden from view — collision detection
+        // (detectFixConflicts / hold capture) still runs independently.
+        fixColliderSource?.shape = nil
     }
 
     /// Builds a north-pointing equilateral triangle at `sizeNM` circumradius + closing point.
