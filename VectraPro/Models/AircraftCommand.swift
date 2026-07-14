@@ -18,4 +18,5 @@ enum AircraftCommand: Equatable {
     case minSpeed(Double)       // maintain xxx knots or greater (speed floor)
     case maxSpeed(Double)       // do not exceed xxx knots (speed ceiling)
     case hold(String)           // proceed direct to a holding fix and hold there
+    case interceptLocalizer(runway: String)   // intercept the localizer for a runway
 }

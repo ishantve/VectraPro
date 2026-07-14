@@ -97,6 +97,8 @@ final class CommandFeedbackManager: ObservableObject {
             return "do not exceed \(Int(kts)) knots"
         case .hold(let fix):
             return "hold at \(fix.uppercased())"
+        case .interceptLocalizer(let runway):
+            return "intercept the localizer runway \(runway)"
         }
     }
 }

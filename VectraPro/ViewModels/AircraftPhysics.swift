@@ -73,6 +73,11 @@ final class AircraftPhysics {
                 // steers the heading toward it each tick (auto-turn).
                 aircraft.holdingTargetName = fixName
                 aircraft.turnDirection = nil
+            case .interceptLocalizer(let runway):
+                // Cleared to intercept the localizer for this runway. The view
+                // model drives the actual intercept + tracking each tick.
+                aircraft.interceptRunway = runway
+                aircraft.turnDirection = nil
             }
         }
     }
