@@ -167,11 +167,17 @@ final class MapViewModel: ObservableObject {
         return coordinate(of: fix)
     }
 
-    /// Find a holding fix by (case-insensitive) name.
+    /// Find a holding fix by name, ignoring case, hyphens and spaces so spoken
+    /// codes match hyphenated fix names ("re01" ↔ "RE-01", "vi95" ↔ "VI-95").
     private func holdingFix(named name: String) -> ExerciseDetail.Fix? {
-        holdingFixes.first {
-            ($0.fixName ?? "").caseInsensitiveCompare(name) == .orderedSame
-        }
+        let target = canonicalFixName(name)
+        return holdingFixes.first { canonicalFixName($0.fixName ?? "") == target }
+    }
+
+    /// Strips everything but letters and digits and lowercases — used for
+    /// tolerant fix-name matching.
+    private func canonicalFixName(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
     private func coordinate(of fix: ExerciseDetail.Fix) -> CLLocationCoordinate2D? {
@@ -505,13 +511,56 @@ final class MapViewModel: ObservableObject {
     /// Apply parsed commands to the selected aircraft.
     /// Routes all audio feedback through CommandFeedbackManager.
     func apply(_ commands: [AircraftCommand]) {
-        guard let id = selectedAircraftID,
-              let i = aircraft.firstIndex(where: { $0.id == id }) else {
+        guard let id = selectedAircraftID else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        physics.apply(commands, to: &aircraft[i])
-        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+        applyCommands(commands, toAircraftWithID: id)
+    }
+
+    /// Central command application. Radar aircraft get the command directly.
+    /// A holding aircraft keeps holding for speed/altitude clearances, but is
+    /// released back onto the radar for a vectoring / direct / hold command.
+    private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
+        // Live radar aircraft.
+        if let i = aircraft.firstIndex(where: { $0.id == id }) {
+            physics.apply(commands, to: &aircraft[i])
+            CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+            return
+        }
+        // Holding aircraft (in the hangar).
+        if let ti = traffic.firstIndex(where: { $0.id == id && $0.holdingName != nil }) {
+            if commandsLeaveHold(commands) {
+                // Vector / clear out of the hold: release onto the radar.
+                var ac = traffic.remove(at: ti)
+                ac.holdingName          = nil
+                ac.holdingTargetName    = nil
+                ac.holdingInboundCourse = nil
+                ac.holdingProgressM     = 0
+                ac.history              = []
+                aircraft.append(ac)
+                let last = aircraft.count - 1
+                physics.apply(commands, to: &aircraft[last])
+                CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[last].callsign, commands: commands)
+            } else {
+                // Speed / altitude clearance: obey while remaining in the hold.
+                physics.apply(commands, to: &traffic[ti])
+                CommandFeedbackManager.shared.commandAccepted(callsign: traffic[ti].callsign, commands: commands)
+            }
+            return
+        }
+        CommandFeedbackManager.shared.aircraftNotFound()
+    }
+
+    /// Commands that take an aircraft OUT of a holding pattern (vectoring,
+    /// resume navigation, or a new hold). Speed/altitude clearances keep it in.
+    private func commandsLeaveHold(_ commands: [AircraftCommand]) -> Bool {
+        commands.contains { cmd in
+            switch cmd {
+            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold: return true
+            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:    return false
+            }
+        }
     }
 
     deinit {
@@ -731,6 +780,9 @@ final class MapViewModel: ObservableObject {
         for i in traffic.indices where traffic[i].holdingName != nil {
             guard let ic = traffic[i].holdingInboundCourse,
                   let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
+            // Apply any speed/altitude clearance while holding (aircraft stays
+            // in the pattern; the racetrack resizes as the speed converges).
+            physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
             let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
                                          speedKnots: traffic[i].speedKnots)
             let vmps = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
@@ -902,22 +954,23 @@ final class MapViewModel: ObservableObject {
                         among: traffic.filter { $0.category == .departure })
     }
 
-    /// Resolves a live radar aircraft callsign from an already-normalised voice transcript.
+    /// Resolves a live radar aircraft callsign from an already-normalised voice
+    /// transcript. Holding aircraft (in the hangar) are included so they can be
+    /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
-        resolveCallsign(from: normalizedText, among: aircraft)
+        let candidates = aircraft + traffic.filter { $0.holdingName != nil }
+        return resolveCallsign(from: normalizedText, among: candidates)
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
     func applyToCallsign(_ callsign: String, commands: [AircraftCommand]) {
-        guard let i = aircraft.firstIndex(where: {
+        guard let id = (aircraft + traffic).first(where: {
             $0.callsign.uppercased() == callsign.uppercased()
-        }) else {
+        })?.id else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        physics.apply(commands, to: &aircraft[i])
-        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign,
-                                                      commands: commands)
+        applyCommands(commands, toAircraftWithID: id)
     }
 
     /// Shared resolver: direct ICAO match → spoken airline name + flight number.
@@ -997,11 +1050,16 @@ final class MapViewModel: ObservableObject {
     }
 
     /// Persist a dragged data-block position as a polar offset from the
-    /// aircraft so it stays attached as the aircraft moves.
+    /// aircraft so it stays attached as the aircraft moves. Handles both radar
+    /// aircraft and holding aircraft (which live in the hangar `traffic` list).
     func setLabelOffset(for id: UUID, bearingDegrees: Double, distanceMeters: Double) {
-        guard let index = aircraft.firstIndex(where: { $0.id == id }) else { return }
-        aircraft[index].labelBearingDegrees = bearingDegrees
-        aircraft[index].labelDistanceMeters = distanceMeters
+        if let index = aircraft.firstIndex(where: { $0.id == id }) {
+            aircraft[index].labelBearingDegrees = bearingDegrees
+            aircraft[index].labelDistanceMeters = distanceMeters
+        } else if let index = traffic.firstIndex(where: { $0.id == id }) {
+            traffic[index].labelBearingDegrees = bearingDegrees
+            traffic[index].labelDistanceMeters = distanceMeters
+        }
     }
 
     // MARK: - Drawing flow

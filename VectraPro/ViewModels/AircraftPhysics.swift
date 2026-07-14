@@ -77,6 +77,14 @@ final class AircraftPhysics {
         }
     }
 
+    /// Converge speed + altitude toward their commanded targets, without moving
+    /// or turning. Used for holding aircraft (which are positioned by the
+    /// racetrack, not normal physics) so speed/altitude clearances still apply.
+    func adjustSpeedAltitude(_ aircraft: inout Aircraft, dt: Double) {
+        adjustSpeed(&aircraft, dt: dt)
+        adjustAltitude(&aircraft, dt: dt)
+    }
+
     // MARK: - Physics step
 
     /// Advances one aircraft through one simulation tick:

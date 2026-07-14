@@ -1060,7 +1060,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Small green ring around the selected aircraft so it's visually distinct.
     private func syncSelectionRing() {
         guard let id = viewModel.selectedAircraftID,
-              let ac = viewModel.aircraft.first(where: { $0.id == id }) else {
+              let ac = viewModel.radarAircraft.first(where: { $0.id == id }) else {
             selectionRingSource?.shape = nil
             return
         }
@@ -1243,7 +1243,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         case .ended, .cancelled, .failed:
             if panMode == .label, let id = draggingLabelID,
-               let aircraft = viewModel.aircraft.first(where: { $0.id == id }),
+               let aircraft = viewModel.radarAircraft.first(where: { $0.id == id }),
                let label = labelAnnotations[id] {
                 let bearing = Geo.bearing(from: aircraft.position, to: label.coordinate)
                 let distance = Geo.distanceMeters(from: aircraft.position, to: label.coordinate)

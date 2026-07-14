@@ -179,12 +179,18 @@ struct CommandParser {
         }
         guard !rest.isEmpty else { return nil }
 
-        // If the name is spoken as ICAO phonetic words ("papa juliet"), fold
-        // them into a compact letter code ("PJ"). A single token is left as-is
-        // (it may already be a code like "pj" or a full fix name).
+        // Fold spoken ICAO phonetic words + digits into a compact code:
+        //   "papa juliet"        → "PJ"
+        //   "romeo echo 01"      → "RE01"   (matches fix "RE-01")
+        //   "victor india 95"    → "VI95"
+        // If any token is a plain word (a full fix name like "clink"), keep the
+        // words joined as-is ("vi 95" → "vi95", "clink" → "clink").
         let words = rest.split(separator: " ").map(String.init)
-        if words.count > 1, words.allSatisfy({ phoneticMap[$0] != nil }) {
-            return .hold(words.compactMap { phoneticMap[$0] }.joined())
+        let allPhoneticOrDigits = words.allSatisfy {
+            phoneticMap[$0] != nil || $0.allSatisfy(\.isNumber)
+        }
+        if allPhoneticOrDigits {
+            return .hold(words.map { phoneticMap[$0] ?? $0 }.joined())
         }
         return .hold(words.joined())
     }
