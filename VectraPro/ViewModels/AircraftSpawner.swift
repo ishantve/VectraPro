@@ -55,12 +55,19 @@ final class AircraftSpawner {
 
     // MARK: - Public: spawn
 
+    /// Minimum separation between spawn points (radial or random).
+    private let minSpawnSeparationM = 15.0 * Distance.metersPerNauticalMile
+
     /// Spawns a radar aircraft outside the 60–63 NM radius, heading roughly inbound.
-    func makeRandomAircraft(context: SpawnContext, category: FlightCategory = .arrival) -> Aircraft {
+    /// `existing` = positions of aircraft already on the radar; the spawn point is
+    /// kept at least 15 NM from all of them (and outside every zone).
+    func makeRandomAircraft(context: SpawnContext,
+                            category: FlightCategory = .arrival,
+                            existing: [CLLocationCoordinate2D] = []) -> Aircraft {
         var position = context.center
         var heading  = 0.0
 
-        // Retry up to 20 times to find a spawn point outside every zone.
+        // Retry up to 20 times to find a spawn point clear of zones and traffic.
         for _ in 0..<20 {
             let candidate: CLLocationCoordinate2D
             let candidateHeading: Double
@@ -84,7 +91,11 @@ final class AircraftSpawner {
 
             position = candidate
             heading  = candidateHeading
-            if !isInsideAnyZone(candidate, zoneShapes: context.zoneShapes) { break }
+            let clearOfZones   = !isInsideAnyZone(candidate, zoneShapes: context.zoneShapes)
+            let clearOfTraffic = existing.allSatisfy {
+                Geo.distanceMeters(from: candidate, to: $0) >= minSpawnSeparationM
+            }
+            if clearOfZones && clearOfTraffic { break }
         }
 
         var ac = Aircraft(callsign: callsign(airlines: context.airlines),

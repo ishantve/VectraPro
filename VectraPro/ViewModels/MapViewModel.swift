@@ -662,7 +662,15 @@ final class MapViewModel: ObservableObject {
         elapsedSeconds      = 0
         isExerciseFinished  = false
         spawner.resetRadialCycle(fixes: fixes)
-        aircraft = initialCategories().map { spawner.makeRandomAircraft(context: spawnContext, category: $0) }
+        // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
+        var spawned: [Aircraft] = []
+        for category in initialCategories() {
+            let ac = spawner.makeRandomAircraft(context: spawnContext,
+                                                category: category,
+                                                existing: spawned.map(\.position))
+            spawned.append(ac)
+        }
+        aircraft = spawned
         resetTraffic()
         // Start filling toward capacity if initial spawn didn't reach it.
         radarPromotionCountdown = aircraft.count < airspaceCapacity
@@ -924,7 +932,8 @@ final class MapViewModel: ObservableObject {
         } else {
             category = Bool.random() ? .arrival : .enroute
         }
-        aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category))
+        aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category,
+                                                   existing: aircraft.map(\.position)))
         radarPromotionCountdown = aircraft.count < airspaceCapacity
             ? (promotionIntervals.randomElement() ?? 30)
             : .infinity
