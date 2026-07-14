@@ -319,8 +319,13 @@ final class MapViewModel: ObservableObject {
                 lengthMeters: nil
             )
             built.append(runway)
-            if strips[0].displayLocalizer == true { enabled.insert(ApproachID(runwayID: runway.id, side: .a)) }
-            if strips[1].displayLocalizer == true { enabled.insert(ApproachID(runwayID: runway.id, side: .b)) }
+            // Show a localizer only when it's set to display AND is active.
+            if strips[0].displayLocalizer == true && strips[0].activeLocalizer == true {
+                enabled.insert(ApproachID(runwayID: runway.id, side: .a))
+            }
+            if strips[1].displayLocalizer == true && strips[1].activeLocalizer == true {
+                enabled.insert(ApproachID(runwayID: runway.id, side: .b))
+            }
         }
 
         if built.isEmpty {
