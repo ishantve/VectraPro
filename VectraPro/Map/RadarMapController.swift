@@ -794,12 +794,31 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         trailLineSource?.shape = MLNShapeCollectionFeature(shapes: features)
     }
 
-    /// One tether line per aircraft, from its symbol to its data block.
+    /// One tether line per aircraft, from its symbol to the centre of the data
+    /// block edge that faces the aircraft (left/right/top/bottom edge centre).
     private func updateTethers(on mapView: MLNMapView) {
         var features: [MLNPolylineFeature] = []
         for aircraft in viewModel.radarAircraft {
-            guard let label = labelAnnotations[aircraft.id] else { continue }
-            var coords = [aircraft.position, label.coordinate]
+            guard let label = labelAnnotations[aircraft.id], let image = label.image else { continue }
+
+            // Data-block centre + the aircraft, both in screen space.
+            let anchor = mapView.convert(label.coordinate, toPointTo: mapView)
+            let center = CGPoint(x: anchor.x + label.centerOffset.dx,
+                                 y: anchor.y + label.centerOffset.dy)
+            let acPoint = mapView.convert(aircraft.position, toPointTo: mapView)
+            let halfW = image.size.width / 2, halfH = image.size.height / 2
+
+            // Pick the edge centre on the side the aircraft is on.
+            let dx = acPoint.x - center.x, dy = acPoint.y - center.y
+            let edge: CGPoint
+            if abs(dx) >= abs(dy) {
+                edge = CGPoint(x: center.x + (dx < 0 ? -halfW : halfW), y: center.y)
+            } else {
+                edge = CGPoint(x: center.x, y: center.y + (dy < 0 ? -halfH : halfH))
+            }
+
+            let edgeCoord = mapView.convert(edge, toCoordinateFrom: mapView)
+            var coords = [aircraft.position, edgeCoord]
             features.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
         }
         tetherSource?.shape = MLNShapeCollectionFeature(shapes: features)
