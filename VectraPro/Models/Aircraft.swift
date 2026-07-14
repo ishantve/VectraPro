@@ -38,6 +38,16 @@ struct Aircraft: Identifiable {
     var assignedRunway: String? = nil
     /// Holding fix this aircraft is holding at (nil = not holding).
     var holdingName: String? = nil
+    /// Holding fix the aircraft is currently flying toward (auto-turn). Cleared
+    /// once it reaches the fix and enters the holding hangar.
+    var holdingTargetName: String? = nil
+    /// Inbound leg course (toward the fix) for the holding racetrack — set to the
+    /// heading the aircraft had when it reached the fix.
+    var holdingInboundCourse: Double? = nil
+    /// Position around the holding loop as a fraction (0…1, 0 = fix). Tracking a
+    /// fraction (not metres) keeps the aircraft at the same relative point when
+    /// the pattern resizes with speed, so speed changes morph it smoothly.
+    var holdingProgress: Double = 0
     /// Takeoff phase; nil when the aircraft is airborne and under normal ATC control.
     var takeoffState: TakeoffState? = nil
     /// ICAO type code of the aircraft (e.g. "AT72"), from the exercise.

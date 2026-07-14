@@ -59,6 +59,14 @@ final class MapViewModel: ObservableObject {
     /// Everything shown in the hangar lists: the on-map aircraft + spawned traffic.
     var listAircraft: [Aircraft] { aircraft + traffic }
 
+    /// Aircraft drawn on the radar. Normally just the live targets; when the
+    /// "Holding racetrack" layer is on, holding aircraft are shown too, orbiting
+    /// their fix on the racetrack.
+    var radarAircraft: [Aircraft] {
+        guard layerOn("Holding racetrack") else { return aircraft }
+        return aircraft + traffic.filter { $0.holdingName != nil }
+    }
+
     /// Spawn-frequency config per category (from the exercise).
     private var freqDeparture: ExerciseDetail.FrequencyOfDeparture?
     private var freqArrival: ExerciseDetail.FrequencyOfArrival?
@@ -149,6 +157,81 @@ final class MapViewModel: ObservableObject {
         fixes.filter { $0.type?.uppercased() == "HOLDING" }
     }
 
+    /// Radius (metres) within which an inbound aircraft is captured by a hold.
+    private let holdCaptureRadiusM = 1.0 * Distance.metersPerNauticalMile
+
+    /// Public: coordinate of a holding fix by name (used by the map controller
+    /// to draw the racetrack).
+    func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
+        guard let fix = holdingFix(named: name) else { return nil }
+        return coordinate(of: fix)
+    }
+
+    /// Find a holding fix by name, ignoring case, hyphens and spaces so spoken
+    /// codes match hyphenated fix names ("re01" ↔ "RE-01", "vi95" ↔ "VI-95").
+    private func holdingFix(named name: String) -> ExerciseDetail.Fix? {
+        let target = canonicalFixName(name)
+        return holdingFixes.first { canonicalFixName($0.fixName ?? "") == target }
+    }
+
+    /// Strips everything but letters and digits and lowercases — used for
+    /// tolerant fix-name matching.
+    private func canonicalFixName(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func coordinate(of fix: ExerciseDetail.Fix) -> CLLocationCoordinate2D? {
+        guard let lat = fix.latitude, let lon = fix.longitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// Continuously steer an aircraft's heading toward its commanded hold fix.
+    private func steerTowardHold(_ aircraft: inout Aircraft) {
+        guard let name = aircraft.holdingTargetName,
+              let fix = holdingFix(named: name),
+              let fixPos = coordinate(of: fix) else { return }
+        aircraft.turnDirection = nil
+        aircraft.targetHeading = Geo.bearing(from: aircraft.position, to: fixPos)
+    }
+
+    /// Move any aircraft that reached its commanded hold fix off the radar and
+    /// into the holding hangar (as hangar traffic tagged with the fix name).
+    private func captureAircraftAtHold() {
+        var capturedIDs = Set<UUID>()
+        for index in aircraft.indices {
+            guard let name = aircraft[index].holdingTargetName,
+                  let fix = holdingFix(named: name),
+                  let fixPos = coordinate(of: fix) else { continue }
+            // Capture as soon as the NOSE reaches the fix collider (not the body).
+            let ac0 = aircraft[index]
+            let noseReachM = (ac0.noseOffsetNM + ac0.noseForwardNM) * Distance.metersPerNauticalMile
+            let nose = Geo.offset(from: ac0.position,
+                                  distanceMeters: noseReachM,
+                                  bearingDegrees: ac0.headingDegrees)
+            guard Geo.distanceMeters(from: nose, to: fixPos) < holdCaptureRadiusM
+            else { continue }
+
+            var ac = aircraft[index]
+            ac.holdingName          = fix.fixName   // canonical name → matches hangar filter
+            ac.holdingTargetName    = nil
+            ac.holdingInboundCourse = ac.headingDegrees   // course it arrived on = inbound leg
+            ac.holdingProgress      = 0                   // start at the fix, entering turn 1
+            ac.targetHeading        = nil
+            ac.turnDirection        = nil
+            ac.history              = []
+            traffic.append(ac)
+            capturedIDs.insert(ac.id)
+        }
+        guard !capturedIDs.isEmpty else { return }
+        if let sel = selectedAircraftID, capturedIDs.contains(sel) { selectedAircraftID = nil }
+        aircraft.removeAll { capturedIDs.contains($0.id) }
+        // Free radar slot → refill soon.
+        if aircraft.count < airspaceCapacity {
+            let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
+            radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
+        }
+    }
+
     /// Apply the started exercise: center the radar and derive runways +
     /// enabled approaches from the API. Built once here so UUIDs stay stable
     /// across `reset()`.
@@ -161,6 +244,21 @@ final class MapViewModel: ObservableObject {
         zones = detail.zones
         obstructions = detail.obstructions
         _zoneShapesDirty = true
+
+        #if DEBUG
+        let holdings = detail.fixes.filter { $0.type?.uppercased() == "HOLDING" }
+        print("📡 HOLDING FIXES FROM API — \(holdings.count) found")
+        for f in holdings {
+            print("""
+              • fixId : \(f.fixId ?? "-")
+                name  : \(f.fixName ?? "-")
+                type  : \(f.type ?? "-")   fixType: \(f.fixType ?? "-")
+                lat   : \(f.latitude.map { String($0) } ?? "-")
+                lon   : \(f.longitude.map { String($0) } ?? "-")
+                radials: \(f.radials?.count ?? 0)
+            """)
+        }
+        #endif
 
         #if DEBUG
         print("========== ZONES (\(zones.count)) ==========")
@@ -262,6 +360,29 @@ final class MapViewModel: ObservableObject {
     private var simulationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private let tickInterval = 1.0          // seconds
+
+    // MARK: - Simulation speed (fast-forward)
+
+    /// Available fast-forward multipliers.
+    static let speedOptions = [1, 2, 3, 5, 10, 15, 20, 30]
+    /// Current simulation speed multiplier (1× = real time).
+    @Published private(set) var simulationSpeed = 1
+
+    /// Step up to the next faster multiplier.
+    func increaseSpeed() {
+        guard let i = Self.speedOptions.firstIndex(of: simulationSpeed),
+              i + 1 < Self.speedOptions.count else { return }
+        simulationSpeed = Self.speedOptions[i + 1]
+        restartTimerIfRunning()
+    }
+
+    /// Step down to the previous slower multiplier.
+    func decreaseSpeed() {
+        guard let i = Self.speedOptions.firstIndex(of: simulationSpeed),
+              i - 1 >= 0 else { return }
+        simulationSpeed = Self.speedOptions[i - 1]
+        restartTimerIfRunning()
+    }
 
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
@@ -390,13 +511,56 @@ final class MapViewModel: ObservableObject {
     /// Apply parsed commands to the selected aircraft.
     /// Routes all audio feedback through CommandFeedbackManager.
     func apply(_ commands: [AircraftCommand]) {
-        guard let id = selectedAircraftID,
-              let i = aircraft.firstIndex(where: { $0.id == id }) else {
+        guard let id = selectedAircraftID else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        physics.apply(commands, to: &aircraft[i])
-        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+        applyCommands(commands, toAircraftWithID: id)
+    }
+
+    /// Central command application. Radar aircraft get the command directly.
+    /// A holding aircraft keeps holding for speed/altitude clearances, but is
+    /// released back onto the radar for a vectoring / direct / hold command.
+    private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
+        // Live radar aircraft.
+        if let i = aircraft.firstIndex(where: { $0.id == id }) {
+            physics.apply(commands, to: &aircraft[i])
+            CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+            return
+        }
+        // Holding aircraft (in the hangar).
+        if let ti = traffic.firstIndex(where: { $0.id == id && $0.holdingName != nil }) {
+            if commandsLeaveHold(commands) {
+                // Vector / clear out of the hold: release onto the radar.
+                var ac = traffic.remove(at: ti)
+                ac.holdingName          = nil
+                ac.holdingTargetName    = nil
+                ac.holdingInboundCourse = nil
+                ac.holdingProgress      = 0
+                ac.history              = []
+                aircraft.append(ac)
+                let last = aircraft.count - 1
+                physics.apply(commands, to: &aircraft[last])
+                CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[last].callsign, commands: commands)
+            } else {
+                // Speed / altitude clearance: obey while remaining in the hold.
+                physics.apply(commands, to: &traffic[ti])
+                CommandFeedbackManager.shared.commandAccepted(callsign: traffic[ti].callsign, commands: commands)
+            }
+            return
+        }
+        CommandFeedbackManager.shared.aircraftNotFound()
+    }
+
+    /// Commands that take an aircraft OUT of a holding pattern (vectoring,
+    /// resume navigation, or a new hold). Speed/altitude clearances keep it in.
+    private func commandsLeaveHold(_ commands: [AircraftCommand]) -> Bool {
+        commands.contains { cmd in
+            switch cmd {
+            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold: return true
+            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:    return false
+            }
+        }
     }
 
     deinit {
@@ -407,16 +571,31 @@ final class MapViewModel: ObservableObject {
 
     func startSimulation() {
         guard simulationTimer == nil else { return }
-        let timer = Timer(timeInterval: tickInterval, repeats: true) { [weak self] _ in
+        scheduleTimer()
+    }
+
+    func stopSimulation() {
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+    }
+
+    /// (Re)creates the timer at the current speed. Fast-forward fires the timer
+    /// more often (interval = tickInterval / speed) and advances ONE sim-second
+    /// per fire, so the clock counts up smoothly instead of jumping by N.
+    private func scheduleTimer() {
+        simulationTimer?.invalidate()
+        let interval = tickInterval / Double(max(1, simulationSpeed))
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.tick()
         }
         RunLoop.main.add(timer, forMode: .common)
         simulationTimer = timer
     }
 
-    func stopSimulation() {
-        simulationTimer?.invalidate()
-        simulationTimer = nil
+    /// Restart the timer with a new cadence when the speed changes mid-run.
+    private func restartTimerIfRunning() {
+        guard simulationTimer != nil else { return }
+        scheduleTimer()
     }
 
     /// Wipes all live state when leaving the radar screen so there is no stale
@@ -460,6 +639,7 @@ final class MapViewModel: ObservableObject {
         elapsedSeconds           = 0
         exerciseDurationSeconds  = 0
         isExerciseFinished       = false
+        simulationSpeed          = 1
     }
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
@@ -562,18 +742,63 @@ final class MapViewModel: ObservableObject {
         }
     }
 
+    /// Timer callback. Fires every `tickInterval / speed` real seconds and
+    /// advances exactly one sim-second, so the clock counts up smoothly (fast,
+    /// but without skipping numbers). Blink stays on a ~1 s real-time cadence.
     private func tick() {
+        guard !isExerciseFinished else { return }
+        advanceStep()
+        if tickCount % max(1, simulationSpeed) == 0 { blinkState.toggle() }
+    }
+
+    private func advanceStep() {
         tickCount += 1
         advanceSpawners()
         advanceRadarPromotion()
 
         for index in aircraft.indices {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
+            // Auto-turn toward a commanded holding fix (proceed direct).
+            steerTowardHold(&aircraft[index])
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
             if tickCount % historySampleTicks == 0 {
                 aircraft[index].history.append(aircraft[index].position)
                 if aircraft[index].history.count > maxHistoryPoints {
                     aircraft[index].history.removeFirst()
+                }
+            }
+        }
+
+        // Holding capture: aircraft that reached their commanded hold fix leave
+        // the radar and enter the holding hangar.
+        captureAircraftAtHold()
+
+        // Fly the holding racetracks. This runs every tick regardless of the
+        // layer's visibility, so an aircraft keeps orbiting while hidden and
+        // reappears at its up-to-date position when the layer is turned back on.
+        // Only the drawing (radarAircraft) is gated by the layer toggle.
+        for i in traffic.indices where traffic[i].holdingName != nil {
+            guard let ic = traffic[i].holdingInboundCourse,
+                  let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
+            // Apply any speed/altitude clearance while holding. The pattern is
+            // sized from the CURRENT speed (so the turn radius grows/shrinks
+            // realistically), and progress is a fraction, so speed changes —
+            // which converge gradually — morph the oval smoothly without jumps.
+            physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
+            let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
+                                         speedKnots: traffic[i].speedKnots)
+            let vmps  = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
+            let total = track.totalLength
+            var prog  = traffic[i].holdingProgress + (vmps * tickInterval) / total
+            prog = prog.truncatingRemainder(dividingBy: 1)
+            traffic[i].holdingProgress = prog
+            let s = track.sample(at: prog * total)
+            traffic[i].position       = s.position
+            traffic[i].headingDegrees = s.heading
+            if tickCount % historySampleTicks == 0 {
+                traffic[i].history.append(traffic[i].position)
+                if traffic[i].history.count > maxHistoryPoints {
+                    traffic[i].history.removeFirst()
                 }
             }
         }
@@ -625,8 +850,6 @@ final class MapViewModel: ObservableObject {
         // Fix collisions.
         let fixConflicts = collision.detectFixConflicts(aircraft: aircraft, fixes: fixes)
         if fixConflicts != fixConflictIDs { fixConflictIDs = fixConflicts }
-
-        blinkState.toggle()
 
         // Advance the exercise clock; finish when we reach the target duration.
         elapsedSeconds += 1
@@ -686,7 +909,8 @@ final class MapViewModel: ObservableObject {
     /// Falls back to a fresh spawn when the hangar has no eligible aircraft.
     private func promoteFromHangar() {
         let eligibleIndices = traffic.indices.filter {
-            traffic[$0].category == .arrival || traffic[$0].category == .enroute
+            traffic[$0].holdingName == nil &&
+            (traffic[$0].category == .arrival || traffic[$0].category == .enroute)
         }
         let category: FlightCategory
         if let idx = eligibleIndices.randomElement() {
@@ -735,22 +959,23 @@ final class MapViewModel: ObservableObject {
                         among: traffic.filter { $0.category == .departure })
     }
 
-    /// Resolves a live radar aircraft callsign from an already-normalised voice transcript.
+    /// Resolves a live radar aircraft callsign from an already-normalised voice
+    /// transcript. Holding aircraft (in the hangar) are included so they can be
+    /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
-        resolveCallsign(from: normalizedText, among: aircraft)
+        let candidates = aircraft + traffic.filter { $0.holdingName != nil }
+        return resolveCallsign(from: normalizedText, among: candidates)
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
     func applyToCallsign(_ callsign: String, commands: [AircraftCommand]) {
-        guard let i = aircraft.firstIndex(where: {
+        guard let id = (aircraft + traffic).first(where: {
             $0.callsign.uppercased() == callsign.uppercased()
-        }) else {
+        })?.id else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        physics.apply(commands, to: &aircraft[i])
-        CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign,
-                                                      commands: commands)
+        applyCommands(commands, toAircraftWithID: id)
     }
 
     /// Shared resolver: direct ICAO match → spoken airline name + flight number.
@@ -830,11 +1055,16 @@ final class MapViewModel: ObservableObject {
     }
 
     /// Persist a dragged data-block position as a polar offset from the
-    /// aircraft so it stays attached as the aircraft moves.
+    /// aircraft so it stays attached as the aircraft moves. Handles both radar
+    /// aircraft and holding aircraft (which live in the hangar `traffic` list).
     func setLabelOffset(for id: UUID, bearingDegrees: Double, distanceMeters: Double) {
-        guard let index = aircraft.firstIndex(where: { $0.id == id }) else { return }
-        aircraft[index].labelBearingDegrees = bearingDegrees
-        aircraft[index].labelDistanceMeters = distanceMeters
+        if let index = aircraft.firstIndex(where: { $0.id == id }) {
+            aircraft[index].labelBearingDegrees = bearingDegrees
+            aircraft[index].labelDistanceMeters = distanceMeters
+        } else if let index = traffic.firstIndex(where: { $0.id == id }) {
+            traffic[index].labelBearingDegrees = bearingDegrees
+            traffic[index].labelDistanceMeters = distanceMeters
+        }
     }
 
     // MARK: - Drawing flow

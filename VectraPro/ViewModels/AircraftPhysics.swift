@@ -68,8 +68,21 @@ final class AircraftPhysics {
                 aircraft.minSpeedKnots = nil
                 aircraft.maxSpeedKnots = knots
                 if aircraft.speedKnots > knots { aircraft.targetSpeedKnots = knots }
+            case .hold(let fixName):
+                // Start navigating direct to the holding fix; the view model
+                // steers the heading toward it each tick (auto-turn).
+                aircraft.holdingTargetName = fixName
+                aircraft.turnDirection = nil
             }
         }
+    }
+
+    /// Converge speed + altitude toward their commanded targets, without moving
+    /// or turning. Used for holding aircraft (which are positioned by the
+    /// racetrack, not normal physics) so speed/altitude clearances still apply.
+    func adjustSpeedAltitude(_ aircraft: inout Aircraft, dt: Double) {
+        adjustSpeed(&aircraft, dt: dt)
+        adjustAltitude(&aircraft, dt: dt)
     }
 
     // MARK: - Physics step

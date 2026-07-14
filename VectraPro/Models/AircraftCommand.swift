@@ -17,4 +17,5 @@ enum AircraftCommand: Equatable {
     case speed(Double)          // maintain an exact speed in knots
     case minSpeed(Double)       // maintain xxx knots or greater (speed floor)
     case maxSpeed(Double)       // do not exceed xxx knots (speed ceiling)
+    case hold(String)           // proceed direct to a holding fix and hold there
 }
