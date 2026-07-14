@@ -107,6 +107,7 @@ struct MapScreen: View {
             }
 
             controlPanel
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background {
             GeometryReader { proxy in
@@ -290,14 +291,14 @@ struct MapScreen: View {
     private var controlPanel: some View {
         VStack(spacing: 12) {
             approachChips
-
-            Text("\(viewModel.enabledApproaches.count) enabled")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.6))
         }
+        // Hug the runway chips instead of stretching the panel full width.
+        .fixedSize(horizontal: true, vertical: false)
         .padding()
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
-        .padding()
+        // Sit above the zoom / fast-forward buttons at the bottom-left.
+        .padding(.leading, 24)
+        .padding(.bottom, 50)
     }
 
     @ViewBuilder
