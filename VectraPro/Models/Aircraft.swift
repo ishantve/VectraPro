@@ -48,6 +48,9 @@ struct Aircraft: Identifiable {
     /// fraction (not metres) keeps the aircraft at the same relative point when
     /// the pattern resizes with speed, so speed changes morph it smoothly.
     var holdingProgress: Double = 0
+    /// Runway designator the aircraft is cleared to intercept the localizer for
+    /// (nil = not on an ILS intercept). e.g. "27L", "09".
+    var interceptRunway: String? = nil
     /// Takeoff phase; nil when the aircraft is airborne and under normal ATC control.
     var takeoffState: TakeoffState? = nil
     /// ICAO type code of the aircraft (e.g. "AT72"), from the exercise.

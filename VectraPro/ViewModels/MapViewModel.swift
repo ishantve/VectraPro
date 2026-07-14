@@ -305,6 +305,7 @@ final class MapViewModel: ObservableObject {
 
         var built: [Runway] = []
         var enabled: Set<ApproachID> = []
+        var activeLocs: Set<String> = []
         for rw in detail.runways {
             let strips = rw.runwayStrips ?? []
             guard strips.count >= 2,
@@ -326,7 +327,11 @@ final class MapViewModel: ObservableObject {
             if strips[1].displayLocalizer == true && strips[1].activeLocalizer == true {
                 enabled.insert(ApproachID(runwayID: runway.id, side: .b))
             }
+            // Track which runway ends have an active localizer (intercept-eligible).
+            if strips[0].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[0].stripName ?? "")) }
+            if strips[1].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[1].stripName ?? "")) }
         }
+        activeLocalizerRunways = activeLocs
 
         if built.isEmpty {
             exerciseRunways = nil
@@ -342,6 +347,9 @@ final class MapViewModel: ObservableObject {
     // MARK: - Runways & approaches
 
     @Published private(set) var runways: [Runway] = []
+    /// Canonical designators of runway ends whose localizer is active — only
+    /// these can be intercepted.
+    private var activeLocalizerRunways: Set<String> = []
 
     /// Approaches currently enabled (shown with runway + localizer). Driven
     /// locally for now; will be supplied by the backend later.
@@ -527,6 +535,26 @@ final class MapViewModel: ObservableObject {
     /// A holding aircraft keeps holding for speed/altitude clearances, but is
     /// released back onto the radar for a vectoring / direct / hold command.
     private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
+        // Validate a localizer-intercept clearance before applying anything: the
+        // aircraft must be inside the runway's approach cone — both its heading
+        // (flying inbound, ±30°) and its position (within the approach funnel,
+        // ±35° of the approach bearing from the threshold).
+        if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
+            for case .interceptLocalizer(let runway) in commands {
+                // Reject if that runway end's localizer isn't active.
+                guard activeLocalizerRunways.contains(canonicalRunway(runway)) else {
+                    CommandFeedbackManager.shared.commandError(
+                        "Localizer runway \(runway) not active")
+                    return
+                }
+                guard isInLocalizerCone(aircraft: ac, runway: runway) else {
+                    CommandFeedbackManager.shared.commandError(
+                        "Unable, not established for localizer runway \(runway)")
+                    return
+                }
+            }
+        }
+
         // Live radar aircraft.
         if let i = aircraft.firstIndex(where: { $0.id == id }) {
             physics.apply(commands, to: &aircraft[i])
@@ -557,13 +585,64 @@ final class MapViewModel: ObservableObject {
         CommandFeedbackManager.shared.aircraftNotFound()
     }
 
+    /// Find the runway threshold matching a designator and its inbound (landing)
+    /// course, derived from the actual runway geometry.
+    private func runwayThreshold(for designator: String) -> (threshold: CLLocationCoordinate2D, inbound: Double)? {
+        let target = canonicalRunway(designator)
+        for rwy in runways {
+            if canonicalRunway(rwy.endA.designator) == target {
+                return (rwy.endA.coordinate, Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
+            }
+            if canonicalRunway(rwy.endB.designator) == target {
+                return (rwy.endB.coordinate, Geo.bearing(from: rwy.endB.coordinate, to: rwy.endA.coordinate))
+            }
+        }
+        return nil
+    }
+
+    /// Normalise a designator for matching: digits without leading zeros + a
+    /// lowercased side suffix ("08L" ↔ "8l", "09" ↔ "9").
+    private func canonicalRunway(_ s: String) -> String {
+        let lower = s.lowercased()
+        let digits = lower.prefix { $0.isNumber }
+        let suffix = lower.drop { $0.isNumber }.filter { "lrc".contains($0) }
+        let num = Int(digits).map(String.init) ?? String(digits)
+        return num + suffix
+    }
+
+    /// True if the aircraft can intercept the runway's localizer. Two conditions:
+    ///   1. POSITION — the aircraft sits inside the approach funnel: its bearing
+    ///      from the threshold is within ±30° of the approach direction (the
+    ///      reciprocal of the landing course = the extended centreline).
+    ///   2. HEADING — the aircraft is flying TOWARD the localizer: its heading is
+    ///      within ±30° of the inbound landing course (a valid intercept angle).
+    /// Both must hold — in the cone but pointing the wrong way can't intercept.
+    private func isInLocalizerCone(aircraft: Aircraft, runway designator: String) -> Bool {
+        guard let (threshold, inbound) = runwayThreshold(for: designator) else { return false }
+        let approachDir = (inbound + 180).truncatingRemainder(dividingBy: 360)
+        let bearingToAircraft = Geo.bearing(from: threshold, to: aircraft.position)
+        let inFunnel  = headingWithinCone(bearingToAircraft, of: approachDir, tolerance: 30)
+        let inbound30 = headingWithinCone(aircraft.headingDegrees, of: inbound, tolerance: 30)
+        return inFunnel && inbound30
+    }
+
+    /// Shortest-angular-distance check: is `angle` within `tolerance`° of `target`?
+    private func headingWithinCone(_ angle: Double, of target: Double,
+                                   tolerance: Double) -> Bool {
+        var diff = abs((angle - target).truncatingRemainder(dividingBy: 360))
+        if diff > 180 { diff = 360 - diff }
+        return diff <= tolerance
+    }
+
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
     /// resume navigation, or a new hold). Speed/altitude clearances keep it in.
     private func commandsLeaveHold(_ commands: [AircraftCommand]) -> Bool {
         commands.contains { cmd in
             switch cmd {
-            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold: return true
-            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:    return false
+            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold, .interceptLocalizer:
+                return true
+            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:
+                return false
             }
         }
     }

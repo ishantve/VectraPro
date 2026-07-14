@@ -92,7 +92,8 @@ struct CommandParser {
         "contact",
         "squawk",
         "direct",
-        "hold"
+        "hold",
+        "intercept"
     ]
 
     /// Result of callsign extraction.
@@ -155,11 +156,36 @@ struct CommandParser {
     static func parse(_ normalized: String) -> [AircraftCommand] {
         var commands: [AircraftCommand] = []
         if normalized.contains("present heading")  { commands.append(AircraftCommand.presentHeading) }
+        if let c = parseInterceptLocalizer(normalized) { commands.append(c) }
         if let c = parseHold(normalized)            { commands.append(c) }
         if let c = parseHeading(normalized)         { commands.append(c) }
         if let c = parseFlightLevel(normalized)     { commands.append(c) }
         if let c = parseSpeed(normalized)           { commands.append(c) }
         return commands
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Intercept localizer
+    // ─────────────────────────────────────────────
+
+    /// "intercept the localizer runway 27 left" → .interceptLocalizer("27L").
+    /// Requires "intercept" + "localizer"/"loc" + "runway <number>" with an
+    /// optional left / right / center suffix.
+    private static func parseInterceptLocalizer(_ text: String) -> AircraftCommand? {
+        guard text.contains("intercept"),
+              text.contains("localizer") || text.contains("localiser") || text.contains(" loc"),
+              let rwyRange = text.range(of: "runway"),
+              let number = firstInt(after: rwyRange.upperBound, in: text),
+              (1...36).contains(number) else { return nil }
+
+        let after = text[rwyRange.upperBound...]
+        let suffix: String
+        if after.contains("left")                              { suffix = "L" }
+        else if after.contains("right")                        { suffix = "R" }
+        else if after.contains("center") || after.contains("centre") { suffix = "C" }
+        else                                                   { suffix = "" }
+
+        return .interceptLocalizer(runway: "\(number)\(suffix)")
     }
 
     // ─────────────────────────────────────────────
