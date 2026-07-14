@@ -100,11 +100,16 @@ struct MapScreen: View {
             // flashes white before the map paints.
             Color.black.ignoresSafeArea()
 
-            if !presentation.isMapDetached {
-                mapView
-                    .ignoresSafeArea()
-                    .id(providerRaw)   // recreate when the provider changes
-            }
+            // Keep the map alive even while detached (just covered), so it
+            // reappears instantly on close instead of re-initialising.
+            mapView
+                .ignoresSafeArea()
+                .id(providerRaw)   // recreate when the provider changes
+                .overlay {
+                    if presentation.isMapDetached {
+                        Color.black.ignoresSafeArea()
+                    }
+                }
 
             controlPanel
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,20 +236,27 @@ struct MapScreen: View {
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
                 PushToTalkMicButton(viewModel: speechViewModel)
-                CommandKeyboard(
-                    onCommand: { CommandKeyboardHandler.shared.perform($0) },
-                    requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
-                    promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
-                    onValue: { command, value in
-                        CommandKeyboardHandler.shared.perform(command, value: value)
-                    },
-                    onBlock: { command, low, high in
-                        CommandKeyboardHandler.shared.perform(command, low: low, high: high)
-                    },
-                    valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
-                    onPreview: { text in speechViewModel.previewCommand(text) },
-                    onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
-                )
+                if presentation.isMapDetached {
+                    // Radar is in its own window → show the Macro Keyboard here.
+                    MacroKeyboard(
+                        onMacro: { _ in /* TODO: macro actions */ }
+                    )
+                } else {
+                    CommandKeyboard(
+                        onCommand: { CommandKeyboardHandler.shared.perform($0) },
+                        requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
+                        promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
+                        onValue: { command, value in
+                            CommandKeyboardHandler.shared.perform(command, value: value)
+                        },
+                        onBlock: { command, low, high in
+                            CommandKeyboardHandler.shared.perform(command, low: low, high: high)
+                        },
+                        valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
+                        onPreview: { text in speechViewModel.previewCommand(text) },
+                        onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
+                    )
+                }
             }
             .padding(.trailing, 16)
             .padding(.bottom, 12)
@@ -587,8 +599,10 @@ struct MapScreen: View {
         Button {
             if presentation.isMapDetached {
                 dismissWindow(id: "radar")
+                presentation.isMapDetached = false
             } else {
                 openWindow(id: "radar")
+                presentation.isMapDetached = true
             }
         } label: {
             Image(systemName: presentation.isMapDetached ? "rectangle.on.rectangle.slash" : "rectangle.on.rectangle")
