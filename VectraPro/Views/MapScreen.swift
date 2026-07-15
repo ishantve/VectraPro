@@ -106,13 +106,8 @@ struct MapScreen: View {
             mapView
                 .ignoresSafeArea()
                 .id(providerRaw)   // recreate when the provider changes
-                .overlay {
-                    if presentation.isMapDetached {
-                        Color.black.ignoresSafeArea()
-                        // Compact macro grid centred in the blank main screen.
-                        MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
-                    }
-                }
+                // Kept alive while detached (covered by the workspace layout),
+                // so it reappears instantly on close.
 
             controlPanel
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -261,6 +256,13 @@ struct MapScreen: View {
             .padding(.trailing, 16)
             .padding(.bottom, 12)
         }
+        // While the radar is in its own window, the main screen becomes a
+        // three-panel workspace (left controls · right macro keyboard · bottom bar).
+        .overlay {
+            if presentation.isMapDetached {
+                detachedLayout
+            }
+        }
         .overlay {
             if viewModel.isExerciseFinished {
                 exerciseSummaryOverlay
@@ -311,6 +313,114 @@ struct MapScreen: View {
         // Sit above the zoom / fast-forward buttons at the bottom-left.
         .padding(.leading, 24)
         .padding(.bottom, 50)
+    }
+
+    // MARK: - Detached workspace layout (radar in its own window)
+
+    /// Three-panel workspace shown on the main screen while the radar is
+    /// detached: left controls · right macro keyboard · bottom control bar.
+    private var detachedLayout: some View {
+        let gap: CGFloat = 12
+        return GeometryReader { geo in
+            // Macro keyboard = 2/3 of the usable width, pinned to the right;
+            // the left panel gets the remaining 1/3.
+            let usable = geo.size.width - gap * 2 - gap   // minus outer + inner gap
+            let macroW = max(0, usable * 2 / 3)
+
+            VStack(spacing: gap) {
+                HStack(spacing: gap) {
+                    // LEFT — takes the remaining width. Left-toolbar sits at the
+                    // left-centre; the top-right action buttons at the top-right;
+                    // any open menu / layer popup shows inside this panel.
+                    workspacePanel {
+                        ZStack(alignment: .topLeading) {
+                            // Left toolbar — left edge, vertically centred.
+                            leftToolbar
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                .padding(.leading, 12)
+
+                            // Open left-tool menu, next to the toolbar.
+                            if anyLeftMenuOpen {
+                                activeMenuView(maxHeight: 420)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    .padding(.leading, 70)
+                            }
+
+                            // Top-right action buttons + layer popup + hangar list.
+                            VStack(alignment: .trailing, spacing: 10) {
+                                HStack(spacing: 10) {
+                                    windowToggleButton
+                                    topActionButton("flag.fill") { /* TODO */ }
+                                    topActionButton("person.2.fill") { /* TODO */ }
+                                    topActionButton("globe", isOn: showLayers) {
+                                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                                    }
+                                }
+                                if showLayers {
+                                    layerButtons
+                                    detachedHangarContent
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(10)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    // RIGHT — macro keyboard (2/3 of the width), pinned right.
+                    // .equatable() so unrelated state changes don't rebuild it.
+                    MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
+                        .equatable()
+                        .frame(width: macroW)
+                }
+
+                // BOTTOM — zoom + fast-forward (left) and the mic (right).
+                workspacePanel {
+                    HStack(alignment: .center) {
+                        HStack(spacing: 12) {
+                            zoomButtons
+                            speedButtons
+                        }
+                        Spacer()
+                        PushToTalkMicButton(viewModel: speechViewModel)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 96)
+            }
+            .padding(gap)
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    /// The hangar / list panel for the currently-selected layer, shown inside
+    /// the detached left panel (holding, flight lists, obstacles, zones).
+    @ViewBuilder
+    private var detachedHangarContent: some View {
+        if activeLayers.contains(.holdingPattern) {
+            let holdings = viewModel.holdingFixes
+            HoldingHangarPanel(
+                tabs: holdings.map { $0.fixName ?? "—" },
+                aircraftByHolding: holdings.map { fix in
+                    viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                }
+            )
+        } else if let category = activeFlightList {
+            HangarPanel(title: category.title,
+                        aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+        } else if let layer = buttonAnchoredLayer {
+            listPanel(for: layer)
+        }
+    }
+
+    /// Bordered rounded container for a workspace panel.
+    @ViewBuilder
+    private func workspacePanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
     @ViewBuilder

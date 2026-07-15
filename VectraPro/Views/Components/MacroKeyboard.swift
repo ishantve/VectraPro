@@ -9,10 +9,14 @@
 
 import SwiftUI
 
-struct MacroKeyboard: View {
+struct MacroKeyboard: View, Equatable {
 
     /// Tapped a macro key (identified by its title).
     var onMacro: (String) -> Void = { _ in }
+
+    // The grid is static, so the view never needs to re-render on a parent
+    // update — this keeps unrelated state changes from rebuilding 72 buttons.
+    static func == (lhs: MacroKeyboard, rhs: MacroKeyboard) -> Bool { true }
 
     // MARK: - Key model
 
@@ -64,12 +68,9 @@ struct MacroKeyboard: View {
 
     private let textColor = Color(red: 0.42, green: 0.12, blue: 0.12)   // dark maroon
     private let offWhite   = Color(red: 0.94, green: 0.93, blue: 0.90)
-
-    // Compact keys, ~4:3 (width:height) to match the reference and fit the text.
-    private let keyWidth: CGFloat  = 92
-    private let keyHeight: CGFloat = 68
     private let gap: CGFloat = 6
 
+    /// Fills the container — keys scale to the panel's width & height.
     var body: some View {
         VStack(spacing: gap) {
             ForEach(rows.indices, id: \.self) { r in
@@ -86,13 +87,14 @@ struct MacroKeyboard: View {
                         keyView(key)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(14)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(offWhite, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
             .stroke(.black.opacity(0.15), lineWidth: 1))
-        .fixedSize()   // hug the grid; don't stretch to fill the screen
     }
 
     @ViewBuilder
@@ -102,12 +104,12 @@ struct MacroKeyboard: View {
                 onMacro(title)
             } label: {
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(textColor)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.55)
-                    .frame(width: keyWidth, height: keyHeight)
+                    .minimumScaleFactor(0.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(key.color.bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(.black.opacity(0.12), lineWidth: 1))
@@ -117,7 +119,7 @@ struct MacroKeyboard: View {
             // Blank filler — keeps the grid aligned.
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(key.color.bg)
-                .frame(width: keyWidth, height: keyHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
