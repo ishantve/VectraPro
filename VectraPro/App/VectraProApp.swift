@@ -33,18 +33,40 @@ struct RadarWindowScene: View {
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
 
     var body: some View {
-        radarMap
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .background(.black)
-            // Green border so the detached radar window is easy to tell apart.
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.green, lineWidth: 3)
-                    .ignoresSafeArea()
-            )
-            .onAppear { RadarPresentation.shared.isMapDetached = true }
-            .onDisappear { RadarPresentation.shared.isMapDetached = false }
+        GeometryReader { geo in
+            // Radar is a square whose side = window height; the rest is the
+            // info area. (capped at width so a portrait window won't overflow.)
+            let side = min(geo.size.height, geo.size.width)
+            HStack(spacing: 0) {
+                // Radar panel — square, height = window height.
+                radarMap
+                    .frame(width: side, height: side)
+                    .clipped()
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(width: 1)
+
+                // Info area — placeholder space for now.
+                ZStack {
+                    Color(red: 0.05, green: 0.06, blue: 0.10)
+                    Text("Info")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .ignoresSafeArea()
+        .background(.black)
+        // Green border so the detached radar window is easy to tell apart.
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.green, lineWidth: 3)
+                .ignoresSafeArea()
+        )
+        .onAppear { RadarPresentation.shared.isMapDetached = true }
+        .onDisappear { RadarPresentation.shared.isMapDetached = false }
     }
 
     @ViewBuilder
