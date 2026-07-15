@@ -37,6 +37,12 @@ struct RadarWindowScene: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
             .background(.black)
+            // Green border so the detached radar window is easy to tell apart.
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color.green, lineWidth: 3)
+                    .ignoresSafeArea()
+            )
             .onAppear { RadarPresentation.shared.isMapDetached = true }
             .onDisappear { RadarPresentation.shared.isMapDetached = false }
     }
