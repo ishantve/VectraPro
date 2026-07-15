@@ -418,7 +418,8 @@ struct MapScreen: View {
     private func workspacePanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(red: 0.06, green: 0.10, blue: 0.22),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.12), lineWidth: 1))
     }

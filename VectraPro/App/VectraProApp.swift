@@ -49,7 +49,7 @@ struct RadarWindowScene: View {
 
                 // Info area — placeholder space for now.
                 ZStack {
-                    Color(red: 0.05, green: 0.06, blue: 0.10)
+                    Color(red: 0.06, green: 0.10, blue: 0.22)
                     Text("Info")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.25))
