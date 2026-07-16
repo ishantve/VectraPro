@@ -44,10 +44,13 @@ struct Aircraft: Identifiable {
     /// Inbound leg course (toward the fix) for the holding racetrack — set to the
     /// heading the aircraft had when it reached the fix.
     var holdingInboundCourse: Double? = nil
-    /// Position around the holding loop as a fraction (0…1, 0 = fix). Tracking a
-    /// fraction (not metres) keeps the aircraft at the same relative point when
-    /// the pattern resizes with speed, so speed changes morph it smoothly.
+    /// Position around the holding loop as a fraction (0…1, 0 = fix).
     var holdingProgress: Double = 0
+    /// Racetrack geometry the aircraft is CURRENTLY flying. Updated only while on
+    /// the inbound leg, so a mid-pattern speed change is deferred until the
+    /// aircraft returns inbound (then the new-speed size applies).
+    var holdingRadiusM: Double = 0
+    var holdingLegM: Double = 0
     /// Runway designator the aircraft is cleared to intercept the localizer for
     /// (nil = not on an ILS intercept). e.g. "27L", "09".
     var interceptRunway: String? = nil

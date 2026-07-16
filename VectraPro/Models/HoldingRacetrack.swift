@@ -86,6 +86,24 @@ struct HoldingRacetrack {
         return (off(inStart, s, inboundCourse), normalize(inboundCourse))  // inbound leg
     }
 
+    /// Progress fraction (0…1) of the loop point nearest `point`, searched in a
+    /// window around `hint`. Used to re-anchor an aircraft onto a resized loop
+    /// each tick so a speed change doesn't make it jump.
+    func nearestProgress(to point: CLLocationCoordinate2D, near hint: Double,
+                         window: Double = 0.18, samples: Int = 48) -> Double {
+        let total = totalLength
+        var best = hint
+        var bestDist = Double.greatestFiniteMagnitude
+        for i in 0...samples {
+            let raw = hint - window + (Double(i) / Double(samples)) * (2 * window)
+            let f = (raw.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
+            let p = sample(at: f * total).position
+            let d = Geo.distanceMeters(from: p, to: point)
+            if d < bestDist { bestDist = d; best = f }
+        }
+        return best
+    }
+
     /// Closed outline of the racetrack for drawing.
     func outline(segments: Int = 96) -> [CLLocationCoordinate2D] {
         (0...segments).map { sample(at: totalLength * Double($0) / Double(segments)).position }

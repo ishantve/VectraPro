@@ -215,7 +215,11 @@ final class MapViewModel: ObservableObject {
             ac.holdingName          = fix.fixName   // canonical name → matches hangar filter
             ac.holdingTargetName    = nil
             ac.holdingInboundCourse = ac.headingDegrees   // course it arrived on = inbound leg
-            ac.holdingProgress      = 0                   // start at the fix, entering turn 1
+            ac.holdingProgress      = 0                   // start at the fix
+            let entryTrack = HoldingRacetrack(fix: fixPos, inboundCourse: ac.headingDegrees,
+                                              speedKnots: ac.speedKnots)
+            ac.holdingRadiusM       = entryTrack.radiusM
+            ac.holdingLegM          = entryTrack.legM
             ac.targetHeading        = nil
             ac.turnDirection        = nil
             ac.history              = []
@@ -870,18 +874,35 @@ final class MapViewModel: ObservableObject {
         // reappears at its up-to-date position when the layer is turned back on.
         // Only the drawing (radarAircraft) is gated by the layer toggle.
         for i in traffic.indices where traffic[i].holdingName != nil {
-            guard let ic = traffic[i].holdingInboundCourse,
-                  let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
-            // Apply any speed/altitude clearance while holding. The pattern is
-            // sized from the CURRENT speed (so the turn radius grows/shrinks
-            // realistically), and progress is a fraction, so speed changes —
-            // which converge gradually — morph the oval smoothly without jumps.
+            guard let ic = traffic[i].holdingInboundCourse else { continue }
+            guard let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
+            // Obey speed/altitude clearances (changes ground speed).
             physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
+
+            // The aircraft keeps flying its CURRENT (committed) racetrack. A
+            // speed change resizes the committed loop only once the aircraft is
+            // on the inbound leg — until then it holds the old pattern.
+            let turnLen   = Double.pi * traffic[i].holdingRadiusM
+            let committedTotal = 2 * traffic[i].holdingLegM + 2 * turnLen
+            let inboundStart = committedTotal > 0
+                ? (2 * turnLen + traffic[i].holdingLegM) / committedTotal
+                : 1
+            if traffic[i].holdingProgress >= inboundStart {
+                let cur = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
+                                           speedKnots: traffic[i].speedKnots)
+                traffic[i].holdingRadiusM = cur.radiusM
+                traffic[i].holdingLegM    = cur.legM
+            }
+
             let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                         speedKnots: traffic[i].speedKnots)
+                                         radiusM: traffic[i].holdingRadiusM,
+                                         legM: traffic[i].holdingLegM)
             let vmps  = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
-            let total = track.totalLength
-            var prog  = traffic[i].holdingProgress + (vmps * tickInterval) / total
+            let total = max(1, track.totalLength)
+            // Re-anchor onto the (possibly just-updated) loop for continuity.
+            let base  = track.nearestProgress(to: traffic[i].position,
+                                              near: traffic[i].holdingProgress)
+            var prog  = base + (vmps * tickInterval) / total
             prog = prog.truncatingRemainder(dividingBy: 1)
             traffic[i].holdingProgress = prog
             let s = track.sample(at: prog * total)

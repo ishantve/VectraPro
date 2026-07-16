@@ -334,6 +334,31 @@ struct MapScreen: View {
                     // any open menu / layer popup shows inside this panel.
                     workspacePanel {
                         ZStack(alignment: .topLeading) {
+                            // Back button + timer — top-left of the panel.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Button { dismiss() } label: {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(.black.opacity(0.6), in: Circle())
+                                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                                }
+                                if viewModel.exerciseDurationSeconds > 0 {
+                                    HStack(spacing: 6) {
+                                        Image("timer_icon").resizable().scaledToFit().frame(width: 16, height: 16)
+                                        Text(viewModel.elapsedSeconds.asTimerString)
+                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    }
+                                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(.black.opacity(0.6), in: Capsule())
+                                    .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .padding(10)
+
                             // Left toolbar — left edge, vertically centred.
                             leftToolbar
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
