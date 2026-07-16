@@ -344,6 +344,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         guard sizeChanged || screenChanged else { return }
         lastKnownSize = currentSize
         lastScreen = currentScreen
+        // Render at the host screen's native scale so the map (tiles + labels)
+        // stays crisp on a high-resolution external display instead of blurry.
+        if let screen = currentScreen {
+            let scale = max(screen.nativeScale, screen.scale)
+            if mapView.contentScaleFactor != scale {
+                mapView.contentScaleFactor = scale
+            }
+        }
         // Recompute zoom limits and visible bounds for the new environment
         didLimitZoom = false
         applyZoomLimit(mapView)
@@ -891,6 +899,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             guard let name = ac.holdingName,
                   let ic = ac.holdingInboundCourse,
                   let fix = viewModel.holdingFixPosition(named: name) else { continue }
+            // Drawn racetrack resizes in real time with the current speed; the
+            // aircraft only adopts the new size once it flies back onto inbound.
             let track = HoldingRacetrack(fix: fix, inboundCourse: ic, speedKnots: ac.speedKnots)
             var coords = track.outline()
             guard coords.count > 1 else { continue }
@@ -1170,7 +1180,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let rect  = CGRect(origin: .zero,
                            size: CGSize(width: textSize.width + pad.width,
                                         height: textSize.height + pad.height))
-        UIGraphicsBeginImageContextWithOptions(rect.size, false, 0)
+        UIGraphicsBeginImageContextWithOptions(rect.size, false, 3)
         UIColor.black.withAlphaComponent(0.72).setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: 4).fill()
         UIColor.white.withAlphaComponent(0.35).setStroke()
