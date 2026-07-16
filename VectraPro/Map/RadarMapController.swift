@@ -19,6 +19,8 @@ final class ImageAnnotation: MLNPointAnnotation {
     /// Shift of the view centre from the coordinate (points). Default centred;
     /// the data block uses this to sit with its bottom-left corner on the point.
     var centerOffset: CGVector = .zero
+    /// True for data-block labels (so they can be scaled down independently).
+    var isLabel = false
 }
 
 final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
@@ -352,6 +354,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                 mapView.contentScaleFactor = scale
             }
         }
+        // Re-apply the data-block scale for the new environment.
+        let ls = labelScale
+        for (_, label) in labelAnnotations {
+            mapView.view(for: label)?.transform = CGAffineTransform(scaleX: ls, y: ls)
+        }
         // Recompute zoom limits and visible bounds for the new environment
         didLimitZoom = false
         applyZoomLimit(mapView)
@@ -656,6 +663,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != labelKey {
                 let previous = labelAnnotations[aircraft.id]
                 let a = ImageAnnotation()
+                a.isLabel = true
                 a.image = AircraftSymbol.label(for: aircraft, conflictColor: labelColor)
                 if let img = a.image {
                     a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
@@ -1064,8 +1072,25 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let imageView = UIImageView(image: image)
         imageView.frame = view.bounds
         view.addSubview(imageView)
-        view.transform = CGAffineTransform(rotationAngle: imageAnnotation.rotationDegrees * .pi / 180)
+        // Shrink data blocks a bit when full screen on an external display.
+        if imageAnnotation.isLabel {
+            view.transform = CGAffineTransform(scaleX: labelScale, y: labelScale)
+        } else {
+            view.transform = CGAffineTransform(rotationAngle: imageAnnotation.rotationDegrees * .pi / 180)
+        }
         return view
+    }
+
+    /// Data-block scale — reduced only while the map is full screen on an
+    /// external display; otherwise full size.
+    private var labelScale: CGFloat { isExternalFullScreen ? 0.7 : 1.0 }
+
+    /// True when the map's window fills an external (non-iPad) display.
+    private var isExternalFullScreen: Bool {
+        guard let screen = mapView.window?.screen, screen !== UIScreen.main,
+              let winSize = mapView.window?.bounds.size else { return false }
+        let s = screen.bounds.size
+        return winSize.width >= s.width - 1 && winSize.height >= s.height - 1
     }
 
     /// Small green ring around the selected aircraft so it's visually distinct.
