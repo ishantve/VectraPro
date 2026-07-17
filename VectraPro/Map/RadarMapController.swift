@@ -649,14 +649,19 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let isRed    = viewModel.redConflictIDs.contains(aircraft.id)
                         || viewModel.zoneConflictIDs.contains(aircraft.id)
             let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
+            // Landing-sequence spacing warning (below the required separation).
+            let isSeq    = viewModel.sequencingConflictIDs.contains(aircraft.id) && !isRed && !isYellow
             let blink    = viewModel.blinkState
-            let conflictColor: UIColor? = blink ? (isRed ? .systemRed : isYellow ? .systemYellow : nil) : nil
+            let conflictColor: UIColor? = blink
+                ? (isRed ? .systemRed : isYellow ? .systemYellow : isSeq ? .systemOrange : nil)
+                : nil
             let labelColor: UIColor?    = conflictColor ?? (isSelected ? .systemGreen : nil)
             let labelKey: String
-            if isRed && blink        { labelKey = "\(text)-red" }
-            else if isYellow && blink { labelKey = "\(text)-yellow" }
-            else if isSelected        { labelKey = "\(text)-selected" }
-            else                      { labelKey = text }
+            if isRed && blink         { labelKey = "\(text)-red" }
+            else if isYellow && blink  { labelKey = "\(text)-yellow" }
+            else if isSeq && blink     { labelKey = "\(text)-seq" }
+            else if isSelected         { labelKey = "\(text)-selected" }
+            else                       { labelKey = text }
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
                                     bearingDegrees: aircraft.labelBearingDegrees)
