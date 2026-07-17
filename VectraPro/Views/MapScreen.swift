@@ -21,6 +21,9 @@ struct MapScreen: View {
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
     enum LeftMenu { case operations, comms, reference, display, insert, collab }
     @State private var openLeftMenu: LeftMenu?
+    /// Which operations popup is open (nil = none). Only one at a time.
+    enum OperationsPopup { case flightData }
+    @State private var activePopup: OperationsPopup?
     /// Display-layer rows (icon, name), in order.
     private let displayOptions: [(icon: String, name: String)] = [
         ("cloud.fill", "Weather"),
@@ -261,6 +264,25 @@ struct MapScreen: View {
         .overlay {
             if presentation.isMapDetached {
                 detachedLayout
+            }
+        }
+        // Operations popups (e.g. Flight Data). Tapping anywhere outside closes.
+        .overlay {
+            if activePopup != nil {
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { activePopup = nil }
+
+                    if activePopup == .flightData {
+                        GeometryReader { geo in
+                            // Stick to the Operations button, like the left menus.
+                            let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
+                            FlightDataPopup(aircraft: selectedAircraft) { activePopup = nil }
+                                .offset(x: 68, y: toolbarTop)   // 16 pad + 48 button + 4 gap
+                        }
+                    }
+                }
             }
         }
         .overlay {
@@ -545,7 +567,10 @@ struct MapScreen: View {
         switch openLeftMenu {
         case .operations:
             menuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
-                collabRow("doc.text.fill", "Flight Data")
+                collabRow("doc.text.fill", "Flight Data") {
+                    openLeftMenu = nil            // close the menu
+                    activePopup = .flightData     // open the popup
+                }
                 Divider().overlay(.white.opacity(0.12))
                 collabRow("airplane", "Aircraft Control")
                 Divider().overlay(.white.opacity(0.12))
@@ -695,9 +720,17 @@ struct MapScreen: View {
         .buttonStyle(.plain)
     }
 
-    private func collabRow(_ systemName: String, _ title: String) -> some View {
+    /// The currently-selected aircraft (nil when none is selected → the Flight
+    /// Data popup shows all fields blank/dashed).
+    private var selectedAircraft: Aircraft? {
+        guard let id = viewModel.selectedAircraftID else { return nil }
+        return viewModel.listAircraft.first { $0.id == id }
+    }
+
+    private func collabRow(_ systemName: String, _ title: String,
+                           action: @escaping () -> Void = {}) -> some View {
         Button {
-            // TODO: wire hub action
+            action()
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: systemName)

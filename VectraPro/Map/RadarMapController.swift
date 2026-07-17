@@ -1081,16 +1081,14 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         return view
     }
 
-    /// Data-block scale — reduced only while the map is full screen on an
-    /// external display; otherwise full size.
-    private var labelScale: CGFloat { isExternalFullScreen ? 0.7 : 1.0 }
-
-    /// True when the map's window fills an external (non-iPad) display.
-    private var isExternalFullScreen: Bool {
-        guard let screen = mapView.window?.screen, screen !== UIScreen.main,
-              let winSize = mapView.window?.bounds.size else { return false }
-        let s = screen.bounds.size
-        return winSize.width >= s.width - 1 && winSize.height >= s.height - 1
+    /// Data-block scale — proportional to the radar view's size relative to the
+    /// iPad's own screen (1.0 on the main window; smaller in a small detached
+    /// window; larger on a big external display). Clamped to a sensible range.
+    private var labelScale: CGFloat {
+        let reference = UIScreen.main.bounds.height
+        let h = mapView.bounds.height
+        guard reference > 0, h > 0 else { return 1.0 }
+        return min(1.4, max(0.6, h / reference))
     }
 
     /// Small green ring around the selected aircraft so it's visually distinct.
