@@ -21,6 +21,9 @@ struct MapScreen: View {
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
     enum LeftMenu { case operations, comms, reference, display, insert, collab }
     @State private var openLeftMenu: LeftMenu?
+    /// Which operations popup is open (nil = none). Only one at a time.
+    enum OperationsPopup { case flightData }
+    @State private var activePopup: OperationsPopup?
     /// Display-layer rows (icon, name), in order.
     private let displayOptions: [(icon: String, name: String)] = [
         ("cloud.fill", "Weather"),
@@ -106,13 +109,8 @@ struct MapScreen: View {
             mapView
                 .ignoresSafeArea()
                 .id(providerRaw)   // recreate when the provider changes
-                .overlay {
-                    if presentation.isMapDetached {
-                        Color.black.ignoresSafeArea()
-                        // Compact macro grid centred in the blank main screen.
-                        MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
-                    }
-                }
+                // Kept alive while detached (covered by the workspace layout),
+                // so it reappears instantly on close.
 
             controlPanel
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -261,6 +259,32 @@ struct MapScreen: View {
             .padding(.trailing, 16)
             .padding(.bottom, 12)
         }
+        // While the radar is in its own window, the main screen becomes a
+        // three-panel workspace (left controls · right macro keyboard · bottom bar).
+        .overlay {
+            if presentation.isMapDetached {
+                detachedLayout
+            }
+        }
+        // Operations popups (e.g. Flight Data). Tapping anywhere outside closes.
+        .overlay {
+            if activePopup != nil {
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { activePopup = nil }
+
+                    if activePopup == .flightData {
+                        GeometryReader { geo in
+                            // Stick to the Operations button, like the left menus.
+                            let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
+                            FlightDataPopup(aircraft: selectedAircraft) { activePopup = nil }
+                                .offset(x: 68, y: toolbarTop)   // 16 pad + 48 button + 4 gap
+                        }
+                    }
+                }
+            }
+        }
         .overlay {
             if viewModel.isExerciseFinished {
                 exerciseSummaryOverlay
@@ -311,6 +335,140 @@ struct MapScreen: View {
         // Sit above the zoom / fast-forward buttons at the bottom-left.
         .padding(.leading, 24)
         .padding(.bottom, 50)
+    }
+
+    // MARK: - Detached workspace layout (radar in its own window)
+
+    /// Three-panel workspace shown on the main screen while the radar is
+    /// detached: left controls · right macro keyboard · bottom control bar.
+    private var detachedLayout: some View {
+        let gap: CGFloat = 12
+        return GeometryReader { geo in
+            // Macro keyboard = 2/3 of the usable width, pinned to the right;
+            // the left panel gets the remaining 1/3.
+            let usable = geo.size.width - gap * 2 - gap   // minus outer + inner gap
+            let macroW = max(0, usable * 2 / 3)
+
+            VStack(spacing: gap) {
+                HStack(spacing: gap) {
+                    // LEFT — takes the remaining width. Left-toolbar sits at the
+                    // left-centre; the top-right action buttons at the top-right;
+                    // any open menu / layer popup shows inside this panel.
+                    workspacePanel {
+                        ZStack(alignment: .topLeading) {
+                            // Back button + timer — top-left of the panel.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Button { dismiss() } label: {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(.black.opacity(0.6), in: Circle())
+                                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                                }
+                                if viewModel.exerciseDurationSeconds > 0 {
+                                    HStack(spacing: 6) {
+                                        Image("timer_icon").resizable().scaledToFit().frame(width: 16, height: 16)
+                                        Text(viewModel.elapsedSeconds.asTimerString)
+                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    }
+                                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(.black.opacity(0.6), in: Capsule())
+                                    .overlay(Capsule().stroke(Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.4), lineWidth: 1))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .padding(10)
+
+                            // Left toolbar — left edge, vertically centred.
+                            leftToolbar
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                .padding(.leading, 12)
+
+                            // Open left-tool menu, next to the toolbar.
+                            if anyLeftMenuOpen {
+                                activeMenuView(maxHeight: 420)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    .padding(.leading, 70)
+                            }
+
+                            // Top-right action buttons + layer popup + hangar list.
+                            VStack(alignment: .trailing, spacing: 10) {
+                                HStack(spacing: 10) {
+                                    windowToggleButton
+                                    topActionButton("flag.fill") { /* TODO */ }
+                                    topActionButton("person.2.fill") { /* TODO */ }
+                                    topActionButton("globe", isOn: showLayers) {
+                                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                                    }
+                                }
+                                if showLayers {
+                                    layerButtons
+                                    detachedHangarContent
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(10)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    // RIGHT — macro keyboard (2/3 of the width), pinned right.
+                    // .equatable() so unrelated state changes don't rebuild it.
+                    MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
+                        .equatable()
+                        .frame(width: macroW)
+                }
+
+                // BOTTOM — zoom + fast-forward (left) and the mic (right).
+                workspacePanel {
+                    HStack(alignment: .center) {
+                        HStack(spacing: 12) {
+                            zoomButtons
+                            speedButtons
+                        }
+                        Spacer()
+                        PushToTalkMicButton(viewModel: speechViewModel)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 96)
+            }
+            .padding(gap)
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    /// The hangar / list panel for the currently-selected layer, shown inside
+    /// the detached left panel (holding, flight lists, obstacles, zones).
+    @ViewBuilder
+    private var detachedHangarContent: some View {
+        if activeLayers.contains(.holdingPattern) {
+            let holdings = viewModel.holdingFixes
+            HoldingHangarPanel(
+                tabs: holdings.map { $0.fixName ?? "—" },
+                aircraftByHolding: holdings.map { fix in
+                    viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                }
+            )
+        } else if let category = activeFlightList {
+            HangarPanel(title: category.title,
+                        aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+        } else if let layer = buttonAnchoredLayer {
+            listPanel(for: layer)
+        }
+    }
+
+    /// Bordered rounded container for a workspace panel.
+    @ViewBuilder
+    private func workspacePanel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(red: 0.06, green: 0.10, blue: 0.22),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -409,7 +567,10 @@ struct MapScreen: View {
         switch openLeftMenu {
         case .operations:
             menuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
-                collabRow("doc.text.fill", "Flight Data")
+                collabRow("doc.text.fill", "Flight Data") {
+                    openLeftMenu = nil            // close the menu
+                    activePopup = .flightData     // open the popup
+                }
                 Divider().overlay(.white.opacity(0.12))
                 collabRow("airplane", "Aircraft Control")
                 Divider().overlay(.white.opacity(0.12))
@@ -559,9 +720,17 @@ struct MapScreen: View {
         .buttonStyle(.plain)
     }
 
-    private func collabRow(_ systemName: String, _ title: String) -> some View {
+    /// The currently-selected aircraft (nil when none is selected → the Flight
+    /// Data popup shows all fields blank/dashed).
+    private var selectedAircraft: Aircraft? {
+        guard let id = viewModel.selectedAircraftID else { return nil }
+        return viewModel.listAircraft.first { $0.id == id }
+    }
+
+    private func collabRow(_ systemName: String, _ title: String,
+                           action: @escaping () -> Void = {}) -> some View {
         Button {
-            // TODO: wire hub action
+            action()
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: systemName)

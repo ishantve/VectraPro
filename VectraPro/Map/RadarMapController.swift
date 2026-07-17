@@ -19,6 +19,8 @@ final class ImageAnnotation: MLNPointAnnotation {
     /// Shift of the view centre from the coordinate (points). Default centred;
     /// the data block uses this to sit with its bottom-left corner on the point.
     var centerOffset: CGVector = .zero
+    /// True for data-block labels (so they can be scaled down independently).
+    var isLabel = false
 }
 
 final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
@@ -344,6 +346,19 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         guard sizeChanged || screenChanged else { return }
         lastKnownSize = currentSize
         lastScreen = currentScreen
+        // Render at the host screen's native scale so the map (tiles + labels)
+        // stays crisp on a high-resolution external display instead of blurry.
+        if let screen = currentScreen {
+            let scale = max(screen.nativeScale, screen.scale)
+            if mapView.contentScaleFactor != scale {
+                mapView.contentScaleFactor = scale
+            }
+        }
+        // Re-apply the data-block scale for the new environment.
+        let ls = labelScale
+        for (_, label) in labelAnnotations {
+            mapView.view(for: label)?.transform = CGAffineTransform(scaleX: ls, y: ls)
+        }
         // Recompute zoom limits and visible bounds for the new environment
         didLimitZoom = false
         applyZoomLimit(mapView)
@@ -648,6 +663,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             if labelAnnotations[aircraft.id] == nil || labelTexts[aircraft.id] != labelKey {
                 let previous = labelAnnotations[aircraft.id]
                 let a = ImageAnnotation()
+                a.isLabel = true
                 a.image = AircraftSymbol.label(for: aircraft, conflictColor: labelColor)
                 if let img = a.image {
                     a.centerOffset = CGVector(dx: img.size.width / 2, dy: -img.size.height / 2)
@@ -891,6 +907,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             guard let name = ac.holdingName,
                   let ic = ac.holdingInboundCourse,
                   let fix = viewModel.holdingFixPosition(named: name) else { continue }
+            // Drawn racetrack resizes in real time with the current speed; the
+            // aircraft only adopts the new size once it flies back onto inbound.
             let track = HoldingRacetrack(fix: fix, inboundCourse: ic, speedKnots: ac.speedKnots)
             var coords = track.outline()
             guard coords.count > 1 else { continue }
@@ -1054,8 +1072,23 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let imageView = UIImageView(image: image)
         imageView.frame = view.bounds
         view.addSubview(imageView)
-        view.transform = CGAffineTransform(rotationAngle: imageAnnotation.rotationDegrees * .pi / 180)
+        // Shrink data blocks a bit when full screen on an external display.
+        if imageAnnotation.isLabel {
+            view.transform = CGAffineTransform(scaleX: labelScale, y: labelScale)
+        } else {
+            view.transform = CGAffineTransform(rotationAngle: imageAnnotation.rotationDegrees * .pi / 180)
+        }
         return view
+    }
+
+    /// Data-block scale — proportional to the radar view's size relative to the
+    /// iPad's own screen (1.0 on the main window; smaller in a small detached
+    /// window; larger on a big external display). Clamped to a sensible range.
+    private var labelScale: CGFloat {
+        let reference = UIScreen.main.bounds.height
+        let h = mapView.bounds.height
+        guard reference > 0, h > 0 else { return 1.0 }
+        return min(1.4, max(0.6, h / reference))
     }
 
     /// Small green ring around the selected aircraft so it's visually distinct.
@@ -1170,7 +1203,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let rect  = CGRect(origin: .zero,
                            size: CGSize(width: textSize.width + pad.width,
                                         height: textSize.height + pad.height))
-        UIGraphicsBeginImageContextWithOptions(rect.size, false, 0)
+        UIGraphicsBeginImageContextWithOptions(rect.size, false, 3)
         UIColor.black.withAlphaComponent(0.72).setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: 4).fill()
         UIColor.white.withAlphaComponent(0.35).setStroke()

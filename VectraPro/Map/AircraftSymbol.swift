@@ -12,13 +12,22 @@ enum AircraftSymbol {
 
     static let color = UIColor.white
 
+    /// High-resolution render format so symbols/labels stay crisp on a
+    /// high-res external display (not just the iPad's own scale).
+    static var hiResFormat: UIGraphicsImageRendererFormat {
+        let f = UIGraphicsImageRendererFormat.preferred()
+        f.scale = 3
+        f.opaque = false
+        return f
+    }
+
     /// The aircraft symbol — hollow diamond body, a tiny nose, a short tail and
     /// a forward leader line, all baked into one image so it stays a fixed
     /// on-screen size and rotates as a whole. Drawn pointing "up" (north); the
     /// annotation view is rotated to the heading.
     static func image() -> UIImage {
         let side: CGFloat = 100
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: hiResFormat)
 
         return renderer.image { _ in
             color.setStroke()
@@ -69,7 +78,7 @@ enum AircraftSymbol {
         let diameter = 2.0 + 4.0 * fraction        // 2 … 6 pt
         let alpha = 0.25 + 0.70 * fraction          // 0.25 … 0.95
         let size = CGSize(width: diameter, height: diameter)
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let renderer = UIGraphicsImageRenderer(size: size, format: hiResFormat)
         return renderer.image { context in
             color.withAlphaComponent(alpha).setFill()
             context.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
@@ -143,7 +152,7 @@ enum AircraftSymbol {
         let totalW = col1X + col1W + CGFloat(altArrowColW)
         let totalH = CGFloat(rows.count) * rowH + CGFloat(rows.count - 1) * lineSpacing
 
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalW, height: totalH))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalW, height: totalH), format: hiResFormat)
         return renderer.image { _ in
             for (i, row) in rows.enumerated() {
                 let y = CGFloat(i) * (rowH + lineSpacing)
