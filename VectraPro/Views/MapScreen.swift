@@ -30,46 +30,6 @@ struct MapScreen: View {
     /// Tint applied to the layer icons (keeps their detail via colorMultiply).
     private let layerTint: Color = .white
 
-    /// Top-right radar layer toggles — each uses its own image asset.
-    enum RadarLayer: String, CaseIterable, Identifiable {
-        case obstacle, zone, holdingPattern, enroute, arrival, departure
-        var id: String { rawValue }
-        var asset: String { rawValue }
-
-        /// Title shown above the hangar list.
-        var title: String {
-            switch self {
-            case .arrival:   return "Arrival"
-            case .departure: return "Departure"
-            case .enroute:   return "Enroute"
-            default:         return rawValue.capitalized
-            }
-        }
-
-        /// The aircraft category this layer lists (nil = not a flight list).
-        var flightCategory: FlightCategory? {
-            switch self {
-            case .arrival:   return .arrival
-            case .departure: return .departure
-            case .enroute:   return .enroute
-            default:         return nil
-            }
-        }
-
-        /// Layers that open a list panel (single-select among themselves).
-        var opensHangar: Bool {
-            flightCategory != nil || self == .holdingPattern || self == .zone || self == .obstacle
-        }
-        /// Enroute / Arrival / Departure ship with the grey bg + border baked into
-        /// the asset; the first three are plain icons we style to match in code.
-        var hasBakedStyle: Bool {
-            switch self {
-            case .enroute, .arrival, .departure: return true
-            default: return false
-            }
-        }
-    }
-
     // Match the styling baked into the enroute/arrival/departure assets.
     private let layerBG = Color(red: 0/255, green: 36/255, blue: 68/255).opacity(0.5)   // #002444
     private let layerBorder = Color(red: 110/255, green: 220/255, blue: 255/255)         // #6EDCFF
