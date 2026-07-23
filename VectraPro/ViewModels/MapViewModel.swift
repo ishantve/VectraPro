@@ -157,63 +157,10 @@ final class MapViewModel: ObservableObject {
         fixes.filter { $0.type?.uppercased() == "HOLDING" }
     }
 
-    /// Radius (metres) within which an inbound aircraft is captured by a hold.
-    private let holdCaptureRadiusM = 1.0 * Distance.metersPerNauticalMile
-
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
         FixLookup.position(named: name, in: holdingFixes)
-    }
-
-    /// Continuously steer an aircraft's heading toward its commanded hold fix.
-    private func steerTowardHold(_ aircraft: inout Aircraft) {
-        guard let name = aircraft.holdingTargetName,
-              let fixPos = FixLookup.position(named: name, in: holdingFixes) else { return }
-        aircraft.turnDirection = nil
-        aircraft.targetHeading = Geo.bearing(from: aircraft.position, to: fixPos)
-    }
-
-    /// Move any aircraft that reached its commanded hold fix off the radar and
-    /// into the holding hangar (as hangar traffic tagged with the fix name).
-    private func captureAircraftAtHold() {
-        var capturedIDs = Set<UUID>()
-        for index in aircraft.indices {
-            guard let name = aircraft[index].holdingTargetName,
-                  let fix = FixLookup.fix(named: name, in: holdingFixes),
-                  let fixPos = FixLookup.coordinate(of: fix) else { continue }
-            // Capture as soon as the NOSE reaches the fix collider (not the body).
-            let ac0 = aircraft[index]
-            let noseReachM = (ac0.noseOffsetNM + ac0.noseForwardNM) * Distance.metersPerNauticalMile
-            let nose = Geo.offset(from: ac0.position,
-                                  distanceMeters: noseReachM,
-                                  bearingDegrees: ac0.headingDegrees)
-            guard Geo.distanceMeters(from: nose, to: fixPos) < holdCaptureRadiusM
-            else { continue }
-
-            var ac = aircraft[index]
-            ac.holdingName          = fix.fixName   // canonical name → matches hangar filter
-            ac.holdingTargetName    = nil
-            ac.holdingInboundCourse = ac.headingDegrees   // course it arrived on = inbound leg
-            ac.holdingProgress      = 0                   // start at the fix
-            let entryTrack = HoldingRacetrack(fix: fixPos, inboundCourse: ac.headingDegrees,
-                                              speedKnots: ac.speedKnots)
-            ac.holdingRadiusM       = entryTrack.radiusM
-            ac.holdingLegM          = entryTrack.legM
-            ac.targetHeading        = nil
-            ac.turnDirection        = nil
-            ac.history              = []
-            traffic.append(ac)
-            capturedIDs.insert(ac.id)
-        }
-        guard !capturedIDs.isEmpty else { return }
-        if let sel = selectedAircraftID, capturedIDs.contains(sel) { selectedAircraftID = nil }
-        aircraft.removeAll { capturedIDs.contains($0.id) }
-        // Free radar slot → refill soon.
-        if aircraft.count < airspaceCapacity {
-            let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
-            radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
-        }
     }
 
     /// Apply the started exercise: center the radar and derive runways +
@@ -791,7 +738,7 @@ final class MapViewModel: ObservableObject {
         for index in aircraft.indices {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             // Auto-turn toward a commanded holding fix (proceed direct).
-            steerTowardHold(&aircraft[index])
+            HoldingController.steer(&aircraft[index], fixes: holdingFixes)
             // Localizer intercept: align with the centreline, then track it in.
             LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
@@ -814,55 +761,22 @@ final class MapViewModel: ObservableObject {
         }
 
         // Holding capture: aircraft that reached their commanded hold fix leave
-        // the radar and enter the holding hangar.
-        captureAircraftAtHold()
-
-        // Fly the holding racetracks. This runs every tick regardless of the
-        // layer's visibility, so an aircraft keeps orbiting while hidden and
-        // reappears at its up-to-date position when the layer is turned back on.
-        // Only the drawing (radarAircraft) is gated by the layer toggle.
-        for i in traffic.indices where traffic[i].holdingName != nil {
-            guard let ic = traffic[i].holdingInboundCourse else { continue }
-            guard let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
-            // Obey speed/altitude clearances (changes ground speed).
-            physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
-
-            // The aircraft keeps flying its CURRENT (committed) racetrack. A
-            // speed change resizes the committed loop only once the aircraft is
-            // on the inbound leg — until then it holds the old pattern.
-            let turnLen   = Double.pi * traffic[i].holdingRadiusM
-            let committedTotal = 2 * traffic[i].holdingLegM + 2 * turnLen
-            let inboundStart = committedTotal > 0
-                ? (2 * turnLen + traffic[i].holdingLegM) / committedTotal
-                : 1
-            if traffic[i].holdingProgress >= inboundStart {
-                let cur = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                           speedKnots: traffic[i].speedKnots)
-                traffic[i].holdingRadiusM = cur.radiusM
-                traffic[i].holdingLegM    = cur.legM
-            }
-
-            let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                         radiusM: traffic[i].holdingRadiusM,
-                                         legM: traffic[i].holdingLegM)
-            let vmps  = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
-            let total = max(1, track.totalLength)
-            // Re-anchor onto the (possibly just-updated) loop for continuity.
-            let base  = track.nearestProgress(to: traffic[i].position,
-                                              near: traffic[i].holdingProgress)
-            var prog  = base + (vmps * tickInterval) / total
-            prog = prog.truncatingRemainder(dividingBy: 1)
-            traffic[i].holdingProgress = prog
-            let s = track.sample(at: prog * total)
-            traffic[i].position       = s.position
-            traffic[i].headingDegrees = s.heading
-            if tickCount % historySampleTicks == 0 {
-                traffic[i].history.append(traffic[i].position)
-                if traffic[i].history.count > maxHistoryPoints {
-                    traffic[i].history.removeFirst()
-                }
+        // the radar and enter the holding hangar. The @Published side-effects
+        // (clear selection, arm a refill for the freed slot) stay here.
+        let captured = HoldingController.capture(aircraft: &aircraft, traffic: &traffic, fixes: holdingFixes)
+        if !captured.isEmpty {
+            if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
+            if aircraft.count < airspaceCapacity {
+                let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
+                radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
             }
         }
+
+        // Fly the holding racetracks (runs every tick; only the drawing is gated
+        // by the layer toggle).
+        HoldingController.flyRacetracks(
+            traffic: &traffic, fixes: holdingFixes, physics: physics, dt: tickInterval,
+            sampleHistory: tickCount % historySampleTicks == 0, maxHistory: maxHistoryPoints)
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
