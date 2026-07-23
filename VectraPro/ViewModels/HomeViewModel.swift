@@ -20,8 +20,30 @@ final class HomeViewModel: ObservableObject {
     private var pageNo = 0
     private var total = 0
 
+    // Collaborators — injected (default to the shared instances) so the view
+    // model owns no global reaches and can be tested with doubles.
+    private let api: APIManager
+    private let exerciseService: ExerciseService
+    private let radar: MapViewModel
+
+    init(api: APIManager = .shared,
+         exerciseService: ExerciseService = .shared,
+         radar: MapViewModel = .shared) {
+        self.api = api
+        self.exerciseService = exerciseService
+        self.radar = radar
+    }
+
     /// More pages available to load.
     private var hasMore: Bool { exercises.count < total }
+
+    /// Load the started exercise's config and set up the radar. Throws on
+    /// failure so the view can surface the error. (Orchestration lives here,
+    /// not in the view.)
+    func startExercise(_ exercise: Exercise) async throws {
+        let detail = try await exerciseService.loadDetail(exerciseID: exercise.id)
+        radar.applyExercise(detail)
+    }
 
     /// Load (or reload) the first page.
     func load() async {
@@ -62,7 +84,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func fetch(page: Int) async throws -> ExercisesResponse {
-        try await APIManager.shared.request(
+        try await api.request(
             .exercises(pageNo: page, pageSize: pageSize, search: "")
         )
     }

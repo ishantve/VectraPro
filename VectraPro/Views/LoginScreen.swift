@@ -15,6 +15,7 @@ struct LoginScreen: View {
     /// Called when the user wants to pick a different organization.
     var onChangeOrganization: () -> Void
 
+    @StateObject private var viewModel = LoginViewModel()
     @State private var username = ""
     @State private var password = ""
     @State private var nickname = ""
@@ -80,16 +81,12 @@ struct LoginScreen: View {
             isLoading = true
             toast = nil
             do {
-                if nicknameAllowed {
-                    try await AuthService.shared.login(nickname: nickname)
-                } else {
-                    try await AuthService.shared.login(
-                        username: username.trimmingCharacters(in: .whitespaces),
-                        password: password
-                    )
-                }
-                // Post-login bootstrap: /organizations then /games (sequential).
-                try await SessionService.shared.loadInitialData()
+                try await viewModel.signIn(
+                    nicknameAllowed: nicknameAllowed,
+                    nickname: nickname,
+                    username: username.trimmingCharacters(in: .whitespaces),
+                    password: password
+                )
 
                 isLoading = false
                 toast = Toast(message: "Login successful", isSuccess: true)
