@@ -615,31 +615,46 @@ final class MapViewModel: ObservableObject {
     /// threshold while descending on a ~3° glide path.
     private func guideLocalizer(_ ac: inout Aircraft) {
         guard let rwy = ac.interceptRunway, let info = runwayThreshold(for: rwy) else { return }
-        let ic  = info.inbound        // inbound course (direction of travel toward the threshold)
+        let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)  // threshold → outward
         let d   = Geo.distanceMeters(from: info.threshold, to: ac.position)
         let brg = Geo.bearing(from: info.threshold, to: ac.position)
 
-        // Signed cross-track (NM) relative to the inbound course, and along-track
-        // distance out on final. No aim point — the aircraft intercepts wherever
-        // it crosses, not by flying to the far end first.
-        var rel = (brg - ic).truncatingRemainder(dividingBy: 360)
+        // Signed along-track distance out on final (foot of perpendicular on the
+        // centre-line). Positive = still out on final; negative = past the threshold.
+        var rel = (brg - approachDir).truncatingRemainder(dividingBy: 360)
         if rel > 180 { rel -= 360 } else if rel < -180 { rel += 360 }
-        let relRad  = rel * .pi / 180
-        let crossNM = (d * sin(relRad)) / Distance.metersPerNauticalMile
-        let alongNM = abs(d * cos(relRad)) / Distance.metersPerNauticalMile
+        let alongM  = d * cos(rel * .pi / 180)
+        let alongNM = alongM / Distance.metersPerNauticalMile
 
-        // Turn to a bounded intercept angle (≤30°) toward the centreline; the
-        // angle eases to 0 as the aircraft captures, so it aligns then tracks in.
-        let interceptAngle = min(30.0, abs(crossNM) * 10.0)
-        let corrected = ic - (crossNM >= 0 ? interceptAngle : -interceptAngle)
+        // Overshoot / missed approach: the aircraft has crossed the threshold but
+        // is still airborne (too high to land — it could not lose altitude in time,
+        // or the glide never captured). Don't spin it back toward the runway; end
+        // the approach and let it fly straight ahead on the inbound course so the
+        // controller can re-vector. (An actual touchdown is handled by reachedRunway
+        // before we ever get here.)
+        if alongM < -0.2 * Distance.metersPerNauticalMile {
+            ac.interceptRunway = nil
+            ac.turnDirection = nil
+            ac.targetHeading = info.inbound
+            ac.minAltitudeFeet = nil; ac.maxAltitudeFeet = nil; ac.targetAltitudeFeet = nil
+            ac.minSpeedKnots = nil; ac.maxSpeedKnots = nil; ac.targetSpeedKnots = nil
+            return
+        }
+
+        // Pure-pursuit: aim a lead ahead of the foot, toward the threshold, ON the
+        // centre-line, so the aircraft turns to intercept then TRACKS the localizer
+        // (not parallel). A ~2 NM lead (≈ 2.3 × turn radius at 160 kt) captures
+        // firmly without weaving, and is well established before the runway.
+        let leadM = 2.0 * Distance.metersPerNauticalMile
+        let aimAlong = max(0, alongM - leadM)
+        let aim = Geo.offset(from: info.threshold, distanceMeters: aimAlong, bearingDegrees: approachDir)
         ac.turnDirection = nil
-        ac.targetHeading = (corrected.truncatingRemainder(dividingBy: 360) + 360)
-            .truncatingRemainder(dividingBy: 360)
+        ac.targetHeading = Geo.bearing(from: ac.position, to: aim)
 
         // Descend on a ~3° glide path (≈ 320 ft per NM). Only ever descend.
         ac.minAltitudeFeet = nil
         ac.maxAltitudeFeet = nil
-        ac.targetAltitudeFeet = min(ac.altitudeFeet, alongNM * 320)
+        ac.targetAltitudeFeet = min(ac.altitudeFeet, max(0, alongNM) * 320)
 
         // Slow to approach speed on final.
         ac.minSpeedKnots = nil
