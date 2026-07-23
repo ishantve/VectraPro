@@ -163,33 +163,13 @@ final class MapViewModel: ObservableObject {
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
-        guard let fix = holdingFix(named: name) else { return nil }
-        return coordinate(of: fix)
-    }
-
-    /// Find a holding fix by name, ignoring case, hyphens and spaces so spoken
-    /// codes match hyphenated fix names ("re01" ↔ "RE-01", "vi95" ↔ "VI-95").
-    private func holdingFix(named name: String) -> ExerciseDetail.Fix? {
-        let target = canonicalFixName(name)
-        return holdingFixes.first { canonicalFixName($0.fixName ?? "") == target }
-    }
-
-    /// Strips everything but letters and digits and lowercases — used for
-    /// tolerant fix-name matching.
-    private func canonicalFixName(_ s: String) -> String {
-        s.lowercased().filter { $0.isLetter || $0.isNumber }
-    }
-
-    private func coordinate(of fix: ExerciseDetail.Fix) -> CLLocationCoordinate2D? {
-        guard let lat = fix.latitude, let lon = fix.longitude else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        FixLookup.position(named: name, in: holdingFixes)
     }
 
     /// Continuously steer an aircraft's heading toward its commanded hold fix.
     private func steerTowardHold(_ aircraft: inout Aircraft) {
         guard let name = aircraft.holdingTargetName,
-              let fix = holdingFix(named: name),
-              let fixPos = coordinate(of: fix) else { return }
+              let fixPos = FixLookup.position(named: name, in: holdingFixes) else { return }
         aircraft.turnDirection = nil
         aircraft.targetHeading = Geo.bearing(from: aircraft.position, to: fixPos)
     }
@@ -200,8 +180,8 @@ final class MapViewModel: ObservableObject {
         var capturedIDs = Set<UUID>()
         for index in aircraft.indices {
             guard let name = aircraft[index].holdingTargetName,
-                  let fix = holdingFix(named: name),
-                  let fixPos = coordinate(of: fix) else { continue }
+                  let fix = FixLookup.fix(named: name, in: holdingFixes),
+                  let fixPos = FixLookup.coordinate(of: fix) else { continue }
             // Capture as soon as the NOSE reaches the fix collider (not the body).
             let ac0 = aircraft[index]
             let noseReachM = (ac0.noseOffsetNM + ac0.noseForwardNM) * Distance.metersPerNauticalMile
