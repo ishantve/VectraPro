@@ -16,10 +16,16 @@ final class ExerciseService {
     /// The started exercise's full configuration.
     private(set) var current: ExerciseDetail?
 
+    /// Networking client — injected (defaults to the shared instance).
+    private let api: APIManager
+    private init(api: APIManager = .shared) {
+        self.api = api
+    }
+
     /// Fetch and save the exercise detail. Call on START, before opening the radar.
     @discardableResult
     func loadDetail(exerciseID: String) async throws -> ExerciseDetail {
-        let response: ExerciseDetailResponse = try await APIManager.shared.request(
+        let response: ExerciseDetailResponse = try await api.request(
             .exerciseDetail(exerciseID: exerciseID)
         )
         guard let detail = response.record else {

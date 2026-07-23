@@ -24,10 +24,20 @@ final class SessionService {
     /// Response from POST /nickName/user (nickname login).
     private(set) var nickNameUser: NickNameUser?
 
+    // Collaborators — injected (default to the shared instances) so this
+    // bootstrap flow's dependencies are explicit rather than global reaches.
+    private let api: APIManager
+    private let auth: AuthService
+
+    private init(api: APIManager = .shared, auth: AuthService = .shared) {
+        self.api = api
+        self.auth = auth
+    }
+
     /// Call once after a successful login.
     func loadInitialData() async throws {
         // 1) Organizations → keep the particular organization object.
-        let orgs: [Organization] = try await APIManager.shared.request(.organizations)
+        let orgs: [Organization] = try await api.request(.organizations)
         let org = orgs.first
         organization = org
 
@@ -36,7 +46,7 @@ final class SessionService {
         }
 
         // 2) Games — org id is in the path; OrganizationId header is also sent.
-        let response: GamesResponse = try await APIManager.shared.request(
+        let response: GamesResponse = try await api.request(
             .games(orgID: orgID),
             headers: ["OrganizationId": orgID]
         )
@@ -51,21 +61,21 @@ final class SessionService {
 
         // From /games onward, every API call must carry BOTH OrganizationId and
         // gameId — set them as default headers so all subsequent calls include them.
-        APIManager.shared.setDefaultHeader(orgID, forKey: "OrganizationId")
+        api.setDefaultHeader(orgID, forKey: "OrganizationId")
         if let gameId = game.id, !gameId.isEmpty {
-            APIManager.shared.setDefaultHeader(gameId, forKey: "gameId")
+            api.setDefaultHeader(gameId, forKey: "gameId")
         }
 
         // 3) Nickname user — only for nickname login. Passes the nickname entered
         //    on the login screen as the `nickName` query parameter.
         //    OrganizationId + gameId are sent automatically (default headers).
-        if let nickname = AuthService.shared.nickname, !nickname.isEmpty {
-            let user: NickNameUser = try await APIManager.shared.request(
+        if let nickname = auth.nickname, !nickname.isEmpty {
+            let user: NickNameUser = try await api.request(
                 .nickNameUser(nickName: nickname)
             )
             nickNameUser = user
             // Persist the resolved userId into the saved session.
-            if !user.userId.isEmpty { AuthService.shared.setUserId(user.userId) }
+            if !user.userId.isEmpty { auth.setUserId(user.userId) }
         }
     }
 }

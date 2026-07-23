@@ -411,7 +411,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     /// Rotated name labels drawn along each VOR radial line.
     private func syncRadialNames(_ mapView: MLNMapView) {
-        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let showNames = viewModel.layerOn(.radialsNames) && viewModel.layerOn(.radials)
         let key = "\(showNames)-\(viewModel.fixes.count)"
         guard key != radialNameKey else { return }
         radialNameKey = key
@@ -438,12 +438,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     /// Add each zone as a transparent fill polygon + solid border + center label.
     private func syncZones(_ mapView: MLNMapView) {
-        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        let key = viewModel.layerOn(.zone) ? "on-\(viewModel.zones.count)" : "off"
         guard key != zoneKey else { return }
         zoneKey = key
         mapView.removeAnnotations(zoneAnnotations)
         zoneAnnotations = []
-        guard viewModel.layerOn("Zone") else { return }
+        guard viewModel.layerOn(.zone) else { return }
         for shape in viewModel.zoneShapes() {
             // Transparent fill.
             var fillCoords = shape.coordinates
@@ -471,9 +471,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Sync fix icon markers and name labels independently so toggling names
     /// never repositions the icon markers.
     private func syncFixes(_ mapView: MLNMapView) {
-        let showFixes   = viewModel.layerOn("Fixes")
-        let showHolding = viewModel.layerOn("Holding")
-        let showNames   = viewModel.layerOn("Fixes Names")
+        let showFixes   = viewModel.layerOn(.fixes)
+        let showHolding = viewModel.layerOn(.holding)
+        let showNames   = viewModel.layerOn(.fixesNames)
         let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
         let nameKey = "\(showNames)-\(iconKey)"
 
@@ -552,7 +552,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
 
         // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
-        let radialsOn = viewModel.layerOn("Radials")
+        let radialsOn = viewModel.layerOn(.radials)
         let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             remove(radialLines, from: mapView)
@@ -698,8 +698,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
 
         let positions = dynamicTrailSpacing
-            ? equalSpacedTrailPositions(from: history, count: 6)
-            : fixedSpacedTrailPositions(from: history, count: 6)
+            ? TrailSampler.equalSpaced(from: history, count: 6)
+            : TrailSampler.fixedSpaced(from: history, count: 6, spacingNM: fixedTrailSpacingNM)
         guard !positions.isEmpty else { trailAnnotations[id] = []; return }
 
         let dots: [ImageAnnotation] = positions.indices.map { i in
@@ -714,95 +714,11 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         trailAnnotations[id] = dots
     }
 
-    /// Returns `count` positions evenly spread along the recent flight path.
-    /// Uses the last 15 history samples so the tail window stays bounded.
-    /// Result is ordered oldest → newest (dot 0 = farthest, dot 5 = closest).
-    private func equalSpacedTrailPositions(from history: [CLLocationCoordinate2D],
-                                           count: Int) -> [CLLocationCoordinate2D] {
-        let window = Array(history.suffix(8))
-        guard window.count >= 2 else { return Array(window.suffix(count)) }
-
-        // Build cumulative arc-lengths along the window (index 0 = oldest end).
-        var cum = [Double](repeating: 0, count: window.count)
-        for i in 1..<window.count {
-            cum[i] = cum[i - 1] + Geo.distanceMeters(from: window[i - 1], to: window[i])
-        }
-        let total = cum.last!
-        guard total > 0 else { return [window.last!] }
-
-        // Place `count` dots at equal fractions of the total arc length.
-        // k=1 → farthest from aircraft (oldest); k=count → closest (newest).
-        var result: [CLLocationCoordinate2D] = []
-        for k in 1...count {
-            let target = total * Double(k) / Double(count)
-
-            // Find the segment that contains `target`.
-            var seg = window.count - 2          // safe default = last segment
-            for i in 0..<window.count - 1 {
-                if cum[i + 1] >= target { seg = i; break }
-            }
-            let seg1   = min(seg + 1, window.count - 1)
-            let segLen = cum[seg1] - cum[seg]
-            let t      = segLen > 0 ? (target - cum[seg]) / segLen : 0.0
-            let lat    = window[seg].latitude  + t * (window[seg1].latitude  - window[seg].latitude)
-            let lon    = window[seg].longitude + t * (window[seg1].longitude - window[seg].longitude)
-            result.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
-        }
-        return result   // already ordered oldest → newest
-    }
-
-    /// Returns exactly `count` positions spaced `fixedTrailSpacingNM` NM apart,
-    /// walking backward from the newest history point. If history is too short,
-    /// remaining dots are projected backward from the oldest point so all `count`
-    /// dots are visible from the moment the aircraft first appears.
-    /// Result is ordered oldest → newest (farthest → closest to aircraft).
-    private func fixedSpacedTrailPositions(from history: [CLLocationCoordinate2D],
-                                           count: Int) -> [CLLocationCoordinate2D] {
-        guard history.count >= 2 else { return [] }
-        let spacingMeters = fixedTrailSpacingNM * 1852.0
-
-        var result  = [CLLocationCoordinate2D]()
-        var walked  = 0.0       // distance walked backward from newest point
-        var dotNum  = 1         // next dot falls at dotNum × spacingMeters from newest
-        var i       = history.count - 1
-
-        while i > 0, result.count < count {
-            let segTo   = history[i]
-            let segFrom = history[i - 1]
-            let segLen  = Geo.distanceMeters(from: segFrom, to: segTo)
-
-            while Double(dotNum) * spacingMeters <= walked + segLen, result.count < count {
-                let t   = segLen > 0 ? (Double(dotNum) * spacingMeters - walked) / segLen : 0
-                let lat = segTo.latitude  + t * (segFrom.latitude  - segTo.latitude)
-                let lon = segTo.longitude + t * (segFrom.longitude - segTo.longitude)
-                result.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
-                dotNum += 1
-            }
-
-            walked += segLen
-            i -= 1
-        }
-
-        // History too short — project the remaining dots backward from the oldest
-        // point using the heading of the first history segment.
-        if result.count < count {
-            let backBearing = Geo.bearing(from: history[1], to: history[0])
-            while result.count < count {
-                let extra = Double(dotNum) * spacingMeters - walked
-                result.append(Geo.offset(from: history[0],
-                                         distanceMeters: extra,
-                                         bearingDegrees: backBearing))
-                dotNum += 1
-            }
-        }
-
-        return result.reversed()    // oldest first (farthest from aircraft)
-    }
 
     /// Rebuilds the trail dashed-line source from all aircraft history arrays.
     /// Each aircraft gets one polyline: history points (oldest→newest) + current position.
     private func syncTrailLines() {
-        guard viewModel.layerOn("Trail") else {
+        guard viewModel.layerOn(.trail) else {
             trailLineSource?.shape = nil
             return
         }
@@ -853,7 +769,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         var bodyDiamonds: [MLNPolylineFeature] = []
         var noseDiamonds: [MLNPolylineFeature] = []
         for ac in viewModel.aircraft {
-            var bd = diamondCoords(center: ac.position,
+            var bd = ColliderGeometry.diamond(center: ac.position,
                                    forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
                                    headingDeg: ac.headingDegrees)
             bodyDiamonds.append(MLNPolylineFeature(coordinates: &bd, count: UInt(bd.count)))
@@ -861,7 +777,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let noseCenter = Geo.offset(from: ac.position,
                                         distanceMeters: ac.noseOffsetNM * 1852,
                                         bearingDegrees: ac.headingDegrees)
-            var nd = noseRectCoords(center: noseCenter,
+            var nd = ColliderGeometry.noseRect(center: noseCenter,
                                     forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
                                     headingDeg: ac.headingDegrees)
             noseDiamonds.append(MLNPolylineFeature(coordinates: &nd, count: UInt(nd.count)))
@@ -877,7 +793,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let isRed    = viewModel.redConflictIDs.contains(ac.id)
             let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
             let blink    = viewModel.blinkState
-            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            var coords = ColliderGeometry.circle(center: ac.position, radiusNM: ac.colliderRadiusNM)
             coords.append(coords[0])
             let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
             if isRed && blink        { redFeatures.append(feature) }
@@ -891,7 +807,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         var zoneFeatures: [MLNPolylineFeature] = []
         for ac in viewModel.aircraft where viewModel.zoneConflictIDs.contains(ac.id) {
-            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            var coords = ColliderGeometry.circle(center: ac.position, radiusNM: ac.colliderRadiusNM)
             coords.append(coords[0])
             zoneFeatures.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
         }
@@ -903,7 +819,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Draws one oval racetrack per holding aircraft when the layer is on.
     private func syncHoldingRacetracks() {
         guard let source = holdingRacetrackSource else { return }
-        guard viewModel.layerOn("Holding racetrack") else {
+        guard viewModel.layerOn(.holdingRacetrack) else {
             source.shape = nil
             return
         }
@@ -931,42 +847,6 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     ///   left   → bearing = headingDeg + 270°,distance = sideNM
     /// NM values are converted to metres (× 1852) for Geo.offset.
     /// The first point is repeated at the end to close the polyline on the map.
-    private func diamondCoords(center: CLLocationCoordinate2D,
-                                forwardNM: Double, sideNM: Double,
-                                headingDeg: Double) -> [CLLocationCoordinate2D] {
-        let offsets: [(Double, Double)] = [
-            (forwardNM * 1852, headingDeg),        // front
-            (sideNM    * 1852, headingDeg + 90),   // right
-            (forwardNM * 1852, headingDeg + 180),  // back
-            (sideNM    * 1852, headingDeg + 270),  // left
-        ]
-        var pts = offsets.map { Geo.offset(from: center, distanceMeters: $0.0, bearingDegrees: $0.1) }
-        pts.append(pts[0])   // close the shape
-        return pts
-    }
-
-    /// Builds the 4 geographic corners of a heading-aligned rectangle + closing point.
-    ///
-    /// Strategy: project the centre forward and backward by forwardNM to get the
-    /// front-edge midpoint and back-edge midpoint. Then offset each midpoint left
-    /// and right by sideNM to get the 4 corners.
-    ///   fR = front + sideNM at (heading + 90°)
-    ///   fL = front + sideNM at (heading − 90°)
-    ///   bR = back  + sideNM at (heading + 90°)
-    ///   bL = back  + sideNM at (heading − 90°)
-    /// Returned in order [fL, fR, bR, bL, fL] so the polyline traces the rectangle.
-    private func noseRectCoords(center: CLLocationCoordinate2D,
-                                 forwardNM: Double, sideNM: Double,
-                                 headingDeg: Double) -> [CLLocationCoordinate2D] {
-        let front = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg)
-        let back  = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg + 180)
-        let fR = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
-        let fL = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
-        let bR = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
-        let bL = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
-        return [fL, fR, bR, bL, fL]   // closed rectangle
-    }
-
     /// Draws fix colliders: circle for HOLDING fixes, north-pointing triangle for all others.
     ///
     /// Fix icons are screen-space (fixed pixel size). Fix colliders are geographic (NM).
@@ -980,34 +860,6 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         // Fix / holding colliders are hidden from view — collision detection
         // (detectFixConflicts / hold capture) still runs independently.
         fixColliderSource?.shape = nil
-    }
-
-    /// Builds a north-pointing equilateral triangle at `sizeNM` circumradius + closing point.
-    ///
-    /// Vertices are at bearings 0° (top), 120° (bottom-right), 240° (bottom-left),
-    /// all at distance `sizeNM` from centre — this gives a true equilateral triangle.
-    /// The shape is fixed north-up (does not rotate), matching the fix icon on screen.
-    /// NM → metres: × 1852. First point repeated at end to close the polyline.
-    private func triangleColliderCoords(center: CLLocationCoordinate2D,
-                                         sizeNM: Double) -> [CLLocationCoordinate2D] {
-        let top   = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 0)    // north tip
-        let right = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 120)  // bottom-right
-        let left  = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 240)  // bottom-left
-        return [top, right, left, top]   // closed triangle
-    }
-
-    /// Approximates a geographic circle as a polygon with `steps` equal-angle segments.
-    ///
-    /// Each point is placed at `radiusNM` from centre along bearing i × (360°/steps).
-    /// 36 steps = 10° per segment — visually smooth at radar zoom levels and
-    /// cheap to compute (avoids true arc rendering).
-    /// NM → metres: 1 NM = 1852 m (international nautical mile definition).
-    private func circleCoords(center: CLLocationCoordinate2D, radiusNM: Double, steps: Int = 36) -> [CLLocationCoordinate2D] {
-        (0..<steps).map { i in
-            Geo.offset(from: center,
-                       distanceMeters: radiusNM * 1852.0,
-                       bearingDegrees: Double(i) * 360.0 / Double(steps))
-        }
     }
 
     private func updateRotation(of annotation: ImageAnnotation, degrees: CGFloat, on mapView: MLNMapView) {
@@ -1103,7 +955,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             selectionRingSource?.shape = nil
             return
         }
-        var coords = circleCoords(center: ac.position, radiusNM: 0.4)
+        var coords = ColliderGeometry.circle(center: ac.position, radiusNM: 0.4)
         coords.append(coords[0])
         let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
         selectionRingSource?.shape = MLNShapeCollectionFeature(shapes: [feature])

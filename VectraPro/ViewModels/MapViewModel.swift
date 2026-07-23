@@ -16,22 +16,22 @@ final class MapViewModel: ObservableObject {
     /// Radar center. Defaults to IGI; replaced by the started exercise's
     /// map location so the range rings draw around it.
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
-    /// Map-layer visibility (driven by the "Map Layers" menu toggles).
-    @Published var layers: [String: Bool] = [
-        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true,
-        "Trail": true
-    ]
-    func layerOn(_ name: String) -> Bool { layers[name] ?? false }
+    /// Map-layer visibility (driven by the "Map Layers" menu toggles). Keyed by
+    /// `RadarDisplayLayer.rawValue`; use the typed `layerOn`/`setLayer` accessors.
+    @Published private(set) var layers: [String: Bool] = Dictionary(
+        uniqueKeysWithValues: RadarDisplayLayer.allCases
+            .filter { $0.defaultOn }
+            .map { ($0.rawValue, true) }
+    )
 
-    /// Set a layer toggle, cascading to dependent labels when a parent turns on or off.
-    func setLayer(_ name: String, _ value: Bool) {
-        layers[name] = value
-        switch name {
-        case "Fixes":
-            layers["Fixes Names"] = value
-        case "Radials":
-            layers["Radials Names"] = value
-        default: break
+    func layerOn(_ layer: RadarDisplayLayer) -> Bool { layers[layer.rawValue] ?? false }
+
+    /// Set a layer toggle, cascading to its dependent label layer (Fixes → Fixes
+    /// Names, Radials → Radials Names) when the parent turns on or off.
+    func setLayer(_ layer: RadarDisplayLayer, _ value: Bool) {
+        layers[layer.rawValue] = value
+        if let dependent = layer.dependentLayer {
+            layers[dependent.rawValue] = value
         }
     }
 
@@ -63,7 +63,7 @@ final class MapViewModel: ObservableObject {
     /// "Holding racetrack" layer is on, holding aircraft are shown too, orbiting
     /// their fix on the racetrack.
     var radarAircraft: [Aircraft] {
-        guard layerOn("Holding racetrack") else { return aircraft }
+        guard layerOn(.holdingRacetrack) else { return aircraft }
         return aircraft + traffic.filter { $0.holdingName != nil }
     }
 
@@ -157,83 +157,10 @@ final class MapViewModel: ObservableObject {
         fixes.filter { $0.type?.uppercased() == "HOLDING" }
     }
 
-    /// Radius (metres) within which an inbound aircraft is captured by a hold.
-    private let holdCaptureRadiusM = 1.0 * Distance.metersPerNauticalMile
-
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
-        guard let fix = holdingFix(named: name) else { return nil }
-        return coordinate(of: fix)
-    }
-
-    /// Find a holding fix by name, ignoring case, hyphens and spaces so spoken
-    /// codes match hyphenated fix names ("re01" ↔ "RE-01", "vi95" ↔ "VI-95").
-    private func holdingFix(named name: String) -> ExerciseDetail.Fix? {
-        let target = canonicalFixName(name)
-        return holdingFixes.first { canonicalFixName($0.fixName ?? "") == target }
-    }
-
-    /// Strips everything but letters and digits and lowercases — used for
-    /// tolerant fix-name matching.
-    private func canonicalFixName(_ s: String) -> String {
-        s.lowercased().filter { $0.isLetter || $0.isNumber }
-    }
-
-    private func coordinate(of fix: ExerciseDetail.Fix) -> CLLocationCoordinate2D? {
-        guard let lat = fix.latitude, let lon = fix.longitude else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
-    }
-
-    /// Continuously steer an aircraft's heading toward its commanded hold fix.
-    private func steerTowardHold(_ aircraft: inout Aircraft) {
-        guard let name = aircraft.holdingTargetName,
-              let fix = holdingFix(named: name),
-              let fixPos = coordinate(of: fix) else { return }
-        aircraft.turnDirection = nil
-        aircraft.targetHeading = Geo.bearing(from: aircraft.position, to: fixPos)
-    }
-
-    /// Move any aircraft that reached its commanded hold fix off the radar and
-    /// into the holding hangar (as hangar traffic tagged with the fix name).
-    private func captureAircraftAtHold() {
-        var capturedIDs = Set<UUID>()
-        for index in aircraft.indices {
-            guard let name = aircraft[index].holdingTargetName,
-                  let fix = holdingFix(named: name),
-                  let fixPos = coordinate(of: fix) else { continue }
-            // Capture as soon as the NOSE reaches the fix collider (not the body).
-            let ac0 = aircraft[index]
-            let noseReachM = (ac0.noseOffsetNM + ac0.noseForwardNM) * Distance.metersPerNauticalMile
-            let nose = Geo.offset(from: ac0.position,
-                                  distanceMeters: noseReachM,
-                                  bearingDegrees: ac0.headingDegrees)
-            guard Geo.distanceMeters(from: nose, to: fixPos) < holdCaptureRadiusM
-            else { continue }
-
-            var ac = aircraft[index]
-            ac.holdingName          = fix.fixName   // canonical name → matches hangar filter
-            ac.holdingTargetName    = nil
-            ac.holdingInboundCourse = ac.headingDegrees   // course it arrived on = inbound leg
-            ac.holdingProgress      = 0                   // start at the fix
-            let entryTrack = HoldingRacetrack(fix: fixPos, inboundCourse: ac.headingDegrees,
-                                              speedKnots: ac.speedKnots)
-            ac.holdingRadiusM       = entryTrack.radiusM
-            ac.holdingLegM          = entryTrack.legM
-            ac.targetHeading        = nil
-            ac.turnDirection        = nil
-            ac.history              = []
-            traffic.append(ac)
-            capturedIDs.insert(ac.id)
-        }
-        guard !capturedIDs.isEmpty else { return }
-        if let sel = selectedAircraftID, capturedIDs.contains(sel) { selectedAircraftID = nil }
-        aircraft.removeAll { capturedIDs.contains($0.id) }
-        // Free radar slot → refill soon.
-        if aircraft.count < airspaceCapacity {
-            let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
-            radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
-        }
+        FixLookup.position(named: name, in: holdingFixes)
     }
 
     /// Apply the started exercise: center the radar and derive runways +
@@ -332,8 +259,8 @@ final class MapViewModel: ObservableObject {
                 enabled.insert(ApproachID(runwayID: runway.id, side: .b))
             }
             // Track which runway ends have an active localizer (intercept-eligible).
-            if strips[0].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[0].stripName ?? "")) }
-            if strips[1].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[1].stripName ?? "")) }
+            if strips[0].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[0].stripName ?? "")) }
+            if strips[1].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[1].stripName ?? "")) }
         }
         activeLocalizerRunways = activeLocs
 
@@ -407,9 +334,12 @@ final class MapViewModel: ObservableObject {
     private let historySampleTicks = 3      // sample a trail point every N ticks
     private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
 
-    private let physics   = AircraftPhysics.shared
-    private let collision = AircraftCollisionDetector.shared
-    private let spawner   = AircraftSpawner.shared
+    // Simulation collaborators — injected (default to the shared instances) so
+    // MapViewModel can be exercised with test doubles instead of reaching into
+    // globals internally.
+    private let physics:   AircraftPhysics
+    private let collision: AircraftCollisionDetector
+    private let spawner:   AircraftSpawner
 
     /// Context bundle passed to the simulator for all spawn calls.
     private var spawnContext: SpawnContext {
@@ -517,7 +447,12 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
-    init() {
+    init(physics: AircraftPhysics = .shared,
+         collision: AircraftCollisionDetector = .shared,
+         spawner: AircraftSpawner = .shared) {
+        self.physics   = physics
+        self.collision = collision
+        self.spawner   = spawner
         aircraft = [spawner.makeRandomAircraft(context: spawnContext)]
     }
 
@@ -549,12 +484,12 @@ final class MapViewModel: ObservableObject {
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
             for case .interceptLocalizer(let runway) in commands {
                 // Reject if that runway end's localizer isn't active.
-                guard activeLocalizerRunways.contains(canonicalRunway(runway)) else {
+                guard activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
                     CommandFeedbackManager.shared.commandError(
                         "Localizer runway \(runway) not active")
                     return
                 }
-                guard isInLocalizerCone(aircraft: ac, runway: runway) else {
+                guard LocalizerGuidanceService.isInCone(aircraft: ac, runway: runway, runways: runways) else {
                     CommandFeedbackManager.shared.commandError(
                         "Unable, not established for localizer runway \(runway)")
                     return
@@ -590,163 +525,6 @@ final class MapViewModel: ObservableObject {
             return
         }
         CommandFeedbackManager.shared.aircraftNotFound()
-    }
-
-    /// Find the runway threshold matching a designator and its inbound (landing)
-    /// course, derived from the actual runway geometry.
-    private func runwayThreshold(for designator: String) -> (threshold: CLLocationCoordinate2D, inbound: Double)? {
-        let target = canonicalRunway(designator)
-        for rwy in runways {
-            if canonicalRunway(rwy.endA.designator) == target {
-                return (rwy.endA.coordinate, Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
-            }
-            if canonicalRunway(rwy.endB.designator) == target {
-                return (rwy.endB.coordinate, Geo.bearing(from: rwy.endB.coordinate, to: rwy.endA.coordinate))
-            }
-        }
-        return nil
-    }
-
-    // MARK: - Localizer intercept guidance
-
-    /// Guides an aircraft cleared to intercept a runway's localizer: aims at a
-    /// point on the extended centreline ahead of it (pure-pursuit), so it turns
-    /// to intercept, aligns with the inbound course, then tracks in to the
-    /// threshold while descending on a ~3° glide path.
-    private func guideLocalizer(_ ac: inout Aircraft) {
-        guard let rwy = ac.interceptRunway, let info = runwayThreshold(for: rwy) else { return }
-        let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)  // threshold → outward
-        let d   = Geo.distanceMeters(from: info.threshold, to: ac.position)
-        let brg = Geo.bearing(from: info.threshold, to: ac.position)
-
-        // Signed along-track distance out on final (foot of perpendicular on the
-        // centre-line). Positive = still out on final; negative = past the threshold.
-        var rel = (brg - approachDir).truncatingRemainder(dividingBy: 360)
-        if rel > 180 { rel -= 360 } else if rel < -180 { rel += 360 }
-        let alongM  = d * cos(rel * .pi / 180)
-        let alongNM = alongM / Distance.metersPerNauticalMile
-
-        // Overshoot / missed approach: the aircraft has crossed the threshold but
-        // is still airborne (too high to land — it could not lose altitude in time,
-        // or the glide never captured). Don't spin it back toward the runway; end
-        // the approach and let it fly straight ahead on the inbound course so the
-        // controller can re-vector. (An actual touchdown is handled by reachedRunway
-        // before we ever get here.)
-        if alongM < -0.2 * Distance.metersPerNauticalMile {
-            ac.interceptRunway = nil
-            ac.turnDirection = nil
-            ac.targetHeading = info.inbound
-            ac.minAltitudeFeet = nil; ac.maxAltitudeFeet = nil; ac.targetAltitudeFeet = nil
-            ac.minSpeedKnots = nil; ac.maxSpeedKnots = nil; ac.targetSpeedKnots = nil
-            return
-        }
-
-        // Pure-pursuit: aim a lead ahead of the foot, toward the threshold, ON the
-        // centre-line, so the aircraft turns to intercept then TRACKS the localizer
-        // (not parallel). A ~2 NM lead (≈ 2.3 × turn radius at 160 kt) captures
-        // firmly without weaving, and is well established before the runway.
-        let leadM = 2.0 * Distance.metersPerNauticalMile
-        let aimAlong = max(0, alongM - leadM)
-        let aim = Geo.offset(from: info.threshold, distanceMeters: aimAlong, bearingDegrees: approachDir)
-        ac.turnDirection = nil
-        ac.targetHeading = Geo.bearing(from: ac.position, to: aim)
-
-        // Descend on a ~3° glide path (≈ 320 ft per NM). Only ever descend.
-        ac.minAltitudeFeet = nil
-        ac.maxAltitudeFeet = nil
-        ac.targetAltitudeFeet = min(ac.altitudeFeet, max(0, alongNM) * 320)
-
-        // Slow to approach speed on final.
-        ac.minSpeedKnots = nil
-        ac.maxSpeedKnots = nil
-        ac.targetSpeedKnots = approachSpeedKnots
-    }
-
-    private let approachSpeedKnots = 160.0
-
-    /// True when a localizer-tracking aircraft has actually touched down: at the
-    /// threshold horizontally AND descended to (near) ground level.
-    private func reachedRunway(_ ac: Aircraft) -> Bool {
-        guard let rwy = ac.interceptRunway, let info = runwayThreshold(for: rwy) else { return false }
-        let atThreshold = Geo.distanceMeters(from: ac.position, to: info.threshold) < 0.4 * Distance.metersPerNauticalMile
-        let onGround = ac.altitudeFeet <= 200
-        return atThreshold && onGround
-    }
-
-    // MARK: - Landing-sequence separation
-
-    /// Wake category of an aircraft from its type's ICAO WTC (L / M / H).
-    private func wakeCategory(_ ac: Aircraft) -> String {
-        guard let code = ac.aircraftType else { return "M" }
-        return aircraftTypes.first { $0.icaoCode?.uppercased() == code.uppercased() }?
-            .icaoWTC?.uppercased() ?? "M"
-    }
-
-    /// Required in-trail separation (NM): 10 if either aircraft is small (Light),
-    /// otherwise 8 for medium/heavy.
-    private func requiredSeparationNM(_ a: Aircraft, _ b: Aircraft) -> Double {
-        (wakeCategory(a) == "L" || wakeCategory(b) == "L") ? 10 : 8
-    }
-
-    /// Flags aircraft on final (localizer) that are closer than the required
-    /// separation to the aircraft ahead of them on the same runway.
-    private func computeSequencingConflicts() {
-        var conflicts = Set<UUID>()
-        let onFinal = aircraft.filter { $0.interceptRunway != nil }
-        let byRunway = Dictionary(grouping: onFinal) { $0.interceptRunway! }
-
-        for (rwy, group) in byRunway {
-            guard group.count >= 2, let info = runwayThreshold(for: rwy) else { continue }
-            // Nearest-to-threshold first (the leader of the sequence).
-            let sorted = group.sorted {
-                Geo.distanceMeters(from: $0.position, to: info.threshold)
-                    < Geo.distanceMeters(from: $1.position, to: info.threshold)
-            }
-            for i in 1..<sorted.count {
-                let leader = sorted[i - 1], follower = sorted[i]
-                let gapNM = Geo.distanceMeters(from: leader.position, to: follower.position)
-                    / Distance.metersPerNauticalMile
-                if gapNM < requiredSeparationNM(leader, follower) {
-                    conflicts.insert(leader.id)
-                    conflicts.insert(follower.id)
-                }
-            }
-        }
-        if sequencingConflictIDs != conflicts { sequencingConflictIDs = conflicts }
-    }
-
-    /// Normalise a designator for matching: digits without leading zeros + a
-    /// lowercased side suffix ("08L" ↔ "8l", "09" ↔ "9").
-    private func canonicalRunway(_ s: String) -> String {
-        let lower = s.lowercased()
-        let digits = lower.prefix { $0.isNumber }
-        let suffix = lower.drop { $0.isNumber }.filter { "lrc".contains($0) }
-        let num = Int(digits).map(String.init) ?? String(digits)
-        return num + suffix
-    }
-
-    /// True if the aircraft can intercept the runway's localizer. Two conditions:
-    ///   1. POSITION — the aircraft sits inside the approach funnel: its bearing
-    ///      from the threshold is within ±30° of the approach direction (the
-    ///      reciprocal of the landing course = the extended centreline).
-    ///   2. HEADING — the aircraft is flying TOWARD the localizer: its heading is
-    ///      within ±30° of the inbound landing course (a valid intercept angle).
-    /// Both must hold — in the cone but pointing the wrong way can't intercept.
-    private func isInLocalizerCone(aircraft: Aircraft, runway designator: String) -> Bool {
-        guard let (threshold, inbound) = runwayThreshold(for: designator) else { return false }
-        let approachDir = (inbound + 180).truncatingRemainder(dividingBy: 360)
-        let bearingToAircraft = Geo.bearing(from: threshold, to: aircraft.position)
-        let inFunnel  = headingWithinCone(bearingToAircraft, of: approachDir, tolerance: 30)
-        let inbound30 = headingWithinCone(aircraft.headingDegrees, of: inbound, tolerance: 30)
-        return inFunnel && inbound30
-    }
-
-    /// Shortest-angular-distance check: is `angle` within `tolerance`° of `target`?
-    private func headingWithinCone(_ angle: Double, of target: Double,
-                                   tolerance: Double) -> Bool {
-        var diff = abs((angle - target).truncatingRemainder(dividingBy: 360))
-        if diff > 180 { diff = 360 - diff }
-        return diff <= tolerance
     }
 
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
@@ -968,11 +746,12 @@ final class MapViewModel: ObservableObject {
         for index in aircraft.indices {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             // Auto-turn toward a commanded holding fix (proceed direct).
-            steerTowardHold(&aircraft[index])
+            HoldingController.steer(&aircraft[index], fixes: holdingFixes)
             // Localizer intercept: align with the centreline, then track it in.
-            guideLocalizer(&aircraft[index])
+            LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
-            if aircraft[index].interceptRunway != nil, reachedRunway(aircraft[index]) {
+            if aircraft[index].interceptRunway != nil,
+               LocalizerGuidanceService.reachedRunway(aircraft[index], runways: runways) {
                 landedIDs.insert(aircraft[index].id)
             }
             if tickCount % historySampleTicks == 0 {
@@ -990,55 +769,22 @@ final class MapViewModel: ObservableObject {
         }
 
         // Holding capture: aircraft that reached their commanded hold fix leave
-        // the radar and enter the holding hangar.
-        captureAircraftAtHold()
-
-        // Fly the holding racetracks. This runs every tick regardless of the
-        // layer's visibility, so an aircraft keeps orbiting while hidden and
-        // reappears at its up-to-date position when the layer is turned back on.
-        // Only the drawing (radarAircraft) is gated by the layer toggle.
-        for i in traffic.indices where traffic[i].holdingName != nil {
-            guard let ic = traffic[i].holdingInboundCourse else { continue }
-            guard let fixPos = holdingFixPosition(named: traffic[i].holdingName ?? "") else { continue }
-            // Obey speed/altitude clearances (changes ground speed).
-            physics.adjustSpeedAltitude(&traffic[i], dt: tickInterval)
-
-            // The aircraft keeps flying its CURRENT (committed) racetrack. A
-            // speed change resizes the committed loop only once the aircraft is
-            // on the inbound leg — until then it holds the old pattern.
-            let turnLen   = Double.pi * traffic[i].holdingRadiusM
-            let committedTotal = 2 * traffic[i].holdingLegM + 2 * turnLen
-            let inboundStart = committedTotal > 0
-                ? (2 * turnLen + traffic[i].holdingLegM) / committedTotal
-                : 1
-            if traffic[i].holdingProgress >= inboundStart {
-                let cur = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                           speedKnots: traffic[i].speedKnots)
-                traffic[i].holdingRadiusM = cur.radiusM
-                traffic[i].holdingLegM    = cur.legM
-            }
-
-            let track = HoldingRacetrack(fix: fixPos, inboundCourse: ic,
-                                         radiusM: traffic[i].holdingRadiusM,
-                                         legM: traffic[i].holdingLegM)
-            let vmps  = traffic[i].speedKnots * Distance.metersPerNauticalMile / 3600
-            let total = max(1, track.totalLength)
-            // Re-anchor onto the (possibly just-updated) loop for continuity.
-            let base  = track.nearestProgress(to: traffic[i].position,
-                                              near: traffic[i].holdingProgress)
-            var prog  = base + (vmps * tickInterval) / total
-            prog = prog.truncatingRemainder(dividingBy: 1)
-            traffic[i].holdingProgress = prog
-            let s = track.sample(at: prog * total)
-            traffic[i].position       = s.position
-            traffic[i].headingDegrees = s.heading
-            if tickCount % historySampleTicks == 0 {
-                traffic[i].history.append(traffic[i].position)
-                if traffic[i].history.count > maxHistoryPoints {
-                    traffic[i].history.removeFirst()
-                }
+        // the radar and enter the holding hangar. The @Published side-effects
+        // (clear selection, arm a refill for the freed slot) stay here.
+        let captured = HoldingController.capture(aircraft: &aircraft, traffic: &traffic, fixes: holdingFixes)
+        if !captured.isEmpty {
+            if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
+            if aircraft.count < airspaceCapacity {
+                let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
+                radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
             }
         }
+
+        // Fly the holding racetracks (runs every tick; only the drawing is gated
+        // by the layer toggle).
+        HoldingController.flyRacetracks(
+            traffic: &traffic, fixes: holdingFixes, physics: physics, dt: tickInterval,
+            sampleHistory: tickCount % historySampleTicks == 0, maxHistory: maxHistoryPoints)
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
@@ -1089,7 +835,9 @@ final class MapViewModel: ObservableObject {
         if fixConflictIDs != fixConflicts { fixConflictIDs = fixConflicts }
 
         // Landing-sequence separation on final.
-        computeSequencingConflicts()
+        let seqConflicts = SequencingSeparationService.conflicts(
+            among: aircraft, runways: runways, aircraftTypes: aircraftTypes)
+        if sequencingConflictIDs != seqConflicts { sequencingConflictIDs = seqConflicts }
 
         // Advance the exercise clock; finish when we reach the target duration.
         elapsedSeconds += 1
@@ -1178,7 +926,7 @@ final class MapViewModel: ObservableObject {
             return
         }
         var ac = traffic[idx]
-        let (threshold, heading) = departureThreshold(for: ac)
+        let (threshold, heading) = RunwayGeometry.departureThreshold(for: ac, in: runways, center: center)
 
         ac.position           = threshold
         ac.headingDegrees     = heading
@@ -1196,8 +944,9 @@ final class MapViewModel: ObservableObject {
 
     /// Resolves a departure callsign from an already-normalised voice transcript.
     func resolveDepartureCallsign(from normalizedText: String) -> String? {
-        resolveCallsign(from: normalizedText,
-                        among: traffic.filter { $0.category == .departure })
+        CallsignResolver.resolve(from: normalizedText,
+                                 among: traffic.filter { $0.category == .departure },
+                                 airlines: airlines)
     }
 
     /// Resolves a live radar aircraft callsign from an already-normalised voice
@@ -1205,7 +954,7 @@ final class MapViewModel: ObservableObject {
     /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
         let candidates = aircraft + traffic.filter { $0.holdingName != nil }
-        return resolveCallsign(from: normalizedText, among: candidates)
+        return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines)
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
@@ -1217,59 +966,6 @@ final class MapViewModel: ObservableObject {
             return
         }
         applyCommands(commands, toAircraftWithID: id)
-    }
-
-    /// Shared resolver: direct ICAO match → spoken airline name + flight number.
-    private func resolveCallsign(from normalizedText: String,
-                                 among candidates: [Aircraft]) -> String? {
-        let text = normalizedText.lowercased()
-        // 1. Direct match — "aic235" or spaced form "aca 29" both match callsign "ACA29".
-        for ac in candidates {
-            let cs = ac.callsign.lowercased()
-            if text.contains(cs) { return ac.callsign }
-            // Spoken callsigns often have a space between letter prefix and digits.
-            let letters = String(cs.prefix(while: { $0.isLetter }))
-            let digits  = String(cs.drop(while:  { $0.isLetter }))
-            if !letters.isEmpty && !digits.isEmpty && text.contains("\(letters) \(digits)") {
-                return ac.callsign
-            }
-        }
-        // 2. Airline spoken name + flight number — e.g. "air india 235".
-        for airline in airlines {
-            guard let spoken = airline.callSign?.lowercased().trimmingCharacters(in: .whitespaces),
-                  !spoken.isEmpty,
-                  let icao = airline.icaoCode?.uppercased(), !icao.isEmpty,
-                  let nameRange = text.range(of: spoken) else { continue }
-            let after  = String(text[nameRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-            let digits = String(after.prefix(while: { $0.isNumber || $0 == " " })
-                                     .filter(\.isNumber).prefix(4))
-            guard !digits.isEmpty else { continue }
-            let candidate = icao + digits
-            if candidates.contains(where: { $0.callsign.uppercased() == candidate }) {
-                return candidate
-            }
-        }
-        return nil
-    }
-
-    /// Returns the threshold coordinate and takeoff heading for an aircraft's
-    /// assigned runway. Falls back to the first available runway, then the center.
-    private func departureThreshold(for ac: Aircraft) -> (CLLocationCoordinate2D, Double) {
-        for runway in runways {
-            if runway.endA.designator == ac.assignedRunway {
-                return (runway.endA.coordinate,
-                        Geo.bearing(from: runway.endA.coordinate, to: runway.endB.coordinate))
-            }
-            if runway.endB.designator == ac.assignedRunway {
-                return (runway.endB.coordinate,
-                        Geo.bearing(from: runway.endB.coordinate, to: runway.endA.coordinate))
-            }
-        }
-        if let rwy = runways.first {
-            return (rwy.endA.coordinate,
-                    Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
-        }
-        return (center, 0)
     }
 
     // MARK: - Approach enabling

@@ -24,68 +24,11 @@ struct MapScreen: View {
     /// Which operations popup is open (nil = none). Only one at a time.
     enum OperationsPopup { case flightData }
     @State private var activePopup: OperationsPopup?
-    /// Display-layer rows (icon, name), in order.
-    private let displayOptions: [(icon: String, name: String)] = [
-        ("cloud.fill", "Weather"),
-        ("scope", "Radials"),
-        ("scope", "Radials Names"),
-        ("triangle.fill", "Fixes"),
-        ("triangle.fill", "Fixes Names"),
-        ("exclamationmark.triangle.fill", "NOTAM"),
-        ("nosign", "Zone"),
-        ("smallcircle.filled.circle", "Holding"),
-        ("oval", "Holding racetrack"),
-        ("point.3.connected.trianglepath.dotted", "Trail"),
-        ("mountain.2.fill", "Obstacles"),
-        ("wind", "Wind"),
-        ("wind", "Wind Speed"),
-        ("cloud.fill", "Clouds"),
-        ("bolt.fill", "Lightening"),
-        ("cloud.bolt.rain.fill", "Thunderstorm")
-    ]
+    /// Display-layer rows, in menu order (single source of truth).
+    private let displayOptions = RadarDisplayLayer.allCases
 
     /// Tint applied to the layer icons (keeps their detail via colorMultiply).
     private let layerTint: Color = .white
-
-    /// Top-right radar layer toggles — each uses its own image asset.
-    enum RadarLayer: String, CaseIterable, Identifiable {
-        case obstacle, zone, holdingPattern, enroute, arrival, departure
-        var id: String { rawValue }
-        var asset: String { rawValue }
-
-        /// Title shown above the hangar list.
-        var title: String {
-            switch self {
-            case .arrival:   return "Arrival"
-            case .departure: return "Departure"
-            case .enroute:   return "Enroute"
-            default:         return rawValue.capitalized
-            }
-        }
-
-        /// The aircraft category this layer lists (nil = not a flight list).
-        var flightCategory: FlightCategory? {
-            switch self {
-            case .arrival:   return .arrival
-            case .departure: return .departure
-            case .enroute:   return .enroute
-            default:         return nil
-            }
-        }
-
-        /// Layers that open a list panel (single-select among themselves).
-        var opensHangar: Bool {
-            flightCategory != nil || self == .holdingPattern || self == .zone || self == .obstacle
-        }
-        /// Enroute / Arrival / Departure ship with the grey bg + border baked into
-        /// the asset; the first three are plain icons we style to match in code.
-        var hasBakedStyle: Bool {
-            switch self {
-            case .enroute, .arrival, .departure: return true
-            default: return false
-            }
-        }
-    }
 
     // Match the styling baked into the enroute/arrival/departure assets.
     private let layerBG = Color(red: 0/255, green: 36/255, blue: 68/255).opacity(0.5)   // #002444
@@ -596,9 +539,9 @@ struct MapScreen: View {
             }
         case .display:
             menuCard(width: 250, maxHeight: maxHeight, title: "MAP LAYERS", rows: displayOptions.count) {
-                ForEach(displayOptions, id: \.name) { option in
-                    displayRow(option.icon, option.name)
-                    if option.name != displayOptions.last?.name {
+                ForEach(displayOptions) { option in
+                    displayRow(option)
+                    if option != displayOptions.last {
                         Divider().overlay(.white.opacity(0.12))
                     }
                 }
@@ -675,19 +618,19 @@ struct MapScreen: View {
         .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
     }
 
-    private func displayRow(_ icon: String, _ name: String) -> some View {
+    private func displayRow(_ layer: RadarDisplayLayer) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: icon)
+            Image(systemName: layer.icon)
                 .font(.system(size: 18))
                 .foregroundStyle(.white)
                 .frame(width: 26)
-            Text(name)
+            Text(layer.title)
                 .font(.system(size: 16))
                 .foregroundStyle(.white)
             Spacer(minLength: 8)
             Toggle("", isOn: Binding(
-                get: { viewModel.layers[name] ?? false },
-                set: { viewModel.setLayer(name, $0) }
+                get: { viewModel.layerOn(layer) },
+                set: { viewModel.setLayer(layer, $0) }
             ))
             .labelsHidden()
             .tint(Color(red: 0.20, green: 0.55, blue: 0.98))
@@ -838,16 +781,14 @@ struct MapScreen: View {
         if activeLayers.contains(layer) {
             activeLayers.remove(layer)
         } else {
+            // Hangar layers are single-select: opening one closes the others.
             if layer.opensHangar {
                 for other in RadarLayer.allCases where other != layer && other.opensHangar {
-                    if activeLayers.remove(other) != nil {
-                        RadarLayerHandler.shared.toggle(other, isOn: false)
-                    }
+                    activeLayers.remove(other)
                 }
             }
             activeLayers.insert(layer)
         }
-        RadarLayerHandler.shared.toggle(layer, isOn: activeLayers.contains(layer))
     }
 
     /// Obstacles / Enroute / Arrival / Departure layer toggles (40×40, asset art).
