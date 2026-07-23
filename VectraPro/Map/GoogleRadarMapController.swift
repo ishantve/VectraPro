@@ -128,7 +128,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     /// Rotated name labels drawn along each VOR radial line.
     private func syncRadialNames() {
-        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let showNames = viewModel.layerOn(.radialsNames) && viewModel.layerOn(.radials)
         let key = "\(showNames)-\(viewModel.fixes.count)"
         guard key != radialNameKey else { return }
         radialNameKey = key
@@ -153,12 +153,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     /// Add each zone as a transparent fill polygon (solid border) + center label.
     private func syncZones() {
-        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        let key = viewModel.layerOn(.zone) ? "on-\(viewModel.zones.count)" : "off"
         guard key != zoneKey else { return }
         zoneKey = key
         zoneOverlays.forEach { $0.map = nil }
         zoneOverlays = []
-        guard viewModel.layerOn("Zone") else { return }
+        guard viewModel.layerOn(.zone) else { return }
         for shape in viewModel.zoneShapes() {
             let path = GMSMutablePath()
             shape.coordinates.forEach { path.add($0) }
@@ -181,9 +181,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// Sync fix icon markers and name labels independently so toggling names
     /// never repositions the icon markers.
     private func syncFixes() {
-        let showFixes   = viewModel.layerOn("Fixes")
-        let showHolding = viewModel.layerOn("Holding")
-        let showNames   = viewModel.layerOn("Fixes Names")
+        let showFixes   = viewModel.layerOn(.fixes)
+        let showHolding = viewModel.layerOn(.holding)
+        let showNames   = viewModel.layerOn(.fixesNames)
         let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
         let nameKey = "\(showNames)-\(iconKey)"
 
@@ -270,7 +270,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
 
         // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
-        let radialsOn = viewModel.layerOn("Radials")
+        let radialsOn = viewModel.layerOn(.radials)
         let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             radialLines.forEach { $0.map = nil }

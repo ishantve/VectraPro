@@ -16,22 +16,22 @@ final class MapViewModel: ObservableObject {
     /// Radar center. Defaults to IGI; replaced by the started exercise's
     /// map location so the range rings draw around it.
     private(set) var center: CLLocationCoordinate2D = MapConfiguration.center
-    /// Map-layer visibility (driven by the "Map Layers" menu toggles).
-    @Published var layers: [String: Bool] = [
-        "Radials": true, "Fixes": true, "Fixes Names": true, "Zone": true, "Holding": true,
-        "Trail": true
-    ]
-    func layerOn(_ name: String) -> Bool { layers[name] ?? false }
+    /// Map-layer visibility (driven by the "Map Layers" menu toggles). Keyed by
+    /// `RadarDisplayLayer.rawValue`; use the typed `layerOn`/`setLayer` accessors.
+    @Published private(set) var layers: [String: Bool] = Dictionary(
+        uniqueKeysWithValues: RadarDisplayLayer.allCases
+            .filter { $0.defaultOn }
+            .map { ($0.rawValue, true) }
+    )
 
-    /// Set a layer toggle, cascading to dependent labels when a parent turns on or off.
-    func setLayer(_ name: String, _ value: Bool) {
-        layers[name] = value
-        switch name {
-        case "Fixes":
-            layers["Fixes Names"] = value
-        case "Radials":
-            layers["Radials Names"] = value
-        default: break
+    func layerOn(_ layer: RadarDisplayLayer) -> Bool { layers[layer.rawValue] ?? false }
+
+    /// Set a layer toggle, cascading to its dependent label layer (Fixes → Fixes
+    /// Names, Radials → Radials Names) when the parent turns on or off.
+    func setLayer(_ layer: RadarDisplayLayer, _ value: Bool) {
+        layers[layer.rawValue] = value
+        if let dependent = layer.dependentLayer {
+            layers[dependent.rawValue] = value
         }
     }
 
@@ -63,7 +63,7 @@ final class MapViewModel: ObservableObject {
     /// "Holding racetrack" layer is on, holding aircraft are shown too, orbiting
     /// their fix on the racetrack.
     var radarAircraft: [Aircraft] {
-        guard layerOn("Holding racetrack") else { return aircraft }
+        guard layerOn(.holdingRacetrack) else { return aircraft }
         return aircraft + traffic.filter { $0.holdingName != nil }
     }
 

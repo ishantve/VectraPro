@@ -411,7 +411,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     /// Rotated name labels drawn along each VOR radial line.
     private func syncRadialNames(_ mapView: MLNMapView) {
-        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let showNames = viewModel.layerOn(.radialsNames) && viewModel.layerOn(.radials)
         let key = "\(showNames)-\(viewModel.fixes.count)"
         guard key != radialNameKey else { return }
         radialNameKey = key
@@ -438,12 +438,12 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
     /// Add each zone as a transparent fill polygon + solid border + center label.
     private func syncZones(_ mapView: MLNMapView) {
-        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        let key = viewModel.layerOn(.zone) ? "on-\(viewModel.zones.count)" : "off"
         guard key != zoneKey else { return }
         zoneKey = key
         mapView.removeAnnotations(zoneAnnotations)
         zoneAnnotations = []
-        guard viewModel.layerOn("Zone") else { return }
+        guard viewModel.layerOn(.zone) else { return }
         for shape in viewModel.zoneShapes() {
             // Transparent fill.
             var fillCoords = shape.coordinates
@@ -471,9 +471,9 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Sync fix icon markers and name labels independently so toggling names
     /// never repositions the icon markers.
     private func syncFixes(_ mapView: MLNMapView) {
-        let showFixes   = viewModel.layerOn("Fixes")
-        let showHolding = viewModel.layerOn("Holding")
-        let showNames   = viewModel.layerOn("Fixes Names")
+        let showFixes   = viewModel.layerOn(.fixes)
+        let showHolding = viewModel.layerOn(.holding)
+        let showNames   = viewModel.layerOn(.fixesNames)
         let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
         let nameKey = "\(showNames)-\(iconKey)"
 
@@ -552,7 +552,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         }
 
         // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
-        let radialsOn = viewModel.layerOn("Radials")
+        let radialsOn = viewModel.layerOn(.radials)
         let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             remove(radialLines, from: mapView)
@@ -802,7 +802,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Rebuilds the trail dashed-line source from all aircraft history arrays.
     /// Each aircraft gets one polyline: history points (oldest→newest) + current position.
     private func syncTrailLines() {
-        guard viewModel.layerOn("Trail") else {
+        guard viewModel.layerOn(.trail) else {
             trailLineSource?.shape = nil
             return
         }
@@ -903,7 +903,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     /// Draws one oval racetrack per holding aircraft when the layer is on.
     private func syncHoldingRacetracks() {
         guard let source = holdingRacetrackSource else { return }
-        guard viewModel.layerOn("Holding racetrack") else {
+        guard viewModel.layerOn(.holdingRacetrack) else {
             source.shape = nil
             return
         }
