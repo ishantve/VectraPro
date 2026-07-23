@@ -17,13 +17,6 @@ final class SessionService {
 
     static let shared = SessionService()
 
-    /// The selected organization (single object, not the array).
-    private(set) var organization: Organization?
-    /// The game whose name contains "Vectra" (single object, not the array).
-    private(set) var vectraGame: Game?
-    /// Response from POST /nickName/user (nickname login).
-    private(set) var nickNameUser: NickNameUser?
-
     // Collaborators — injected (default to the shared instances) so this
     // bootstrap flow's dependencies are explicit rather than global reaches.
     private let api: APIManager
@@ -39,7 +32,6 @@ final class SessionService {
         // 1) Organizations → keep the particular organization object.
         let orgs: [Organization] = try await api.request(.organizations)
         let org = orgs.first
-        organization = org
 
         guard let orgID = org?.id, !orgID.isEmpty else {
             throw APIError.noOrganizationAccess
@@ -57,7 +49,6 @@ final class SessionService {
         }) else {
             throw APIError.noApplicationAccess
         }
-        vectraGame = game
 
         // From /games onward, every API call must carry BOTH OrganizationId and
         // gameId — set them as default headers so all subsequent calls include them.
@@ -73,7 +64,6 @@ final class SessionService {
             let user: NickNameUser = try await api.request(
                 .nickNameUser(nickName: nickname)
             )
-            nickNameUser = user
             // Persist the resolved userId into the saved session.
             if !user.userId.isEmpty { auth.setUserId(user.userId) }
         }
