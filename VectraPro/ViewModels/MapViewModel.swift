@@ -447,13 +447,13 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
-    init(physics: AircraftPhysics = .shared,
-         collision: AircraftCollisionDetector = .shared,
-         spawner: AircraftSpawner = .shared) {
-        self.physics   = physics
-        self.collision = collision
-        self.spawner   = spawner
-        aircraft = [spawner.makeRandomAircraft(context: spawnContext)]
+    init(physics: AircraftPhysics? = nil,
+         collision: AircraftCollisionDetector? = nil,
+         spawner: AircraftSpawner? = nil) {
+        self.physics   = physics ?? .shared
+        self.collision = collision ?? .shared
+        self.spawner   = spawner ?? .shared
+        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
     }
 
     // MARK: - Voice commands

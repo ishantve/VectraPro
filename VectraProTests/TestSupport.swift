@@ -25,10 +25,11 @@ enum Fixtures {
 
     /// A runway with `endA` at `a` and `endB` 3 km away on `bearingAB`.
     /// So `RunwayGeometry.threshold(for: designA)` returns `a` with inbound ≈ bearingAB.
-    static func runway(_ designA: String = "09", at a: CLLocationCoordinate2D = center,
+    static func runway(_ designA: String = "09", at a: CLLocationCoordinate2D? = nil,
                        _ designB: String = "27", bearingAB: Double = 90) -> Runway {
-        let b = Geo.offset(from: a, distanceMeters: 3000, bearingDegrees: bearingAB)
-        return Runway(endA: RunwayThreshold(designator: designA, coordinate: a),
+        let origin = a ?? center
+        let b = Geo.offset(from: origin, distanceMeters: 3000, bearingDegrees: bearingAB)
+        return Runway(endA: RunwayThreshold(designator: designA, coordinate: origin),
                       endB: RunwayThreshold(designator: designB, coordinate: b),
                       lengthMeters: 3000)
     }
@@ -40,9 +41,9 @@ enum Fixtures {
     }
 
     static func aircraft(_ callsign: String = "TST1",
-                         at position: CLLocationCoordinate2D = center,
+                         at position: CLLocationCoordinate2D? = nil,
                          heading: Double = 0) -> Aircraft {
-        Aircraft(callsign: callsign, position: position, headingDegrees: heading)
+        Aircraft(callsign: callsign, position: position ?? center, headingDegrees: heading)
     }
 
     static func type(_ icao: String, wtc: String) -> ExerciseDetail.AircraftType {

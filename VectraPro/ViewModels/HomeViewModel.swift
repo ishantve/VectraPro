@@ -26,12 +26,12 @@ final class HomeViewModel: ObservableObject {
     private let exerciseService: ExerciseService
     private let radar: MapViewModel
 
-    init(api: APIManager = .shared,
-         exerciseService: ExerciseService = .shared,
-         radar: MapViewModel = .shared) {
-        self.api = api
-        self.exerciseService = exerciseService
-        self.radar = radar
+    init(api: APIManager? = nil,
+         exerciseService: ExerciseService? = nil,
+         radar: MapViewModel? = nil) {
+        self.api = api ?? .shared
+        self.exerciseService = exerciseService ?? .shared
+        self.radar = radar ?? .shared
     }
 
     /// More pages available to load.

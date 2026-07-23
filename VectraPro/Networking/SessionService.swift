@@ -22,9 +22,9 @@ final class SessionService {
     private let api: APIManager
     private let auth: AuthService
 
-    private init(api: APIManager = .shared, auth: AuthService = .shared) {
-        self.api = api
-        self.auth = auth
+    private init(api: APIManager? = nil, auth: AuthService? = nil) {
+        self.api = api ?? .shared
+        self.auth = auth ?? .shared
     }
 
     /// Call once after a successful login.

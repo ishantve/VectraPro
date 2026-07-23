@@ -16,8 +16,8 @@ final class ExerciseService {
 
     /// Networking client — injected (defaults to the shared instance).
     private let api: APIManager
-    private init(api: APIManager = .shared) {
-        self.api = api
+    private init(api: APIManager? = nil) {
+        self.api = api ?? .shared
     }
 
     /// Fetch the exercise detail. Call on START, before opening the radar.

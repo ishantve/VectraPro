@@ -16,9 +16,9 @@ final class LoginViewModel: ObservableObject {
     private let auth: AuthService
     private let session: SessionService
 
-    init(auth: AuthService = .shared, session: SessionService = .shared) {
-        self.auth = auth
-        self.session = session
+    init(auth: AuthService? = nil, session: SessionService? = nil) {
+        self.auth = auth ?? .shared
+        self.session = session ?? .shared
     }
 
     /// Authenticate (nickname or username/password), then run the post-login
