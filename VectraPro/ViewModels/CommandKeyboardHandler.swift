@@ -16,9 +16,13 @@ import Foundation
 final class CommandKeyboardHandler {
 
     static let shared = CommandKeyboardHandler()
-    private init() {}
 
-    private var radar: MapViewModel { MapViewModel.shared }
+    /// The view-model commands are applied to — injected (defaults to the shared
+    /// instance) rather than reached into globally, so the dependency is explicit.
+    private let radar: MapViewModel
+    private init(radar: MapViewModel = .shared) {
+        self.radar = radar
+    }
 
     // MARK: - Valued (numeric-entry) commands
 

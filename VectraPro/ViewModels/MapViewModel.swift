@@ -334,9 +334,12 @@ final class MapViewModel: ObservableObject {
     private let historySampleTicks = 3      // sample a trail point every N ticks
     private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
 
-    private let physics   = AircraftPhysics.shared
-    private let collision = AircraftCollisionDetector.shared
-    private let spawner   = AircraftSpawner.shared
+    // Simulation collaborators — injected (default to the shared instances) so
+    // MapViewModel can be exercised with test doubles instead of reaching into
+    // globals internally.
+    private let physics:   AircraftPhysics
+    private let collision: AircraftCollisionDetector
+    private let spawner:   AircraftSpawner
 
     /// Context bundle passed to the simulator for all spawn calls.
     private var spawnContext: SpawnContext {
@@ -444,7 +447,12 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
-    init() {
+    init(physics: AircraftPhysics = .shared,
+         collision: AircraftCollisionDetector = .shared,
+         spawner: AircraftSpawner = .shared) {
+        self.physics   = physics
+        self.collision = collision
+        self.spawner   = spawner
         aircraft = [spawner.makeRandomAircraft(context: spawnContext)]
     }
 
