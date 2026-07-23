@@ -76,14 +76,19 @@ final class AuthService: ObservableObject {
     /// De-dupes concurrent refreshes (refresh tokens are often single-use).
     private var refreshTask: Task<String, Error>?
 
-    private init() {
+    /// Networking client — injected (defaults to the shared instance) so the
+    /// dependency is explicit rather than reached into globally.
+    private let api: APIManager
+
+    private init(api: APIManager = .shared) {
+        self.api = api
         session = SessionStore.load()
         // Every request fetches a valid token through this provider.
-        APIManager.shared.tokenProvider = { [weak self] in
+        api.tokenProvider = { [weak self] in
             try await self?.validAccessToken()
         }
         // A 401 mid-request forces a refresh, then the request retries.
-        APIManager.shared.tokenRefresher = { [weak self] in
+        api.tokenRefresher = { [weak self] in
             try await self?.refresh()
         }
     }
@@ -116,7 +121,7 @@ final class AuthService: ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         SessionStore.clear()
-        APIManager.shared.removeDefaultHeader(forKey: "Authorization")
+        api.removeDefaultHeader(forKey: "Authorization")
     }
 
     /// The refresh token is dead — clear everything and signal observers to
@@ -197,7 +202,7 @@ final class AuthService: ObservableObject {
         }
 
         do {
-            let token: TokenResponse = try await APIManager.shared.postForm(config.authURL, form: form)
+            let token: TokenResponse = try await api.postForm(config.authURL, form: form)
             let now = Date()
             let updated = Session(
                 accessToken: token.accessToken,
