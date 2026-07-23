@@ -332,8 +332,8 @@ final class MapViewModel: ObservableObject {
                 enabled.insert(ApproachID(runwayID: runway.id, side: .b))
             }
             // Track which runway ends have an active localizer (intercept-eligible).
-            if strips[0].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[0].stripName ?? "")) }
-            if strips[1].activeLocalizer == true { activeLocs.insert(canonicalRunway(strips[1].stripName ?? "")) }
+            if strips[0].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[0].stripName ?? "")) }
+            if strips[1].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[1].stripName ?? "")) }
         }
         activeLocalizerRunways = activeLocs
 
@@ -549,12 +549,12 @@ final class MapViewModel: ObservableObject {
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
             for case .interceptLocalizer(let runway) in commands {
                 // Reject if that runway end's localizer isn't active.
-                guard activeLocalizerRunways.contains(canonicalRunway(runway)) else {
+                guard activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
                     CommandFeedbackManager.shared.commandError(
                         "Localizer runway \(runway) not active")
                     return
                 }
-                guard isInLocalizerCone(aircraft: ac, runway: runway) else {
+                guard LocalizerGuidanceService.isInCone(aircraft: ac, runway: runway, runways: runways) else {
                     CommandFeedbackManager.shared.commandError(
                         "Unable, not established for localizer runway \(runway)")
                     return
@@ -590,163 +590,6 @@ final class MapViewModel: ObservableObject {
             return
         }
         CommandFeedbackManager.shared.aircraftNotFound()
-    }
-
-    /// Find the runway threshold matching a designator and its inbound (landing)
-    /// course, derived from the actual runway geometry.
-    private func runwayThreshold(for designator: String) -> (threshold: CLLocationCoordinate2D, inbound: Double)? {
-        let target = canonicalRunway(designator)
-        for rwy in runways {
-            if canonicalRunway(rwy.endA.designator) == target {
-                return (rwy.endA.coordinate, Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
-            }
-            if canonicalRunway(rwy.endB.designator) == target {
-                return (rwy.endB.coordinate, Geo.bearing(from: rwy.endB.coordinate, to: rwy.endA.coordinate))
-            }
-        }
-        return nil
-    }
-
-    // MARK: - Localizer intercept guidance
-
-    /// Guides an aircraft cleared to intercept a runway's localizer: aims at a
-    /// point on the extended centreline ahead of it (pure-pursuit), so it turns
-    /// to intercept, aligns with the inbound course, then tracks in to the
-    /// threshold while descending on a ~3° glide path.
-    private func guideLocalizer(_ ac: inout Aircraft) {
-        guard let rwy = ac.interceptRunway, let info = runwayThreshold(for: rwy) else { return }
-        let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)  // threshold → outward
-        let d   = Geo.distanceMeters(from: info.threshold, to: ac.position)
-        let brg = Geo.bearing(from: info.threshold, to: ac.position)
-
-        // Signed along-track distance out on final (foot of perpendicular on the
-        // centre-line). Positive = still out on final; negative = past the threshold.
-        var rel = (brg - approachDir).truncatingRemainder(dividingBy: 360)
-        if rel > 180 { rel -= 360 } else if rel < -180 { rel += 360 }
-        let alongM  = d * cos(rel * .pi / 180)
-        let alongNM = alongM / Distance.metersPerNauticalMile
-
-        // Overshoot / missed approach: the aircraft has crossed the threshold but
-        // is still airborne (too high to land — it could not lose altitude in time,
-        // or the glide never captured). Don't spin it back toward the runway; end
-        // the approach and let it fly straight ahead on the inbound course so the
-        // controller can re-vector. (An actual touchdown is handled by reachedRunway
-        // before we ever get here.)
-        if alongM < -0.2 * Distance.metersPerNauticalMile {
-            ac.interceptRunway = nil
-            ac.turnDirection = nil
-            ac.targetHeading = info.inbound
-            ac.minAltitudeFeet = nil; ac.maxAltitudeFeet = nil; ac.targetAltitudeFeet = nil
-            ac.minSpeedKnots = nil; ac.maxSpeedKnots = nil; ac.targetSpeedKnots = nil
-            return
-        }
-
-        // Pure-pursuit: aim a lead ahead of the foot, toward the threshold, ON the
-        // centre-line, so the aircraft turns to intercept then TRACKS the localizer
-        // (not parallel). A ~2 NM lead (≈ 2.3 × turn radius at 160 kt) captures
-        // firmly without weaving, and is well established before the runway.
-        let leadM = 2.0 * Distance.metersPerNauticalMile
-        let aimAlong = max(0, alongM - leadM)
-        let aim = Geo.offset(from: info.threshold, distanceMeters: aimAlong, bearingDegrees: approachDir)
-        ac.turnDirection = nil
-        ac.targetHeading = Geo.bearing(from: ac.position, to: aim)
-
-        // Descend on a ~3° glide path (≈ 320 ft per NM). Only ever descend.
-        ac.minAltitudeFeet = nil
-        ac.maxAltitudeFeet = nil
-        ac.targetAltitudeFeet = min(ac.altitudeFeet, max(0, alongNM) * 320)
-
-        // Slow to approach speed on final.
-        ac.minSpeedKnots = nil
-        ac.maxSpeedKnots = nil
-        ac.targetSpeedKnots = approachSpeedKnots
-    }
-
-    private let approachSpeedKnots = 160.0
-
-    /// True when a localizer-tracking aircraft has actually touched down: at the
-    /// threshold horizontally AND descended to (near) ground level.
-    private func reachedRunway(_ ac: Aircraft) -> Bool {
-        guard let rwy = ac.interceptRunway, let info = runwayThreshold(for: rwy) else { return false }
-        let atThreshold = Geo.distanceMeters(from: ac.position, to: info.threshold) < 0.4 * Distance.metersPerNauticalMile
-        let onGround = ac.altitudeFeet <= 200
-        return atThreshold && onGround
-    }
-
-    // MARK: - Landing-sequence separation
-
-    /// Wake category of an aircraft from its type's ICAO WTC (L / M / H).
-    private func wakeCategory(_ ac: Aircraft) -> String {
-        guard let code = ac.aircraftType else { return "M" }
-        return aircraftTypes.first { $0.icaoCode?.uppercased() == code.uppercased() }?
-            .icaoWTC?.uppercased() ?? "M"
-    }
-
-    /// Required in-trail separation (NM): 10 if either aircraft is small (Light),
-    /// otherwise 8 for medium/heavy.
-    private func requiredSeparationNM(_ a: Aircraft, _ b: Aircraft) -> Double {
-        (wakeCategory(a) == "L" || wakeCategory(b) == "L") ? 10 : 8
-    }
-
-    /// Flags aircraft on final (localizer) that are closer than the required
-    /// separation to the aircraft ahead of them on the same runway.
-    private func computeSequencingConflicts() {
-        var conflicts = Set<UUID>()
-        let onFinal = aircraft.filter { $0.interceptRunway != nil }
-        let byRunway = Dictionary(grouping: onFinal) { $0.interceptRunway! }
-
-        for (rwy, group) in byRunway {
-            guard group.count >= 2, let info = runwayThreshold(for: rwy) else { continue }
-            // Nearest-to-threshold first (the leader of the sequence).
-            let sorted = group.sorted {
-                Geo.distanceMeters(from: $0.position, to: info.threshold)
-                    < Geo.distanceMeters(from: $1.position, to: info.threshold)
-            }
-            for i in 1..<sorted.count {
-                let leader = sorted[i - 1], follower = sorted[i]
-                let gapNM = Geo.distanceMeters(from: leader.position, to: follower.position)
-                    / Distance.metersPerNauticalMile
-                if gapNM < requiredSeparationNM(leader, follower) {
-                    conflicts.insert(leader.id)
-                    conflicts.insert(follower.id)
-                }
-            }
-        }
-        if sequencingConflictIDs != conflicts { sequencingConflictIDs = conflicts }
-    }
-
-    /// Normalise a designator for matching: digits without leading zeros + a
-    /// lowercased side suffix ("08L" ↔ "8l", "09" ↔ "9").
-    private func canonicalRunway(_ s: String) -> String {
-        let lower = s.lowercased()
-        let digits = lower.prefix { $0.isNumber }
-        let suffix = lower.drop { $0.isNumber }.filter { "lrc".contains($0) }
-        let num = Int(digits).map(String.init) ?? String(digits)
-        return num + suffix
-    }
-
-    /// True if the aircraft can intercept the runway's localizer. Two conditions:
-    ///   1. POSITION — the aircraft sits inside the approach funnel: its bearing
-    ///      from the threshold is within ±30° of the approach direction (the
-    ///      reciprocal of the landing course = the extended centreline).
-    ///   2. HEADING — the aircraft is flying TOWARD the localizer: its heading is
-    ///      within ±30° of the inbound landing course (a valid intercept angle).
-    /// Both must hold — in the cone but pointing the wrong way can't intercept.
-    private func isInLocalizerCone(aircraft: Aircraft, runway designator: String) -> Bool {
-        guard let (threshold, inbound) = runwayThreshold(for: designator) else { return false }
-        let approachDir = (inbound + 180).truncatingRemainder(dividingBy: 360)
-        let bearingToAircraft = Geo.bearing(from: threshold, to: aircraft.position)
-        let inFunnel  = headingWithinCone(bearingToAircraft, of: approachDir, tolerance: 30)
-        let inbound30 = headingWithinCone(aircraft.headingDegrees, of: inbound, tolerance: 30)
-        return inFunnel && inbound30
-    }
-
-    /// Shortest-angular-distance check: is `angle` within `tolerance`° of `target`?
-    private func headingWithinCone(_ angle: Double, of target: Double,
-                                   tolerance: Double) -> Bool {
-        var diff = abs((angle - target).truncatingRemainder(dividingBy: 360))
-        if diff > 180 { diff = 360 - diff }
-        return diff <= tolerance
     }
 
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
@@ -970,9 +813,10 @@ final class MapViewModel: ObservableObject {
             // Auto-turn toward a commanded holding fix (proceed direct).
             steerTowardHold(&aircraft[index])
             // Localizer intercept: align with the centreline, then track it in.
-            guideLocalizer(&aircraft[index])
+            LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
-            if aircraft[index].interceptRunway != nil, reachedRunway(aircraft[index]) {
+            if aircraft[index].interceptRunway != nil,
+               LocalizerGuidanceService.reachedRunway(aircraft[index], runways: runways) {
                 landedIDs.insert(aircraft[index].id)
             }
             if tickCount % historySampleTicks == 0 {
@@ -1089,7 +933,9 @@ final class MapViewModel: ObservableObject {
         if fixConflictIDs != fixConflicts { fixConflictIDs = fixConflicts }
 
         // Landing-sequence separation on final.
-        computeSequencingConflicts()
+        let seqConflicts = SequencingSeparationService.conflicts(
+            among: aircraft, runways: runways, aircraftTypes: aircraftTypes)
+        if sequencingConflictIDs != seqConflicts { sequencingConflictIDs = seqConflicts }
 
         // Advance the exercise clock; finish when we reach the target duration.
         elapsedSeconds += 1
@@ -1178,7 +1024,7 @@ final class MapViewModel: ObservableObject {
             return
         }
         var ac = traffic[idx]
-        let (threshold, heading) = departureThreshold(for: ac)
+        let (threshold, heading) = RunwayGeometry.departureThreshold(for: ac, in: runways, center: center)
 
         ac.position           = threshold
         ac.headingDegrees     = heading
@@ -1250,26 +1096,6 @@ final class MapViewModel: ObservableObject {
             }
         }
         return nil
-    }
-
-    /// Returns the threshold coordinate and takeoff heading for an aircraft's
-    /// assigned runway. Falls back to the first available runway, then the center.
-    private func departureThreshold(for ac: Aircraft) -> (CLLocationCoordinate2D, Double) {
-        for runway in runways {
-            if runway.endA.designator == ac.assignedRunway {
-                return (runway.endA.coordinate,
-                        Geo.bearing(from: runway.endA.coordinate, to: runway.endB.coordinate))
-            }
-            if runway.endB.designator == ac.assignedRunway {
-                return (runway.endB.coordinate,
-                        Geo.bearing(from: runway.endB.coordinate, to: runway.endA.coordinate))
-            }
-        }
-        if let rwy = runways.first {
-            return (rwy.endA.coordinate,
-                    Geo.bearing(from: rwy.endA.coordinate, to: rwy.endB.coordinate))
-        }
-        return (center, 0)
     }
 
     // MARK: - Approach enabling
