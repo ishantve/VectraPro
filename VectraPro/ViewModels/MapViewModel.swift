@@ -1042,8 +1042,9 @@ final class MapViewModel: ObservableObject {
 
     /// Resolves a departure callsign from an already-normalised voice transcript.
     func resolveDepartureCallsign(from normalizedText: String) -> String? {
-        resolveCallsign(from: normalizedText,
-                        among: traffic.filter { $0.category == .departure })
+        CallsignResolver.resolve(from: normalizedText,
+                                 among: traffic.filter { $0.category == .departure },
+                                 airlines: airlines)
     }
 
     /// Resolves a live radar aircraft callsign from an already-normalised voice
@@ -1051,7 +1052,7 @@ final class MapViewModel: ObservableObject {
     /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
         let candidates = aircraft + traffic.filter { $0.holdingName != nil }
-        return resolveCallsign(from: normalizedText, among: candidates)
+        return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines)
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
@@ -1063,39 +1064,6 @@ final class MapViewModel: ObservableObject {
             return
         }
         applyCommands(commands, toAircraftWithID: id)
-    }
-
-    /// Shared resolver: direct ICAO match → spoken airline name + flight number.
-    private func resolveCallsign(from normalizedText: String,
-                                 among candidates: [Aircraft]) -> String? {
-        let text = normalizedText.lowercased()
-        // 1. Direct match — "aic235" or spaced form "aca 29" both match callsign "ACA29".
-        for ac in candidates {
-            let cs = ac.callsign.lowercased()
-            if text.contains(cs) { return ac.callsign }
-            // Spoken callsigns often have a space between letter prefix and digits.
-            let letters = String(cs.prefix(while: { $0.isLetter }))
-            let digits  = String(cs.drop(while:  { $0.isLetter }))
-            if !letters.isEmpty && !digits.isEmpty && text.contains("\(letters) \(digits)") {
-                return ac.callsign
-            }
-        }
-        // 2. Airline spoken name + flight number — e.g. "air india 235".
-        for airline in airlines {
-            guard let spoken = airline.callSign?.lowercased().trimmingCharacters(in: .whitespaces),
-                  !spoken.isEmpty,
-                  let icao = airline.icaoCode?.uppercased(), !icao.isEmpty,
-                  let nameRange = text.range(of: spoken) else { continue }
-            let after  = String(text[nameRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-            let digits = String(after.prefix(while: { $0.isNumber || $0 == " " })
-                                     .filter(\.isNumber).prefix(4))
-            guard !digits.isEmpty else { continue }
-            let candidate = icao + digits
-            if candidates.contains(where: { $0.callsign.uppercased() == candidate }) {
-                return candidate
-            }
-        }
-        return nil
     }
 
     // MARK: - Approach enabling
