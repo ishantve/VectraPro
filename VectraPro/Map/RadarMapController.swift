@@ -769,7 +769,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         var bodyDiamonds: [MLNPolylineFeature] = []
         var noseDiamonds: [MLNPolylineFeature] = []
         for ac in viewModel.aircraft {
-            var bd = diamondCoords(center: ac.position,
+            var bd = ColliderGeometry.diamond(center: ac.position,
                                    forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
                                    headingDeg: ac.headingDegrees)
             bodyDiamonds.append(MLNPolylineFeature(coordinates: &bd, count: UInt(bd.count)))
@@ -777,7 +777,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let noseCenter = Geo.offset(from: ac.position,
                                         distanceMeters: ac.noseOffsetNM * 1852,
                                         bearingDegrees: ac.headingDegrees)
-            var nd = noseRectCoords(center: noseCenter,
+            var nd = ColliderGeometry.noseRect(center: noseCenter,
                                     forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
                                     headingDeg: ac.headingDegrees)
             noseDiamonds.append(MLNPolylineFeature(coordinates: &nd, count: UInt(nd.count)))
@@ -793,7 +793,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             let isRed    = viewModel.redConflictIDs.contains(ac.id)
             let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
             let blink    = viewModel.blinkState
-            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            var coords = ColliderGeometry.circle(center: ac.position, radiusNM: ac.colliderRadiusNM)
             coords.append(coords[0])
             let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
             if isRed && blink        { redFeatures.append(feature) }
@@ -807,7 +807,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
 
         var zoneFeatures: [MLNPolylineFeature] = []
         for ac in viewModel.aircraft where viewModel.zoneConflictIDs.contains(ac.id) {
-            var coords = circleCoords(center: ac.position, radiusNM: ac.colliderRadiusNM)
+            var coords = ColliderGeometry.circle(center: ac.position, radiusNM: ac.colliderRadiusNM)
             coords.append(coords[0])
             zoneFeatures.append(MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count)))
         }
@@ -847,42 +847,6 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     ///   left   → bearing = headingDeg + 270°,distance = sideNM
     /// NM values are converted to metres (× 1852) for Geo.offset.
     /// The first point is repeated at the end to close the polyline on the map.
-    private func diamondCoords(center: CLLocationCoordinate2D,
-                                forwardNM: Double, sideNM: Double,
-                                headingDeg: Double) -> [CLLocationCoordinate2D] {
-        let offsets: [(Double, Double)] = [
-            (forwardNM * 1852, headingDeg),        // front
-            (sideNM    * 1852, headingDeg + 90),   // right
-            (forwardNM * 1852, headingDeg + 180),  // back
-            (sideNM    * 1852, headingDeg + 270),  // left
-        ]
-        var pts = offsets.map { Geo.offset(from: center, distanceMeters: $0.0, bearingDegrees: $0.1) }
-        pts.append(pts[0])   // close the shape
-        return pts
-    }
-
-    /// Builds the 4 geographic corners of a heading-aligned rectangle + closing point.
-    ///
-    /// Strategy: project the centre forward and backward by forwardNM to get the
-    /// front-edge midpoint and back-edge midpoint. Then offset each midpoint left
-    /// and right by sideNM to get the 4 corners.
-    ///   fR = front + sideNM at (heading + 90°)
-    ///   fL = front + sideNM at (heading − 90°)
-    ///   bR = back  + sideNM at (heading + 90°)
-    ///   bL = back  + sideNM at (heading − 90°)
-    /// Returned in order [fL, fR, bR, bL, fL] so the polyline traces the rectangle.
-    private func noseRectCoords(center: CLLocationCoordinate2D,
-                                 forwardNM: Double, sideNM: Double,
-                                 headingDeg: Double) -> [CLLocationCoordinate2D] {
-        let front = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg)
-        let back  = Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg + 180)
-        let fR = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
-        let fL = Geo.offset(from: front, distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
-        let bR = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg + 90)
-        let bL = Geo.offset(from: back,  distanceMeters: sideNM * 1852, bearingDegrees: headingDeg - 90)
-        return [fL, fR, bR, bL, fL]   // closed rectangle
-    }
-
     /// Draws fix colliders: circle for HOLDING fixes, north-pointing triangle for all others.
     ///
     /// Fix icons are screen-space (fixed pixel size). Fix colliders are geographic (NM).
@@ -896,34 +860,6 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         // Fix / holding colliders are hidden from view — collision detection
         // (detectFixConflicts / hold capture) still runs independently.
         fixColliderSource?.shape = nil
-    }
-
-    /// Builds a north-pointing equilateral triangle at `sizeNM` circumradius + closing point.
-    ///
-    /// Vertices are at bearings 0° (top), 120° (bottom-right), 240° (bottom-left),
-    /// all at distance `sizeNM` from centre — this gives a true equilateral triangle.
-    /// The shape is fixed north-up (does not rotate), matching the fix icon on screen.
-    /// NM → metres: × 1852. First point repeated at end to close the polyline.
-    private func triangleColliderCoords(center: CLLocationCoordinate2D,
-                                         sizeNM: Double) -> [CLLocationCoordinate2D] {
-        let top   = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 0)    // north tip
-        let right = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 120)  // bottom-right
-        let left  = Geo.offset(from: center, distanceMeters: sizeNM * 1852, bearingDegrees: 240)  // bottom-left
-        return [top, right, left, top]   // closed triangle
-    }
-
-    /// Approximates a geographic circle as a polygon with `steps` equal-angle segments.
-    ///
-    /// Each point is placed at `radiusNM` from centre along bearing i × (360°/steps).
-    /// 36 steps = 10° per segment — visually smooth at radar zoom levels and
-    /// cheap to compute (avoids true arc rendering).
-    /// NM → metres: 1 NM = 1852 m (international nautical mile definition).
-    private func circleCoords(center: CLLocationCoordinate2D, radiusNM: Double, steps: Int = 36) -> [CLLocationCoordinate2D] {
-        (0..<steps).map { i in
-            Geo.offset(from: center,
-                       distanceMeters: radiusNM * 1852.0,
-                       bearingDegrees: Double(i) * 360.0 / Double(steps))
-        }
     }
 
     private func updateRotation(of annotation: ImageAnnotation, degrees: CGFloat, on mapView: MLNMapView) {
@@ -1019,7 +955,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             selectionRingSource?.shape = nil
             return
         }
-        var coords = circleCoords(center: ac.position, radiusNM: 0.4)
+        var coords = ColliderGeometry.circle(center: ac.position, radiusNM: 0.4)
         coords.append(coords[0])
         let feature = MLNPolylineFeature(coordinates: &coords, count: UInt(coords.count))
         selectionRingSource?.shape = MLNShapeCollectionFeature(shapes: [feature])
