@@ -477,33 +477,18 @@ final class MapViewModel: ObservableObject {
     /// A holding aircraft keeps holding for speed/altitude clearances, but is
     /// released back onto the radar for a vectoring / direct / hold command.
     private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
-        // Validate a localizer-intercept clearance before applying anything: the
-        // aircraft must be inside the runway's approach cone — both its heading
-        // (flying inbound, ±30°) and its position (within the approach funnel,
-        // ±35° of the approach bearing from the threshold).
+        // Validate the whole utterance against the aircraft + scene before applying
+        // anything (altitude/speed envelope, turn limits, hold-fix existence, and
+        // the localizer-intercept checks). On failure, speak the reason and apply
+        // nothing.
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
-            for case .interceptLocalizer(let runway) in commands {
-                // Localizer-intercept clearance is valid only if ALL hold:
-                //   1. that runway end's localizer is active,
-                //   2. the aircraft is established in the approach cone (position
-                //      funnel + inbound heading, both ±30°),
-                //   3. it isn't too high to descend to the runway on the final.
-                // Any failure is rejected with spoken feedback and no command applied.
-                guard activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
-                    CommandFeedbackManager.shared.commandError(
-                        "Localizer runway \(runway) not active")
-                    return
-                }
-                guard LocalizerGuidanceService.isInCone(aircraft: ac, runway: runway, runways: runways) else {
-                    CommandFeedbackManager.shared.commandError(
-                        "Unable, not established for localizer runway \(runway)")
-                    return
-                }
-                guard LocalizerGuidanceService.canReachRunway(aircraft: ac, runway: runway, runways: runways) else {
-                    CommandFeedbackManager.shared.commandError(
-                        "Unable, too high to intercept runway \(runway) — descend first")
-                    return
-                }
+            let context = CommandValidator.Context(
+                runways: runways,
+                activeLocalizerRunways: activeLocalizerRunways,
+                holdingFixes: holdingFixes)
+            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
+                CommandFeedbackManager.shared.commandError(reason)
+                return
             }
         }
 
