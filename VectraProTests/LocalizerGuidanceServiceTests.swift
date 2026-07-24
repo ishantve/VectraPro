@@ -59,6 +59,32 @@ struct LocalizerGuidanceServiceTests {
         #expect(!LocalizerGuidanceService.reachedRunway(lowButFar, runways: [rwy]))
     }
 
+    // MARK: reachability (intercept altitude validation)
+
+    @Test func canReachRunwayWhenLowEnoughForTheFinal() {
+        let (rwy, t) = setup()
+        // 15 NM out, 7000 ft → ~467 ft/NM, well within the descent budget.
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: t, nm: 15, bearing: 270), heading: 90)
+        ac.interceptRunway = "09"; ac.altitudeFeet = 7000
+        #expect(LocalizerGuidanceService.canReachRunway(aircraft: ac, runway: "09", runways: [rwy]))
+    }
+
+    @Test func cannotReachRunwayWhenTooHigh() {
+        let (rwy, t) = setup()
+        // 15 NM out, FL180 → 1200 ft/NM, above the descent budget → rejected.
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: t, nm: 15, bearing: 270), heading: 90)
+        ac.interceptRunway = "09"; ac.altitudeFeet = 18_000
+        #expect(!LocalizerGuidanceService.canReachRunway(aircraft: ac, runway: "09", runways: [rwy]))
+    }
+
+    @Test func cannotReachRunwayWhenPastThreshold() {
+        let (rwy, t) = setup()
+        // Already beyond the threshold → no final remaining.
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: t, nm: 2, bearing: 90), heading: 90)
+        ac.interceptRunway = "09"; ac.altitudeFeet = 1000
+        #expect(!LocalizerGuidanceService.canReachRunway(aircraft: ac, runway: "09", runways: [rwy]))
+    }
+
     // MARK: guidance
 
     @Test func guideSetsApproachSpeedAndDescentOnFinal() {

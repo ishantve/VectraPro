@@ -483,7 +483,12 @@ final class MapViewModel: ObservableObject {
         // ±35° of the approach bearing from the threshold).
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
             for case .interceptLocalizer(let runway) in commands {
-                // Reject if that runway end's localizer isn't active.
+                // Localizer-intercept clearance is valid only if ALL hold:
+                //   1. that runway end's localizer is active,
+                //   2. the aircraft is established in the approach cone (position
+                //      funnel + inbound heading, both ±30°),
+                //   3. it isn't too high to descend to the runway on the final.
+                // Any failure is rejected with spoken feedback and no command applied.
                 guard activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
                     CommandFeedbackManager.shared.commandError(
                         "Localizer runway \(runway) not active")
@@ -492,6 +497,11 @@ final class MapViewModel: ObservableObject {
                 guard LocalizerGuidanceService.isInCone(aircraft: ac, runway: runway, runways: runways) else {
                     CommandFeedbackManager.shared.commandError(
                         "Unable, not established for localizer runway \(runway)")
+                    return
+                }
+                guard LocalizerGuidanceService.canReachRunway(aircraft: ac, runway: runway, runways: runways) else {
+                    CommandFeedbackManager.shared.commandError(
+                        "Unable, too high to intercept runway \(runway) — descend first")
                     return
                 }
             }

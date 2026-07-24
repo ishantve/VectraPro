@@ -29,6 +29,11 @@ enum LocalizerGuidanceService {
     private static let glideFeetPerNM = 320.0
     /// Intercept-cone half-angle for position and heading validation.
     static let coneToleranceDeg = 30.0
+    /// Altitude the aircraft can shed per NM of final at the steeper approach
+    /// descent (~3000 ft/min, ≈ 50 ft/s, at approach speed). Used to reject an
+    /// intercept the aircraft is simply too high to complete. Kept a touch below
+    /// the physics limit (≈1125 ft/NM) so anything accepted actually lands.
+    static let maxDescentFtPerNM = 1100.0
 
     /// Steers a localizer-tracking aircraft for one step.
     static func guide(_ ac: inout Aircraft, runways: [Runway]) {
@@ -111,6 +116,22 @@ enum LocalizerGuidanceService {
         let inFunnel  = headingWithinCone(bearingToAircraft, of: approachDir, tolerance: coneToleranceDeg)
         let inbound30 = headingWithinCone(ac.headingDegrees, of: inbound, tolerance: coneToleranceDeg)
         return inFunnel && inbound30
+    }
+
+    /// True if the aircraft can descend to the runway over the remaining final —
+    /// i.e. it is NOT being cleared to intercept from too high to make it down.
+    /// Rejects when it's past the threshold (no final left) or above the descent
+    /// budget for its along-track distance.
+    static func canReachRunway(aircraft ac: Aircraft, runway designator: String, runways: [Runway]) -> Bool {
+        guard let info = RunwayGeometry.threshold(for: designator, in: runways) else { return false }
+        let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)
+        let d   = Geo.distanceMeters(from: info.threshold, to: ac.position)
+        let brg = Geo.bearing(from: info.threshold, to: ac.position)
+        var rel = (brg - approachDir).truncatingRemainder(dividingBy: 360)
+        if rel > 180 { rel -= 360 } else if rel < -180 { rel += 360 }
+        let alongNM = (d * cos(rel * .pi / 180)) / Distance.metersPerNauticalMile
+        guard alongNM > 0 else { return false }        // no final remaining
+        return ac.altitudeFeet <= alongNM * maxDescentFtPerNM
     }
 
     /// Shortest-angular-distance check: is `angle` within `tolerance`° of `target`?
