@@ -45,6 +45,12 @@ final class AircraftCollisionDetector {
             for j in (i + 1)..<aircraft.count {
                 let a = aircraft[i], b = aircraft[j]
 
+                // Vertically separated (≥ 1000 ft apart) → no conflict of ANY kind:
+                // they can neither collide nor infringe separation, even if their
+                // horizontal footprints overlap. Guard up front so this gates the
+                // body/nose collision too, not just the proximity rings.
+                guard abs(a.altitudeFeet - b.altitudeFeet) < 1000 else { continue }
+
                 let aXY = (x: 0.0, y: 0.0)
                 let bXY = flatXY(origin: a.position, target: b.position)
                 let aH  = a.headingDegrees * .pi / 180
@@ -69,8 +75,6 @@ final class AircraftCollisionDetector {
                 }
 
                 let hDistNM = hypot(bXY.x, bXY.y) / 1852.0
-                let vDistFt = abs(a.altitudeFeet - b.altitudeFeet)
-                guard vDistFt < 1000 else { continue }
                 if hDistNM < (a.colliderRadiusNM + b.colliderRadiusNM) {
                     yellows.insert(a.id); yellows.insert(b.id)
                 }

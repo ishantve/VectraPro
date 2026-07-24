@@ -51,6 +51,14 @@ struct AircraftCollisionDetectorTests {
         #expect(r.yellows.isEmpty && r.reds.isEmpty)
     }
 
+    @Test func verticalSeparationPreventsBodyCollision() {
+        // Footprints overlap horizontally, but 2000 ft apart vertically → no crash.
+        let (a, b) = pair(nm: 0.3, altA: 18_000, altB: 20_000)
+        let r = detector.detectConflicts(in: [a, b])
+        #expect(r.destroyed.isEmpty)
+        #expect(r.yellows.isEmpty && r.reds.isEmpty)
+    }
+
     @Test func overlappingCollidersDestroyBoth() {
         // ~0.3 NM apart, same heading → body diamonds overlap.
         let (a, b) = pair(nm: 0.3)
