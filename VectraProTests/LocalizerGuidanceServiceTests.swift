@@ -76,6 +76,47 @@ struct LocalizerGuidanceServiceTests {
         #expect(ac.targetHeading != nil)
     }
 
+    /// Shortest angular distance between two headings.
+    private func angDiff(_ a: Double, _ b: Double) -> Double {
+        var d = abs((a - b).truncatingRemainder(dividingBy: 360))
+        if d > 180 { d = 360 - d }
+        return d
+    }
+
+    @Test func guideUsesGradualBoundedInterceptWhenFarOffCentreline() {
+        let (rwy, t) = setup()
+        // 10 NM out on final, but 8 NM off to the side — a big cross-track.
+        let foot = Fixtures.offsetNM(from: t, nm: 10, bearing: 270)
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: foot, nm: 8, bearing: 0), heading: 90)
+        ac.interceptRunway = "09"
+
+        LocalizerGuidanceService.guide(&ac, runways: [rwy])
+
+        // Must be a gradual ≤30° intercept, NOT a near-perpendicular swing.
+        #expect(ac.targetHeading != nil)
+        #expect(angDiff(ac.targetHeading!, 90) <= 31)
+        #expect(angDiff(ac.targetHeading!, 90) > 5)     // still actively intercepting
+    }
+
+    @Test func guideEasesInterceptAngleNearCentreline() {
+        let (rwy, t) = setup()
+        // Only 0.3 NM off the centre-line → a small, proportional correction.
+        let foot = Fixtures.offsetNM(from: t, nm: 5, bearing: 270)
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: foot, nm: 0.3, bearing: 0), heading: 90)
+        ac.interceptRunway = "09"
+
+        LocalizerGuidanceService.guide(&ac, runways: [rwy])
+        #expect(angDiff(ac.targetHeading!, 90) < 15)    // well under the 30° cap
+    }
+
+    @Test func guideTracksInboundWhenOnCentreline() {
+        let (rwy, t) = setup()
+        var ac = Fixtures.aircraft(at: Fixtures.offsetNM(from: t, nm: 6, bearing: 270), heading: 90)
+        ac.interceptRunway = "09"
+        LocalizerGuidanceService.guide(&ac, runways: [rwy])
+        #expect(angDiff(ac.targetHeading!, 90) < 1)     // essentially on the inbound course
+    }
+
     @Test func guideAbandonsApproachAfterOvershoot() {
         let (rwy, t) = setup()
         // Past the threshold (east of it) but still airborne.

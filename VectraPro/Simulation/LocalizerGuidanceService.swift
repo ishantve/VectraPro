@@ -18,9 +18,13 @@ enum LocalizerGuidanceService {
     /// Speed the aircraft is slowed to on final.
     static let approachSpeedKnots = 160.0
 
-    /// Pure-pursuit lookahead. ~2 NM (≈ 2.3 × turn radius at 160 kt) captures
-    /// firmly onto the centreline without weaving, established before the runway.
+    /// Minimum pure-pursuit lookahead — used once the aircraft is on/near the
+    /// centreline. ~2 NM (≈ 2.3 × turn radius at 160 kt) tracks it firmly.
     private static let interceptLeadNM = 2.0
+    /// Maximum intercept angle while still off the centreline. The lookahead is
+    /// stretched so the aim never demands a turn sharper than this — a gradual
+    /// straight intercept instead of a near-perpendicular swing.
+    private static let maxInterceptDeg = 30.0
     /// Glide-path descent gradient (≈ 3°).
     private static let glideFeetPerNM = 320.0
     /// Intercept-cone half-angle for position and heading validation.
@@ -56,14 +60,21 @@ enum LocalizerGuidanceService {
             return
         }
 
-        // Pure-pursuit: aim a lead ahead of the foot, toward the threshold, ON the
-        // centre-line, so the aircraft turns to intercept then TRACKS the localizer
-        // (not parallel).
-        let leadM = interceptLeadNM * Distance.metersPerNauticalMile
-        let aimAlong = max(0, alongM - leadM)
-        let aim = Geo.offset(from: info.threshold, distanceMeters: aimAlong, bearingDegrees: approachDir)
+        // Steer onto the centre-line at a BOUNDED intercept angle. The angle is
+        // the pure-pursuit angle for a ~2 NM lookahead, capped at maxInterceptDeg:
+        // far off the localizer that gives a gradual ~30° intercept (not a hard
+        // near-perpendicular turn), and it eases smoothly to 0 as the cross-track
+        // shrinks, so the aircraft rolls out aligned and tracks the centre-line.
+        // Signed cross-track; its sign biases the inbound course to whichever
+        // side steers the aircraft back toward the centre-line.
+        let crossNM = (d * sin(rel * .pi / 180)) / Distance.metersPerNauticalMile
+        let rawAngle = atan(abs(crossNM) / interceptLeadNM) * 180 / .pi
+        let interceptAngle = min(maxInterceptDeg, rawAngle)
+        let signedAngle = crossNM >= 0 ? interceptAngle : -interceptAngle
         ac.turnDirection = nil
-        ac.targetHeading = Geo.bearing(from: ac.position, to: aim)
+        ac.targetHeading = ((info.inbound + signedAngle)
+            .truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360)
 
         // Descend on the glide path. Only ever descend.
         ac.minAltitudeFeet = nil
