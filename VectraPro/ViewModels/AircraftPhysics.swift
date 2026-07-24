@@ -19,6 +19,10 @@ final class AircraftPhysics {
     private let decelKnotsPerSecond      = 6.0    // throttle + drag (faster)
     private let climbFeetPerSecond       = 33.0   // 2000 ft/min
     private let descentFeetPerSecond     = 33.0   // 2000 ft/min
+    /// Steeper descent while tracking a localizer, so an aircraft cleared to
+    /// intercept from above can actually capture the glide and reach the runway
+    /// instead of arriving too high and going around.
+    private let approachDescentFeetPerSecond = 50.0   // ~3000 ft/min
     private let takeoffAccelKnotsPerSec  = 8.0    // full takeoff thrust
     private let rotationSpeedKnots       = 150.0  // Vr — transition to climbout
     private let climboutAltitudeFt       = 1000.0 // feet AGL — end of climbout phase
@@ -188,7 +192,9 @@ final class AircraftPhysics {
     private func adjustAltitude(_ aircraft: inout Aircraft, dt: Double) {
         guard let target = aircraft.targetAltitudeFeet else { return }
         let diff = target - aircraft.altitudeFeet
-        let step = (diff > 0 ? climbFeetPerSecond : descentFeetPerSecond) * dt
+        let descentRate = aircraft.interceptRunway != nil ? approachDescentFeetPerSecond
+                                                          : descentFeetPerSecond
+        let step = (diff > 0 ? climbFeetPerSecond : descentRate) * dt
         if abs(diff) <= step {
             aircraft.altitudeFeet = target; aircraft.targetAltitudeFeet = nil
         } else {
