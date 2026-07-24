@@ -31,11 +31,32 @@ enum CommandValidator {
     static let minSpeedKnots  = 100.0
     static let maxSpeedKnots  = 350.0
     static let maxRelativeTurnDeg = 180.0
+    /// Below the transition altitude, indicated speed is capped (real ATC rule).
+    static let transitionAltitudeFeet = 10_000.0
+    static let speedLimitBelowTransition = 250.0
 
     /// Validate a whole utterance for one aircraft. Returns `.ok` or the first
     /// failure (so the pilot hears one clear reason).
     static func validate(_ commands: [AircraftCommand], for aircraft: Aircraft,
                          context: Context) -> Result {
+
+        // V9 — an aircraft still on the takeoff roll isn't under control yet
+        // (its heading is locked to the runway); reject the whole utterance.
+        if case .groundRoll = aircraft.takeoffState {
+            return .rejected("Unable, aircraft is on the takeoff roll")
+        }
+
+        // V11 — reject mutually-exclusive instructions issued together.
+        if contains(commands, .hold) && contains(commands, .intercept) {
+            return .rejected("Unable, cannot hold and intercept at once")
+        }
+        if contains(commands, .presentHeading) && contains(commands, .turn) {
+            return .rejected("Unable, conflicting heading instructions")
+        }
+        if contains(commands, .flightLevel) && contains(commands, .block) {
+            return .rejected("Unable, conflicting altitude instructions")
+        }
+
         for command in commands {
             switch command {
 
@@ -56,6 +77,10 @@ enum CommandValidator {
                 guard (minSpeedKnots...maxSpeedKnots).contains(kt) else {
                     return .rejected("Unable, speed \(Int(kt)) is outside limits")
                 }
+                // V8 — 250 kt maximum below the transition altitude.
+                if kt > speedLimitBelowTransition, aircraft.altitudeFeet < transitionAltitudeFeet {
+                    return .rejected("Unable, 250 knots maximum below flight level 100")
+                }
 
             // MARK: vectoring (absolute headings are bounded 1…360 at parse)
             case .relativeTurn(let degrees, _):
@@ -65,12 +90,18 @@ enum CommandValidator {
 
             // MARK: hold — the fix must exist and be a holding fix
             case .hold(let fix):
+                guard aircraft.takeoffState == nil else {
+                    return .rejected("Unable, aircraft is still departing")
+                }
                 guard FixLookup.fix(named: fix, in: context.holdingFixes) != nil else {
                     return .rejected("Unable, holding fix \(fix) not found")
                 }
 
             // MARK: localizer intercept — active, established, and reachable
             case .interceptLocalizer(let runway):
+                guard aircraft.takeoffState == nil else {
+                    return .rejected("Unable, aircraft is still departing")
+                }
                 guard context.activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
                     return .rejected("Localizer runway \(runway) not active")
                 }
@@ -88,5 +119,26 @@ enum CommandValidator {
             }
         }
         return .ok
+    }
+
+    // MARK: - Command-kind matching (for the mutual-exclusion checks)
+
+    private enum Kind { case hold, intercept, presentHeading, turn, flightLevel, block }
+
+    private static func contains(_ commands: [AircraftCommand], _ kind: Kind) -> Bool {
+        commands.contains { cmd in
+            switch (kind, cmd) {
+            case (.hold, .hold),
+                 (.intercept, .interceptLocalizer),
+                 (.presentHeading, .presentHeading),
+                 (.flightLevel, .flightLevel),
+                 (.block, .altitudeBlock):
+                return true
+            case (.turn, .heading), (.turn, .headingTurn), (.turn, .relativeTurn):
+                return true
+            default:
+                return false
+            }
+        }
     }
 }

@@ -94,6 +94,48 @@ struct CommandValidatorTests {
         #expect(r == .ok)
     }
 
+    // MARK: V8 — 250 kt below the transition altitude
+
+    @Test func highSpeedBelowTransitionRejected() {
+        var low = Fixtures.aircraft(); low.altitudeFeet = 8_000
+        #expect(isRejected(CommandValidator.validate([.speed(300)], for: low, context: context())))
+    }
+
+    @Test func highSpeedAboveTransitionIsOK() {
+        var high = Fixtures.aircraft(); high.altitudeFeet = 18_000
+        #expect(CommandValidator.validate([.speed(300)], for: high, context: context()) == .ok)
+    }
+
+    // MARK: V9 — aircraft state
+
+    @Test func commandsRejectedDuringTakeoffRoll() {
+        var rolling = Fixtures.aircraft()
+        rolling.takeoffState = .groundRoll(runwayHeading: 90)
+        #expect(isRejected(CommandValidator.validate([.speed(200)], for: rolling, context: context())))
+    }
+
+    @Test func holdRejectedWhileDeparting() {
+        var climbing = Fixtures.aircraft()
+        climbing.takeoffState = .climbout
+        let ctx = context(holdingFixes: [Fixtures.fix("RE-01")])
+        #expect(isRejected(CommandValidator.validate([.hold("re01")], for: climbing, context: ctx)))
+    }
+
+    // MARK: V11 — contradictory instructions
+
+    @Test func conflictingHeadingInstructionsRejected() {
+        let r = CommandValidator.validate([.presentHeading, .heading(90)],
+                                          for: Fixtures.aircraft(), context: context())
+        #expect(isRejected(r))
+    }
+
+    @Test func holdAndInterceptTogetherRejected() {
+        let ctx = context(holdingFixes: [Fixtures.fix("RE-01")])
+        let r = CommandValidator.validate([.hold("re01"), .interceptLocalizer(runway: "09")],
+                                          for: Fixtures.aircraft(), context: ctx)
+        #expect(isRejected(r))
+    }
+
     // MARK: all-or-nothing
 
     @Test func firstFailureInUtteranceIsReported() {
