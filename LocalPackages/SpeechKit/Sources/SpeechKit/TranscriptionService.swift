@@ -8,15 +8,17 @@
 
 import Foundation
 
-enum TranscriptionError: Error {
+public enum TranscriptionError: Error {
     case notConfigured
     case invalidURL
     case badResponse
 }
 
-struct TranscriptionService {
+public struct TranscriptionService {
 
-    func transcribe(wavURL: URL) async throws -> String {
+    public init() {}
+
+    public func transcribe(wavURL: URL) async throws -> String {
         let config = AzureConfiguration.shared
 
         guard !config.azureSubscriptionKey.isEmpty, !config.azureEndpointId.isEmpty else {

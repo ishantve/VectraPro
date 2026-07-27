@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol LiveTranscribing: AnyObject {
+public protocol LiveTranscribing: AnyObject {
     /// Called on the main thread with the latest transcript as it streams in.
     var onPartial: ((String) -> Void)? { get set }
 

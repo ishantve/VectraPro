@@ -8,18 +8,20 @@
 
 import AVFoundation
 
-final class AudioRecorder {
+public final class AudioRecorder {
 
     private var recorder: AVAudioRecorder?
-    private(set) var fileURL: URL?
+    public private(set) var fileURL: URL?
 
-    func requestPermission(_ completion: @escaping (Bool) -> Void) {
+    public init() {}
+
+    public func requestPermission(_ completion: @escaping (Bool) -> Void) {
         AVAudioApplication.requestRecordPermission { granted in
             DispatchQueue.main.async { completion(granted) }
         }
     }
 
-    func start() throws {
+    public func start() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .default)
         try session.setActive(true)
@@ -45,7 +47,7 @@ final class AudioRecorder {
 
     /// Stop recording and return the finished file.
     @discardableResult
-    func stop() -> URL? {
+    public func stop() -> URL? {
         recorder?.stop()
         recorder = nil
         try? AVAudioSession.sharedInstance().setActive(false)
@@ -53,7 +55,7 @@ final class AudioRecorder {
     }
 
     /// Stop and discard the recording.
-    func cancel() {
+    public func cancel() {
         recorder?.stop()
         recorder = nil
         if let url = fileURL { try? FileManager.default.removeItem(at: url) }

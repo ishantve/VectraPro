@@ -8,9 +8,9 @@
 
 import Foundation
 
-enum LiveSpeechRecognizerFactory {
+public enum LiveSpeechRecognizerFactory {
 
-    static func make() -> LiveTranscribing? {
+    public static func make() -> LiveTranscribing? {
         #if canImport(MicrosoftCognitiveServicesSpeech)
         return AzureLiveRecognizer()
         #else
