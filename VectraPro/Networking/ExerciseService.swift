@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import NetworkKit
 
 @MainActor
 final class ExerciseService {
@@ -23,7 +24,7 @@ final class ExerciseService {
     /// Fetch the exercise detail. Call on START, before opening the radar.
     func loadDetail(exerciseID: String) async throws -> ExerciseDetail {
         let response: ExerciseDetailResponse = try await api.request(
-            .exerciseDetail(exerciseID: exerciseID)
+            Endpoint.exerciseDetail(exerciseID: exerciseID)
         )
         guard let detail = response.record else {
             throw APIError.invalidResponse

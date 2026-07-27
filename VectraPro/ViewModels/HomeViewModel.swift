@@ -6,6 +6,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 @MainActor
@@ -85,7 +86,7 @@ final class HomeViewModel: ObservableObject {
 
     private func fetch(page: Int) async throws -> ExercisesResponse {
         try await api.request(
-            .exercises(pageNo: page, pageSize: pageSize, search: "")
+            Endpoint.exercises(pageNo: page, pageSize: pageSize, search: "")
         )
     }
 }

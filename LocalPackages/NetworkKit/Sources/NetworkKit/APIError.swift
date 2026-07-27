@@ -1,13 +1,16 @@
 //
 //  APIError.swift
-//  VectraPro
+//  NetworkKit
 //
-//  Errors surfaced by APIManager.
+//  Errors surfaced by APIManager. The transport cases (invalidURL, requestFailed,
+//  unacceptableStatus, …) are generic; a few domain cases (organization / access)
+//  are kept here so the app has a single networking error type — move them app-
+//  side if NetworkKit is reused elsewhere.
 //
 
 import Foundation
 
-enum APIError: LocalizedError {
+public enum APIError: LocalizedError {
     case invalidURL
     case encodingFailed(Error)
     case requestFailed(Error)
@@ -22,7 +25,7 @@ enum APIError: LocalizedError {
     case unacceptableStatus(code: Int, data: Data)
     case decodingFailed(Error)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidURL:
             return "The request URL was invalid."
@@ -46,7 +49,7 @@ enum APIError: LocalizedError {
     }
 
     /// HTTP status code when the failure was a non-2xx response.
-    var statusCode: Int? {
+    public var statusCode: Int? {
         if case .unacceptableStatus(let code, _) = self { return code }
         return nil
     }

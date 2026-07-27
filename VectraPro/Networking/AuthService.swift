@@ -12,6 +12,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 /// OAuth2 token response from the AuthURL.

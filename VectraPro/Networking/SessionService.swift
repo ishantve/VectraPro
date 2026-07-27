@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import NetworkKit
 
 @MainActor
 final class SessionService {
@@ -30,7 +31,7 @@ final class SessionService {
     /// Call once after a successful login.
     func loadInitialData() async throws {
         // 1) Organizations → keep the particular organization object.
-        let orgs: [Organization] = try await api.request(.organizations)
+        let orgs: [Organization] = try await api.request(Endpoint.organizations)
         let org = orgs.first
 
         guard let orgID = org?.id, !orgID.isEmpty else {
@@ -39,7 +40,7 @@ final class SessionService {
 
         // 2) Games — org id is in the path; OrganizationId header is also sent.
         let response: GamesResponse = try await api.request(
-            .games(orgID: orgID),
+            Endpoint.games(orgID: orgID),
             headers: ["OrganizationId": orgID]
         )
 
@@ -62,7 +63,7 @@ final class SessionService {
         //    OrganizationId + gameId are sent automatically (default headers).
         if let nickname = auth.nickname, !nickname.isEmpty {
             let user: NickNameUser = try await api.request(
-                .nickNameUser(nickName: nickname)
+                Endpoint.nickNameUser(nickName: nickname)
             )
             // Persist the resolved userId into the saved session.
             if !user.userId.isEmpty { auth.setUserId(user.userId) }

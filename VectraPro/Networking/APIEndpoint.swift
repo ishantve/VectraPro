@@ -12,12 +12,13 @@
 //        // App launch (before any other API call):
 //        try await APIEnvironment.bootstrap()
 //
-//        let flights: [Flight] = try await APIManager.shared.request(.flights)
-//        let created: Flight   = try await APIManager.shared.request(.createFlight, body: newFlight)
-//        try await APIManager.shared.request(.deleteFlight(id: "AI302"))
+//        let flights: [Flight] = try await APIManager.shared.request(Endpoint.flights)
+//        let created: Flight   = try await APIManager.shared.request(Endpoint.createFlight, body: newFlight)
+//        try await APIManager.shared.request(Endpoint.deleteFlight(id: "AI302"))
 //
 
 import Foundation
+import NetworkKit
 
 // MARK: - Environment / base URL (resolved from UDC)
 
@@ -145,8 +146,9 @@ struct UDCConfig: Decodable {
 // MARK: - Endpoints
 
 /// Every API route lives here. Each case maps to a `path`, an HTTP `method`,
-/// and (optionally) query items. Add new routes by adding a case below.
-enum Endpoint {
+/// and (optionally) query items. Conforms to NetworkKit's `APIEndpoint`, so it
+/// can be passed straight to `APIManager.request(_:)`.
+enum Endpoint: APIEndpoint {
     // Post-login bootstrap.
     case organizations
     case games(orgID: String)
@@ -219,67 +221,6 @@ enum Endpoint {
             ]
         default:
             return nil
-        }
-    }
-}
-
-// MARK: - APIManager + Endpoint
-
-extension APIManager {
-
-    /// Bodyless request (GET / DELETE) → decoded response.
-    func request<Response: Decodable>(
-        _ endpoint: Endpoint,
-        headers: [String: String] = [:]
-    ) async throws -> Response {
-        try await request(endpoint.path,
-                          method: endpoint.method,
-                          query: endpoint.query,
-                          headers: headers)
-    }
-
-    /// Request with an Encodable body (POST / PUT / PATCH) → decoded response.
-    func request<Body: Encodable, Response: Decodable>(
-        _ endpoint: Endpoint,
-        body: Body,
-        headers: [String: String] = [:]
-    ) async throws -> Response {
-        try await request(endpoint.path,
-                          method: endpoint.method,
-                          body: body,
-                          query: endpoint.query,
-                          headers: headers)
-    }
-
-    /// Request with an Encodable body, ignoring the response body.
-    @discardableResult
-    func request<Body: Encodable>(
-        _ endpoint: Endpoint,
-        body: Body,
-        headers: [String: String] = [:]
-    ) async throws -> Data {
-        try await requestData(endpoint.path,
-                              method: endpoint.method,
-                              body: body,
-                              query: endpoint.query,
-                              headers: headers)
-    }
-
-    /// Bodyless request, ignoring the response body (e.g. DELETE).
-    @discardableResult
-    func request(
-        _ endpoint: Endpoint,
-        headers: [String: String] = [:]
-    ) async throws -> Data {
-        switch endpoint.method {
-        case .delete:
-            return try await delete(endpoint.path, query: endpoint.query, headers: headers)
-        default:
-            let data: Data = try await request(endpoint.path,
-                                               method: endpoint.method,
-                                               query: endpoint.query,
-                                               headers: headers)
-            return data
         }
     }
 }

@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import NetworkKit
 
 enum AppRoute: Hashable {
     case login
