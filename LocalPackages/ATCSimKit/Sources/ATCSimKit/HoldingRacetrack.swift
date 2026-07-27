@@ -19,16 +19,16 @@ import CoreLocation
 import GeoKit
 import Foundation
 
-struct HoldingRacetrack {
+public struct HoldingRacetrack {
 
-    let fix: CLLocationCoordinate2D
-    let inboundCourse: Double     // degrees, direction of travel toward the fix
-    let radiusM: Double           // turn radius (metres)
-    let legM: Double              // straight-leg length (metres, 1-minute rule)
+    public let fix: CLLocationCoordinate2D
+    public let inboundCourse: Double     // degrees, direction of travel toward the fix
+    public let radiusM: Double           // turn radius (metres)
+    public let legM: Double              // straight-leg length (metres, 1-minute rule)
 
     /// Build the geometry from a holding speed (Rate-1 / 30°-bank turn radius,
     /// 1-minute legs).
-    init(fix: CLLocationCoordinate2D, inboundCourse: Double, speedKnots: Double) {
+    public init(fix: CLLocationCoordinate2D, inboundCourse: Double, speedKnots: Double) {
         let speed = max(speedKnots, 1)
         let neededBank    = atan(speed / 362.1) * 180 / .pi
         let bank          = min(neededBank, 30)
@@ -40,14 +40,14 @@ struct HoldingRacetrack {
     }
 
     /// Build the geometry from explicit, fixed dimensions.
-    init(fix: CLLocationCoordinate2D, inboundCourse: Double, radiusM: Double, legM: Double) {
+    public init(fix: CLLocationCoordinate2D, inboundCourse: Double, radiusM: Double, legM: Double) {
         self.fix = fix
         self.inboundCourse = inboundCourse
         self.radiusM = radiusM
         self.legM = legM
     }
 
-    var totalLength: Double { 2 * legM + 2 * .pi * radiusM }
+    public var totalLength: Double { 2 * legM + 2 * .pi * radiusM }
 
     // MARK: - Key points
 
@@ -64,7 +64,7 @@ struct HoldingRacetrack {
 
     /// Position + heading at distance `s` along the loop.
     /// s = 0 is at the fix, entering turn 1 (flight order: turn1 → outbound → turn2 → inbound).
-    func sample(at s0: Double) -> (position: CLLocationCoordinate2D, heading: Double) {
+    public func sample(at s0: Double) -> (position: CLLocationCoordinate2D, heading: Double) {
         let total = totalLength
         var s = s0.truncatingRemainder(dividingBy: total)
         if s < 0 { s += total }
@@ -90,7 +90,7 @@ struct HoldingRacetrack {
     /// Progress fraction (0…1) of the loop point nearest `point`, searched in a
     /// window around `hint`. Used to re-anchor an aircraft onto a resized loop
     /// each tick so a speed change doesn't make it jump.
-    func nearestProgress(to point: CLLocationCoordinate2D, near hint: Double,
+    public func nearestProgress(to point: CLLocationCoordinate2D, near hint: Double,
                          window: Double = 0.18, samples: Int = 48) -> Double {
         let total = totalLength
         var best = hint
@@ -106,7 +106,7 @@ struct HoldingRacetrack {
     }
 
     /// Closed outline of the racetrack for drawing.
-    func outline(segments: Int = 96) -> [CLLocationCoordinate2D] {
+    public func outline(segments: Int = 96) -> [CLLocationCoordinate2D] {
         (0...segments).map { sample(at: totalLength * Double($0) / Double(segments)).position }
     }
 

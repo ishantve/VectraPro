@@ -7,6 +7,7 @@
 //
 
 import CoreLocation
+import ATCSimKit
 import GeoKit
 import Foundation
 

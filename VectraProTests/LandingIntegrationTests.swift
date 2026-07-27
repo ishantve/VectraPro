@@ -8,6 +8,7 @@
 //
 
 import Testing
+import ATCSimKit
 import GeoKit
 import CoreLocation
 @testable import VectraPro

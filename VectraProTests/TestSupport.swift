@@ -6,6 +6,7 @@
 //
 
 import CoreLocation
+import ATCSimKit
 import GeoKit
 @testable import VectraPro
 

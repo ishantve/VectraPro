@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import ATCSimKit
 
 @MainActor
 final class CommandKeyboardHandler {

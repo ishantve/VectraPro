@@ -11,13 +11,13 @@
 import CoreLocation
 import GeoKit
 
-enum HoldingController {
+public enum HoldingController {
 
     /// Radius (metres) within which an inbound aircraft is captured by a hold.
-    static let captureRadiusM = 1.0 * Distance.metersPerNauticalMile
+    public static let captureRadiusM = 1.0 * Distance.metersPerNauticalMile
 
     /// Continuously steer an aircraft's heading toward its commanded hold fix.
-    static func steer(_ aircraft: inout Aircraft, fixes: [ExerciseDetail.Fix]) {
+    public static func steer(_ aircraft: inout Aircraft, fixes: [Fix]) {
         guard let name = aircraft.holdingTargetName,
               let fixPos = FixLookup.position(named: name, in: fixes) else { return }
         aircraft.turnDirection = nil
@@ -28,8 +28,8 @@ enum HoldingController {
     /// into the holding hangar (as hangar traffic tagged with the fix name).
     /// Returns the captured aircraft ids (empty if none) — the caller clears the
     /// selection if needed and arms a refill for the freed radar slot.
-    static func capture(aircraft: inout [Aircraft], traffic: inout [Aircraft],
-                        fixes: [ExerciseDetail.Fix]) -> Set<UUID> {
+    public static func capture(aircraft: inout [Aircraft], traffic: inout [Aircraft],
+                        fixes: [Fix]) -> Set<UUID> {
         var capturedIDs = Set<UUID>()
         for index in aircraft.indices {
             guard let name = aircraft[index].holdingTargetName,
@@ -67,7 +67,7 @@ enum HoldingController {
     /// Fly the holding racetracks for one step. Runs every tick regardless of the
     /// layer's visibility, so an aircraft keeps orbiting while hidden and
     /// reappears at its up-to-date position when the layer is turned back on.
-    static func flyRacetracks(traffic: inout [Aircraft], fixes: [ExerciseDetail.Fix],
+    public static func flyRacetracks(traffic: inout [Aircraft], fixes: [Fix],
                               physics: AircraftPhysics, dt: Double,
                               sampleHistory: Bool, maxHistory: Int) {
         for i in traffic.indices where traffic[i].holdingName != nil {

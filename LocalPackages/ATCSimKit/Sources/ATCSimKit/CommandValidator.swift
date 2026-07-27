@@ -10,34 +10,40 @@
 
 import Foundation
 
-enum CommandValidator {
+public enum CommandValidator {
 
     /// Scene inputs the validator needs (passed in, so this stays testable).
-    struct Context {
-        let runways: [Runway]
-        let activeLocalizerRunways: Set<String>
-        let holdingFixes: [ExerciseDetail.Fix]
+    public struct Context {
+        public let runways: [Runway]
+        public let activeLocalizerRunways: Set<String>
+        public let holdingFixes: [Fix]
+
+        public init(runways: [Runway], activeLocalizerRunways: Set<String>, holdingFixes: [Fix]) {
+            self.runways = runways
+            self.activeLocalizerRunways = activeLocalizerRunways
+            self.holdingFixes = holdingFixes
+        }
     }
 
-    enum Result: Equatable {
+    public enum Result: Equatable {
         case ok
         case rejected(String)   // phrase for spoken feedback
     }
 
     // MARK: Operational envelope
 
-    static let minFlightLevel = 10       // FL010 (1 000 ft)
-    static let maxFlightLevel = 450      // FL450
-    static let minSpeedKnots  = 100.0
-    static let maxSpeedKnots  = 350.0
-    static let maxRelativeTurnDeg = 180.0
+    public static let minFlightLevel = 10       // FL010 (1 000 ft)
+    public static let maxFlightLevel = 450      // FL450
+    public static let minSpeedKnots  = 100.0
+    public static let maxSpeedKnots  = 350.0
+    public static let maxRelativeTurnDeg = 180.0
     /// Below the transition altitude, indicated speed is capped (real ATC rule).
-    static let transitionAltitudeFeet = 10_000.0
-    static let speedLimitBelowTransition = 250.0
+    public static let transitionAltitudeFeet = 10_000.0
+    public static let speedLimitBelowTransition = 250.0
 
     /// Validate a whole utterance for one aircraft. Returns `.ok` or the first
     /// failure (so the pilot hears one clear reason).
-    static func validate(_ commands: [AircraftCommand], for aircraft: Aircraft,
+    public static func validate(_ commands: [AircraftCommand], for aircraft: Aircraft,
                          context: Context) -> Result {
 
         // V9 — an aircraft still on the takeoff roll isn't under control yet

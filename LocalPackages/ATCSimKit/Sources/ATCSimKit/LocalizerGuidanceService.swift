@@ -14,10 +14,10 @@
 import CoreLocation
 import GeoKit
 
-enum LocalizerGuidanceService {
+public enum LocalizerGuidanceService {
 
     /// Speed the aircraft is slowed to on final.
-    static let approachSpeedKnots = 160.0
+    public static let approachSpeedKnots = 160.0
 
     /// Minimum pure-pursuit lookahead — used once the aircraft is on/near the
     /// centreline. ~2 NM (≈ 2.3 × turn radius at 160 kt) tracks it firmly.
@@ -29,15 +29,15 @@ enum LocalizerGuidanceService {
     /// Glide-path descent gradient (≈ 3°).
     private static let glideFeetPerNM = 320.0
     /// Intercept-cone half-angle for position and heading validation.
-    static let coneToleranceDeg = 30.0
+    public static let coneToleranceDeg = 30.0
     /// Altitude the aircraft can shed per NM of final at the steeper approach
     /// descent (~3000 ft/min, ≈ 50 ft/s, at approach speed). Used to reject an
     /// intercept the aircraft is simply too high to complete. Kept a touch below
     /// the physics limit (≈1125 ft/NM) so anything accepted actually lands.
-    static let maxDescentFtPerNM = 1100.0
+    public static let maxDescentFtPerNM = 1100.0
 
     /// Steers a localizer-tracking aircraft for one step.
-    static func guide(_ ac: inout Aircraft, runways: [Runway]) {
+    public static func guide(_ ac: inout Aircraft, runways: [Runway]) {
         guard let rwy = ac.interceptRunway,
               let info = RunwayGeometry.threshold(for: rwy, in: runways) else { return }
         let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)  // threshold → outward
@@ -95,7 +95,7 @@ enum LocalizerGuidanceService {
 
     /// True when a localizer-tracking aircraft has actually touched down: at the
     /// threshold horizontally AND descended to (near) ground level.
-    static func reachedRunway(_ ac: Aircraft, runways: [Runway]) -> Bool {
+    public static func reachedRunway(_ ac: Aircraft, runways: [Runway]) -> Bool {
         guard let rwy = ac.interceptRunway,
               let info = RunwayGeometry.threshold(for: rwy, in: runways) else { return false }
         let atThreshold = Geo.distanceMeters(from: ac.position, to: info.threshold) < 0.4 * Distance.metersPerNauticalMile
@@ -110,7 +110,7 @@ enum LocalizerGuidanceService {
     ///   2. HEADING — the aircraft is flying TOWARD the localizer: its heading is
     ///      within ±30° of the inbound landing course (a valid intercept angle).
     /// Both must hold — in the cone but pointing the wrong way can't intercept.
-    static func isInCone(aircraft ac: Aircraft, runway designator: String, runways: [Runway]) -> Bool {
+    public static func isInCone(aircraft ac: Aircraft, runway designator: String, runways: [Runway]) -> Bool {
         guard let (threshold, inbound) = RunwayGeometry.threshold(for: designator, in: runways) else { return false }
         let approachDir = (inbound + 180).truncatingRemainder(dividingBy: 360)
         let bearingToAircraft = Geo.bearing(from: threshold, to: ac.position)
@@ -123,7 +123,7 @@ enum LocalizerGuidanceService {
     /// i.e. it is NOT being cleared to intercept from too high to make it down.
     /// Rejects when it's past the threshold (no final left) or above the descent
     /// budget for its along-track distance.
-    static func canReachRunway(aircraft ac: Aircraft, runway designator: String, runways: [Runway]) -> Bool {
+    public static func canReachRunway(aircraft ac: Aircraft, runway designator: String, runways: [Runway]) -> Bool {
         guard let info = RunwayGeometry.threshold(for: designator, in: runways) else { return false }
         let approachDir = (info.inbound + 180).truncatingRemainder(dividingBy: 360)
         let d   = Geo.distanceMeters(from: info.threshold, to: ac.position)

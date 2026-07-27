@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		6E0C170000000000000000A1 /* GeoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoKit */; };
 		4E70000000000000000000C1 /* NetworkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E70000000000000000000C2 /* NetworkKit */; };
+		6E0C170000000000000000A1 /* GeoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoKit */; };
 		6E0C170000000000000000B1 /* GeoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000B2 /* GeoKit */; };
 		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
 		A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */; };
+		A7C000000000000000000E1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000E2 /* ATCSimKit */; };
+		A7C000000000000000000F1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000F2 /* ATCSimKit */; };
 		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
 /* End PBXBuildFile section */
 
@@ -65,6 +67,7 @@
 				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
 				6E0C170000000000000000A1 /* GeoKit in Frameworks */,
 				4E70000000000000000000C1 /* NetworkKit in Frameworks */,
+				A7C000000000000000000E1 /* ATCSimKit in Frameworks */,
 				A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -74,6 +77,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6E0C170000000000000000B1 /* GeoKit in Frameworks */,
+				A7C000000000000000000F1 /* ATCSimKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +135,7 @@
 				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
 				6E0C170000000000000000A2 /* GeoKit */,
 				4E70000000000000000000C2 /* NetworkKit */,
+				A7C000000000000000000E2 /* ATCSimKit */,
 				A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */,
 			);
 			productName = VectraPro;
@@ -156,6 +161,7 @@
 			name = VectraProTests;
 			packageProductDependencies = (
 				6E0C170000000000000000B2 /* GeoKit */,
+				A7C000000000000000000F2 /* ATCSimKit */,
 			);
 			productName = VectraProTests;
 			productReference = 8B7FEE0F2FEC24A90055FDF8 /* VectraProTests.xctest */;
@@ -221,6 +227,7 @@
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
 				6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */,
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
+				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
 				A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -624,13 +631,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/NetworkKit;
+		};
 		6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/GeoKit;
 		};
-		4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */ = {
+		A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/NetworkKit;
+			relativePath = LocalPackages/ATCSimKit;
 		};
 		C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -658,15 +669,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		6E0C170000000000000000A2 /* GeoKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
-			productName = GeoKit;
-		};
 		4E70000000000000000000C2 /* NetworkKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */;
 			productName = NetworkKit;
+		};
+		6E0C170000000000000000A2 /* GeoKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
+			productName = GeoKit;
 		};
 		6E0C170000000000000000B2 /* GeoKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -682,6 +693,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
 			productName = GoogleMaps;
+		};
+		A7C000000000000000000E2 /* ATCSimKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */;
+			productName = ATCSimKit;
+		};
+		A7C000000000000000000F2 /* ATCSimKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */;
+			productName = ATCSimKit;
 		};
 		C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */ = {
 			isa = XCSwiftPackageProductDependency;

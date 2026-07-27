@@ -8,6 +8,7 @@
 //
 
 import CoreLocation
+import ATCSimKit
 import GeoKit
 import UIKit
 

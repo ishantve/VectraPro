@@ -9,9 +9,9 @@
 import Foundation
 import GeoKit
 
-final class AircraftPhysics {
+public final class AircraftPhysics {
 
-    static let shared = AircraftPhysics()
+    public static let shared = AircraftPhysics()
     private init() {}
 
     // MARK: - Constants
@@ -31,7 +31,7 @@ final class AircraftPhysics {
     // MARK: - Command application
 
     /// Applies ATC commands to a single aircraft struct.
-    func apply(_ commands: [AircraftCommand], to aircraft: inout Aircraft) {
+    public func apply(_ commands: [AircraftCommand], to aircraft: inout Aircraft) {
         for command in commands {
             switch command {
             case .heading(let heading):
@@ -90,7 +90,7 @@ final class AircraftPhysics {
     /// Converge speed + altitude toward their commanded targets, without moving
     /// or turning. Used for holding aircraft (which are positioned by the
     /// racetrack, not normal physics) so speed/altitude clearances still apply.
-    func adjustSpeedAltitude(_ aircraft: inout Aircraft, dt: Double) {
+    public func adjustSpeedAltitude(_ aircraft: inout Aircraft, dt: Double) {
         adjustSpeed(&aircraft, dt: dt)
         adjustAltitude(&aircraft, dt: dt)
     }
@@ -99,7 +99,7 @@ final class AircraftPhysics {
 
     /// Advances one aircraft through one simulation tick:
     /// turns, accelerates/decelerates, climbs/descends, then moves forward.
-    func stepPhysics(_ aircraft: inout Aircraft, dt: Double) {
+    public func stepPhysics(_ aircraft: inout Aircraft, dt: Double) {
         switch aircraft.takeoffState {
 
         case .groundRoll(let runwayHeading):

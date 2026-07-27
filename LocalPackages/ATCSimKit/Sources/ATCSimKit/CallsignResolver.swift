@@ -10,13 +10,13 @@
 
 import Foundation
 
-enum CallsignResolver {
+public enum CallsignResolver {
 
     /// Direct ICAO match → spoken airline name + flight number.
     /// Returns the matched callsign, or nil if nothing matches.
-    static func resolve(from normalizedText: String,
+    public static func resolve(from normalizedText: String,
                         among candidates: [Aircraft],
-                        airlines: [ExerciseDetail.Airline]) -> String? {
+                        airlines: [Airline]) -> String? {
         let text = normalizedText.lowercased()
         // 1. Direct match — "aic235" or spaced form "aca 29" both match callsign "ACA29".
         for ac in candidates {

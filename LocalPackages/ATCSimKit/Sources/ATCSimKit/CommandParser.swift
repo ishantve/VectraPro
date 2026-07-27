@@ -32,7 +32,7 @@
 
 import Foundation
 
-struct CommandParser {
+public struct CommandParser {
 
     // ─────────────────────────────────────────────
     // MARK: Step 1 · Normalise
@@ -40,7 +40,7 @@ struct CommandParser {
 
     /// Returns a clean, lowercase string ready for pattern matching.
     /// Always call this before extractCallsign() or parse().
-    static func normalize(_ raw: String) -> String {
+    public static func normalize(_ raw: String) -> String {
         var text = raw.lowercased()
 
         // Keep only letters, digits, and spaces — drop commas, periods,
@@ -97,13 +97,11 @@ struct CommandParser {
     ]
 
     /// Result of callsign extraction.
-    struct Extracted {
+    public struct Extracted {
         /// Raw callsign text as it appeared in the transcript (already normalised).
-        /// e.g. "air canada 125", "aca 125", "indigo 2341"
-        let callsign: String
+        public let callsign: String
         /// Remainder of the string with the callsign prefix removed.
-        /// e.g. "heading 270", "flight level 250"
-        let commandText: String
+        public let commandText: String
     }
 
     /// Identifies and strips a callsign prefix from a normalised transcript.
@@ -115,7 +113,7 @@ struct CommandParser {
     ///   4. If all three conditions hold, the prefix is the callsign.
     ///
     /// Works for any airline worldwide — no lookup table required.
-    static func extractCallsign(from normalized: String) -> Extracted? {
+    public static func extractCallsign(from normalized: String) -> Extracted? {
         // 1. Find the index of the earliest command keyword.
         var firstKeywordIndex: String.Index? = nil
         for keyword in commandKeywords {
@@ -153,7 +151,7 @@ struct CommandParser {
     /// Extract all recognised ATC commands from an already-normalised string.
     /// Pass the `commandText` from extractCallsign() here, not the full transcript,
     /// so flight-number digits cannot collide with command values.
-    static func parse(_ normalized: String) -> [AircraftCommand] {
+    public static func parse(_ normalized: String) -> [AircraftCommand] {
         var commands: [AircraftCommand] = []
         if normalized.contains("present heading")  { commands.append(AircraftCommand.presentHeading) }
         if let c = parseInterceptLocalizer(normalized) { commands.append(c) }

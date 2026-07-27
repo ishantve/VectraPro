@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum AircraftCommand: Equatable {
+public enum AircraftCommand: Equatable {
     case heading(Double)                        // fly an absolute heading (shortest turn)
     case headingTurn(Double, TurnDirection)     // absolute heading, forced turn direction
     case relativeTurn(Double, TurnDirection)    // turn N degrees left / right

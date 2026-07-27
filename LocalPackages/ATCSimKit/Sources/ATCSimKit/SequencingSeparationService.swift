@@ -11,11 +11,11 @@
 import Foundation
 import GeoKit
 
-enum SequencingSeparationService {
+public enum SequencingSeparationService {
 
     /// Wake category of an aircraft from its type's ICAO WTC (L / M / H).
-    static func wakeCategory(_ ac: Aircraft,
-                             aircraftTypes: [ExerciseDetail.AircraftType]) -> String {
+    public static func wakeCategory(_ ac: Aircraft,
+                             aircraftTypes: [AircraftType]) -> String {
         guard let code = ac.aircraftType else { return "M" }
         return aircraftTypes.first { $0.icaoCode?.uppercased() == code.uppercased() }?
             .icaoWTC?.uppercased() ?? "M"
@@ -23,16 +23,16 @@ enum SequencingSeparationService {
 
     /// Required in-trail separation (NM): 10 if either aircraft is small (Light),
     /// otherwise 8 for medium/heavy.
-    static func requiredSeparationNM(_ a: Aircraft, _ b: Aircraft,
-                                     aircraftTypes: [ExerciseDetail.AircraftType]) -> Double {
+    public static func requiredSeparationNM(_ a: Aircraft, _ b: Aircraft,
+                                     aircraftTypes: [AircraftType]) -> Double {
         (wakeCategory(a, aircraftTypes: aircraftTypes) == "L" ||
          wakeCategory(b, aircraftTypes: aircraftTypes) == "L") ? 10 : 8
     }
 
     /// Aircraft on final (localizer) that are closer than the required separation
     /// to the aircraft ahead of them on the same runway.
-    static func conflicts(among aircraft: [Aircraft], runways: [Runway],
-                          aircraftTypes: [ExerciseDetail.AircraftType]) -> Set<UUID> {
+    public static func conflicts(among aircraft: [Aircraft], runways: [Runway],
+                          aircraftTypes: [AircraftType]) -> Set<UUID> {
         var conflicts = Set<UUID>()
         let onFinal = aircraft.filter { $0.interceptRunway != nil }
         let byRunway = Dictionary(grouping: onFinal) { $0.interceptRunway! }

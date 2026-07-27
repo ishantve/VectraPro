@@ -10,11 +10,11 @@
 import CoreLocation
 import GeoKit
 
-enum RunwayGeometry {
+public enum RunwayGeometry {
 
     /// Normalise a designator for matching: digits without leading zeros + a
     /// lowercased side suffix ("08L" ↔ "8l", "09" ↔ "9").
-    static func canonical(_ s: String) -> String {
+    public static func canonical(_ s: String) -> String {
         let lower = s.lowercased()
         let digits = lower.prefix { $0.isNumber }
         let suffix = lower.drop { $0.isNumber }.filter { "lrc".contains($0) }
@@ -24,7 +24,7 @@ enum RunwayGeometry {
 
     /// The threshold coordinate and inbound (landing) course matching a
     /// designator, derived from the actual runway geometry.
-    static func threshold(for designator: String, in runways: [Runway])
+    public static func threshold(for designator: String, in runways: [Runway])
         -> (threshold: CLLocationCoordinate2D, inbound: Double)? {
         let target = canonical(designator)
         for rwy in runways {
@@ -40,7 +40,7 @@ enum RunwayGeometry {
 
     /// Threshold coordinate and takeoff heading for an aircraft's assigned
     /// runway. Falls back to the first available runway, then `center`.
-    static func departureThreshold(for ac: Aircraft, in runways: [Runway],
+    public static func departureThreshold(for ac: Aircraft, in runways: [Runway],
                                    center: CLLocationCoordinate2D)
         -> (CLLocationCoordinate2D, Double) {
         for runway in runways {
