@@ -216,7 +216,7 @@
 			packageReferences = (
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
-				6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "Packages/GeoKit" */,
+				6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */,
 				A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -620,9 +620,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "Packages/GeoKit" */ = {
+		6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/GeoKit;
+			relativePath = LocalPackages/GeoKit;
 		};
 		C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -652,12 +652,12 @@
 /* Begin XCSwiftPackageProductDependency section */
 		6E0C170000000000000000A2 /* GeoKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "Packages/GeoKit" */;
+			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
 			productName = GeoKit;
 		};
 		6E0C170000000000000000B2 /* GeoKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "Packages/GeoKit" */;
+			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
 			productName = GeoKit;
 		};
 		8B7FEE2D2FEC24E10055FDF8 /* MapLibre */ = {
