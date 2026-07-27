@@ -7,6 +7,7 @@
 //
 
 import CoreLocation
+import GeoKit
 import Foundation
 
 // MARK: - Result types

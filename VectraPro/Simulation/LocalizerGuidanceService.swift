@@ -12,6 +12,7 @@
 //
 
 import CoreLocation
+import GeoKit
 
 enum LocalizerGuidanceService {
 

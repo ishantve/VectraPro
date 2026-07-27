@@ -9,6 +9,7 @@
 //
 
 import Combine
+import GeoKit
 import CoreLocation
 import MapLibre
 import UIKit

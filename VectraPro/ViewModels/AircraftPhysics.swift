@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import GeoKit
 
 final class AircraftPhysics {
 

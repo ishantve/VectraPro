@@ -8,6 +8,7 @@
 //
 
 import CoreLocation
+import GeoKit
 import UIKit
 
 enum FixRadialRenderer {

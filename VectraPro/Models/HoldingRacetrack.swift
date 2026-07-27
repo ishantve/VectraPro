@@ -16,6 +16,7 @@
 //
 
 import CoreLocation
+import GeoKit
 import Foundation
 
 struct HoldingRacetrack {

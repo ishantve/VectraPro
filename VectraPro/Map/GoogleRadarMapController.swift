@@ -8,6 +8,7 @@
 //
 
 import Combine
+import GeoKit
 import CoreLocation
 import GoogleMaps
 import QuartzCore

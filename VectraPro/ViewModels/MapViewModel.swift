@@ -6,6 +6,7 @@
 //
 
 import Combine
+import GeoKit
 import CoreLocation
 import Foundation
 

@@ -6,6 +6,7 @@
 //
 
 import CoreLocation
+import GeoKit
 @testable import VectraPro
 
 /// Approximate coordinate equality (default ~1 m).

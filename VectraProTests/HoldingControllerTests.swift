@@ -4,6 +4,7 @@
 //
 
 import Testing
+import GeoKit
 import CoreLocation
 @testable import VectraPro
 
