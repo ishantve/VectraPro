@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/master.swiftdeps"
+  },
+  "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/Tests/GeoKitTests/GeoKitTests.swift": {
+    "dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/GeoKitTests.d",
+    "object": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/GeoKitTests.swift.o",
+    "swiftmodule": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/GeoKitTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/GeoKitTests.swiftdeps",
+    "diagnostics": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKitTests.build/GeoKitTests.dia"
+  }
+}

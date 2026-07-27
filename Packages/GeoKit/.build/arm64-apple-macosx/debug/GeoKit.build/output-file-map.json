@@ -1,0 +1,33 @@
+{
+  "": {
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/master.swiftdeps"
+  },
+  "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/Sources/GeoKit/ColliderGeometry.swift": {
+    "dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/ColliderGeometry.d",
+    "object": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/ColliderGeometry.swift.o",
+    "swiftmodule": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/ColliderGeometry~partial.swiftmodule",
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/ColliderGeometry.swiftdeps",
+    "diagnostics": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/ColliderGeometry.dia"
+  },
+  "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/Sources/GeoKit/Distance.swift": {
+    "dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Distance.d",
+    "object": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Distance.swift.o",
+    "swiftmodule": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Distance~partial.swiftmodule",
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Distance.swiftdeps",
+    "diagnostics": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Distance.dia"
+  },
+  "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/Sources/GeoKit/Geo.swift": {
+    "dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Geo.d",
+    "object": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Geo.swift.o",
+    "swiftmodule": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Geo~partial.swiftmodule",
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Geo.swiftdeps",
+    "diagnostics": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/Geo.dia"
+  },
+  "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/Sources/GeoKit/TrailSampler.swift": {
+    "dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/TrailSampler.d",
+    "object": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/TrailSampler.swift.o",
+    "swiftmodule": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/TrailSampler~partial.swiftmodule",
+    "swift-dependencies": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/TrailSampler.swiftdeps",
+    "diagnostics": "/Users/ajaybharti/Desktop/iOS_Projects/Rigil/VectraPro/Packages/GeoKit/.build/arm64-apple-macosx/debug/GeoKit.build/TrailSampler.dia"
+  }
+}
