@@ -6,7 +6,7 @@
 //
 
 import UIKit
-import GeoKit
+import GeoNavKit
 
 /// How a range ring is stroked on the map.
 enum RingStyle {

@@ -8,7 +8,7 @@
 //
 
 import CoreLocation
-import GeoKit
+import GeoNavKit
 import UIKit
 
 final class RadialManager {

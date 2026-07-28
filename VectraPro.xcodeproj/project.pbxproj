@@ -8,8 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		4E70000000000000000000C1 /* NetworkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E70000000000000000000C2 /* NetworkKit */; };
-		6E0C170000000000000000A1 /* GeoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoKit */; };
-		6E0C170000000000000000B1 /* GeoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000B2 /* GeoKit */; };
+		6E0C170000000000000000A1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoNavKit */; };
+		6E0C170000000000000000B1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000B2 /* GeoNavKit */; };
 		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
 		A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */; };
 		A7C000000000000000000E1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000E2 /* ATCSimKit */; };
@@ -66,7 +66,7 @@
 			files = (
 				8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */,
 				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
-				6E0C170000000000000000A1 /* GeoKit in Frameworks */,
+				6E0C170000000000000000A1 /* GeoNavKit in Frameworks */,
 				4E70000000000000000000C1 /* NetworkKit in Frameworks */,
 				A7C000000000000000000E1 /* ATCSimKit in Frameworks */,
 				5EEC000000000000000000A1 /* SpeechKit in Frameworks */,
@@ -78,7 +78,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6E0C170000000000000000B1 /* GeoKit in Frameworks */,
+				6E0C170000000000000000B1 /* GeoNavKit in Frameworks */,
 				A7C000000000000000000F1 /* ATCSimKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -135,7 +135,7 @@
 			packageProductDependencies = (
 				8B7FEE2D2FEC24E10055FDF8 /* MapLibre */,
 				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
-				6E0C170000000000000000A2 /* GeoKit */,
+				6E0C170000000000000000A2 /* GeoNavKit */,
 				4E70000000000000000000C2 /* NetworkKit */,
 				A7C000000000000000000E2 /* ATCSimKit */,
 				5EEC000000000000000000A2 /* SpeechKit */,
@@ -163,7 +163,7 @@
 			);
 			name = VectraProTests;
 			packageProductDependencies = (
-				6E0C170000000000000000B2 /* GeoKit */,
+				6E0C170000000000000000B2 /* GeoNavKit */,
 				A7C000000000000000000F2 /* ATCSimKit */,
 			);
 			productName = VectraProTests;
@@ -228,7 +228,7 @@
 			packageReferences = (
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
-				6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */,
+				6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoNavKit" */,
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
 				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
 				5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */,
@@ -639,9 +639,9 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/NetworkKit;
 		};
-		6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */ = {
+		6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoNavKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/GeoKit;
+			relativePath = LocalPackages/GeoNavKit;
 		};
 		A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -682,15 +682,15 @@
 			package = 4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */;
 			productName = NetworkKit;
 		};
-		6E0C170000000000000000A2 /* GeoKit */ = {
+		6E0C170000000000000000A2 /* GeoNavKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
-			productName = GeoKit;
+			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoNavKit" */;
+			productName = GeoNavKit;
 		};
-		6E0C170000000000000000B2 /* GeoKit */ = {
+		6E0C170000000000000000B2 /* GeoNavKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoKit" */;
-			productName = GeoKit;
+			package = 6E0C170000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/GeoNavKit" */;
+			productName = GeoNavKit;
 		};
 		8B7FEE2D2FEC24E10055FDF8 /* MapLibre */ = {
 			isa = XCSwiftPackageProductDependency;

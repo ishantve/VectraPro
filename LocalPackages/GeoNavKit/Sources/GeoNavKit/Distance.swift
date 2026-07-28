@@ -1,6 +1,6 @@
 //
 //  Distance.swift
-//  GeoKit
+//  GeoNavKit
 //
 //  Nautical-mile ↔ meter conversion.
 //

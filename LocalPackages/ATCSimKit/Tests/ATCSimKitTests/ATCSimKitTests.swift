@@ -8,7 +8,7 @@
 
 import XCTest
 import CoreLocation
-import GeoKit
+import GeoNavKit
 @testable import ATCSimKit
 
 private enum F {

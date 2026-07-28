@@ -1,13 +1,13 @@
 //
-//  GeoKitTests.swift
-//  GeoKit
+//  GeoNavKitTests.swift
+//  GeoNavKit
 //
 
 import XCTest
 import CoreLocation
-@testable import GeoKit
+@testable import GeoNavKit
 
-final class GeoKitTests: XCTestCase {
+final class GeoNavKitTests: XCTestCase {
 
     private let delhi = CLLocationCoordinate2D(latitude: 28.5665, longitude: 77.1031)
 

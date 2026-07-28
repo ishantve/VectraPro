@@ -8,7 +8,7 @@
 //
 
 import CoreLocation
-import GeoKit
+import GeoNavKit
 
 public enum RunwayGeometry {
 

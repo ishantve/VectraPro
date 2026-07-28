@@ -7,7 +7,7 @@
 
 import CoreLocation
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 @testable import VectraPro
 
 /// Approximate coordinate equality (default ~1 m).

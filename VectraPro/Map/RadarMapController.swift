@@ -10,7 +10,7 @@
 
 import Combine
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 import CoreLocation
 import MapLibre
 import UIKit

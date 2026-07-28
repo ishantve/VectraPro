@@ -1,6 +1,6 @@
 //
 //  TrailSampler.swift
-//  GeoKit
+//  GeoNavKit
 //
 //  Pure geometry for placing history-trail dots along a recent path. Returns
 //  coordinates only — no rendering dependency.

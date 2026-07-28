@@ -9,7 +9,7 @@
 
 import CoreLocation
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 import UIKit
 
 enum LocalizerRenderer {

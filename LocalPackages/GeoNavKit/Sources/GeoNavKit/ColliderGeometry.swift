@@ -1,6 +1,6 @@
 //
 //  ColliderGeometry.swift
-//  GeoKit
+//  GeoNavKit
 //
 //  Pure geographic shape geometry for colliders and range circles. Each
 //  function returns a closed ring of coordinates. NM → metres uses 1 NM = 1852 m.

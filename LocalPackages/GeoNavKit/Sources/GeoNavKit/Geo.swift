@@ -1,6 +1,6 @@
 //
 //  Geo.swift
-//  GeoKit
+//  GeoNavKit
 //
 //  Great-circle geographic helpers: bearing, distance, and offset. Pure maths
 //  over CLLocationCoordinate2D — no app dependencies.

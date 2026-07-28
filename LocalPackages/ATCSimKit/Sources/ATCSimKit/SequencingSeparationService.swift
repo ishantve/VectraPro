@@ -9,7 +9,7 @@
 //
 
 import Foundation
-import GeoKit
+import GeoNavKit
 
 public enum SequencingSeparationService {
 

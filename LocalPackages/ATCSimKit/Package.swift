@@ -8,10 +8,10 @@ let package = Package(
         .library(name: "ATCSimKit", targets: ["ATCSimKit"]),
     ],
     dependencies: [
-        .package(path: "../GeoKit"),
+        .package(path: "../GeoNavKit"),
     ],
     targets: [
-        .target(name: "ATCSimKit", dependencies: ["GeoKit"]),
+        .target(name: "ATCSimKit", dependencies: ["GeoNavKit"]),
         .testTarget(name: "ATCSimKitTests", dependencies: ["ATCSimKit"]),
     ]
 )

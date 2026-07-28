@@ -6,7 +6,7 @@
 //
 
 import CoreLocation
-import GeoKit
+import GeoNavKit
 
 enum RangeRingRenderer {
 

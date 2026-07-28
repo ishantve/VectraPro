@@ -9,7 +9,7 @@
 
 import Testing
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 import CoreLocation
 @testable import VectraPro
 

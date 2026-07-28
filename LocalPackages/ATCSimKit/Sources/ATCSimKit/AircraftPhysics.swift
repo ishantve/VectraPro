@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import GeoKit
+import GeoNavKit
 
 public final class AircraftPhysics {
 

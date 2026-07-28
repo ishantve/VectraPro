@@ -8,7 +8,7 @@
 
 import CoreLocation
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 import Foundation
 
 // MARK: - Spawn context

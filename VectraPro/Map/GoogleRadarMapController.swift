@@ -9,7 +9,7 @@
 
 import Combine
 import ATCSimKit
-import GeoKit
+import GeoNavKit
 import CoreLocation
 import GoogleMaps
 import QuartzCore
