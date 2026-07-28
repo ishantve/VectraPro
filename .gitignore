@@ -1,0 +1,13 @@
+# Swift Package Manager build artifacts (e.g. from `swift build` / `swift test`
+# inside LocalPackages/*)
+.build/
+.swiftpm/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+build/
+
+# macOS
+.DS_Store

@@ -12,6 +12,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 /// OAuth2 token response from the AuthURL.
@@ -80,15 +81,16 @@ final class AuthService: ObservableObject {
     /// dependency is explicit rather than reached into globally.
     private let api: APIManager
 
-    private init(api: APIManager = .shared) {
-        self.api = api
+    private init(api: APIManager? = nil) {
+        let client = api ?? .shared
+        self.api = client
         session = SessionStore.load()
         // Every request fetches a valid token through this provider.
-        api.tokenProvider = { [weak self] in
+        client.tokenProvider = { [weak self] in
             try await self?.validAccessToken()
         }
         // A 401 mid-request forces a refresh, then the request retries.
-        api.tokenRefresher = { [weak self] in
+        client.tokenRefresher = { [weak self] in
             try await self?.refresh()
         }
     }

@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import ATCSimKit
 
 enum RadarLayer: String, CaseIterable, Identifiable {
     case obstacle, zone, holdingPattern, enroute, arrival, departure

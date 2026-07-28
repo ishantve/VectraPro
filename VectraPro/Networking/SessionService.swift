@@ -11,35 +11,28 @@
 //
 
 import Foundation
+import NetworkKit
 
 @MainActor
 final class SessionService {
 
     static let shared = SessionService()
 
-    /// The selected organization (single object, not the array).
-    private(set) var organization: Organization?
-    /// The game whose name contains "Vectra" (single object, not the array).
-    private(set) var vectraGame: Game?
-    /// Response from POST /nickName/user (nickname login).
-    private(set) var nickNameUser: NickNameUser?
-
     // Collaborators — injected (default to the shared instances) so this
     // bootstrap flow's dependencies are explicit rather than global reaches.
     private let api: APIManager
     private let auth: AuthService
 
-    private init(api: APIManager = .shared, auth: AuthService = .shared) {
-        self.api = api
-        self.auth = auth
+    private init(api: APIManager? = nil, auth: AuthService? = nil) {
+        self.api = api ?? .shared
+        self.auth = auth ?? .shared
     }
 
     /// Call once after a successful login.
     func loadInitialData() async throws {
         // 1) Organizations → keep the particular organization object.
-        let orgs: [Organization] = try await api.request(.organizations)
+        let orgs: [Organization] = try await api.request(Endpoint.organizations)
         let org = orgs.first
-        organization = org
 
         guard let orgID = org?.id, !orgID.isEmpty else {
             throw APIError.noOrganizationAccess
@@ -47,7 +40,7 @@ final class SessionService {
 
         // 2) Games — org id is in the path; OrganizationId header is also sent.
         let response: GamesResponse = try await api.request(
-            .games(orgID: orgID),
+            Endpoint.games(orgID: orgID),
             headers: ["OrganizationId": orgID]
         )
 
@@ -57,7 +50,6 @@ final class SessionService {
         }) else {
             throw APIError.noApplicationAccess
         }
-        vectraGame = game
 
         // From /games onward, every API call must carry BOTH OrganizationId and
         // gameId — set them as default headers so all subsequent calls include them.
@@ -71,9 +63,8 @@ final class SessionService {
         //    OrganizationId + gameId are sent automatically (default headers).
         if let nickname = auth.nickname, !nickname.isEmpty {
             let user: NickNameUser = try await api.request(
-                .nickNameUser(nickName: nickname)
+                Endpoint.nickNameUser(nickName: nickname)
             )
-            nickNameUser = user
             // Persist the resolved userId into the saved session.
             if !user.userId.isEmpty { auth.setUserId(user.userId) }
         }

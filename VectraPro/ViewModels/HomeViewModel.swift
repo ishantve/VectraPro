@@ -6,6 +6,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 @MainActor
@@ -26,12 +27,12 @@ final class HomeViewModel: ObservableObject {
     private let exerciseService: ExerciseService
     private let radar: MapViewModel
 
-    init(api: APIManager = .shared,
-         exerciseService: ExerciseService = .shared,
-         radar: MapViewModel = .shared) {
-        self.api = api
-        self.exerciseService = exerciseService
-        self.radar = radar
+    init(api: APIManager? = nil,
+         exerciseService: ExerciseService? = nil,
+         radar: MapViewModel? = nil) {
+        self.api = api ?? .shared
+        self.exerciseService = exerciseService ?? .shared
+        self.radar = radar ?? .shared
     }
 
     /// More pages available to load.
@@ -85,7 +86,7 @@ final class HomeViewModel: ObservableObject {
 
     private func fetch(page: Int) async throws -> ExercisesResponse {
         try await api.request(
-            .exercises(pageNo: page, pageSize: pageSize, search: "")
+            Endpoint.exercises(pageNo: page, pageSize: pageSize, search: "")
         )
     }
 }

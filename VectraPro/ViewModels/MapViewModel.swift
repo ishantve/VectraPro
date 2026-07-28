@@ -6,6 +6,8 @@
 //
 
 import Combine
+import ATCSimKit
+import GeoNavKit
 import CoreLocation
 import Foundation
 
@@ -152,15 +154,21 @@ final class MapViewModel: ObservableObject {
         fixes.filter { $0.type?.uppercased() == "WAYPOINT" }
     }
 
-    /// Holding-type fixes, shown as the holding icon on the radar.
+    /// Holding-type fixes, shown as the holding icon on the radar (wire model,
+    /// used by the renderers).
     var holdingFixes: [ExerciseDetail.Fix] {
         fixes.filter { $0.type?.uppercased() == "HOLDING" }
+    }
+
+    /// Holding fixes as ATCSimKit domain inputs, for the simulation services.
+    private var holdingFixesDomain: [ATCSimKit.Fix] {
+        holdingFixes.map(\.asDomain)
     }
 
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
-        FixLookup.position(named: name, in: holdingFixes)
+        FixLookup.position(named: name, in: holdingFixesDomain)
     }
 
     /// Apply the started exercise: center the radar and derive runways +
@@ -447,13 +455,13 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
-    init(physics: AircraftPhysics = .shared,
-         collision: AircraftCollisionDetector = .shared,
-         spawner: AircraftSpawner = .shared) {
-        self.physics   = physics
-        self.collision = collision
-        self.spawner   = spawner
-        aircraft = [spawner.makeRandomAircraft(context: spawnContext)]
+    init(physics: AircraftPhysics? = nil,
+         collision: AircraftCollisionDetector? = nil,
+         spawner: AircraftSpawner? = nil) {
+        self.physics   = physics ?? .shared
+        self.collision = collision ?? .shared
+        self.spawner   = spawner ?? .shared
+        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
     }
 
     // MARK: - Voice commands
@@ -477,23 +485,18 @@ final class MapViewModel: ObservableObject {
     /// A holding aircraft keeps holding for speed/altitude clearances, but is
     /// released back onto the radar for a vectoring / direct / hold command.
     private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
-        // Validate a localizer-intercept clearance before applying anything: the
-        // aircraft must be inside the runway's approach cone — both its heading
-        // (flying inbound, ±30°) and its position (within the approach funnel,
-        // ±35° of the approach bearing from the threshold).
+        // Validate the whole utterance against the aircraft + scene before applying
+        // anything (altitude/speed envelope, turn limits, hold-fix existence, and
+        // the localizer-intercept checks). On failure, speak the reason and apply
+        // nothing.
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
-            for case .interceptLocalizer(let runway) in commands {
-                // Reject if that runway end's localizer isn't active.
-                guard activeLocalizerRunways.contains(RunwayGeometry.canonical(runway)) else {
-                    CommandFeedbackManager.shared.commandError(
-                        "Localizer runway \(runway) not active")
-                    return
-                }
-                guard LocalizerGuidanceService.isInCone(aircraft: ac, runway: runway, runways: runways) else {
-                    CommandFeedbackManager.shared.commandError(
-                        "Unable, not established for localizer runway \(runway)")
-                    return
-                }
+            let context = CommandValidator.Context(
+                runways: runways,
+                activeLocalizerRunways: activeLocalizerRunways,
+                holdingFixes: holdingFixesDomain)
+            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
+                CommandFeedbackManager.shared.commandError(reason)
+                return
             }
         }
 
@@ -746,7 +749,7 @@ final class MapViewModel: ObservableObject {
         for index in aircraft.indices {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             // Auto-turn toward a commanded holding fix (proceed direct).
-            HoldingController.steer(&aircraft[index], fixes: holdingFixes)
+            HoldingController.steer(&aircraft[index], fixes: holdingFixesDomain)
             // Localizer intercept: align with the centreline, then track it in.
             LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
@@ -771,7 +774,7 @@ final class MapViewModel: ObservableObject {
         // Holding capture: aircraft that reached their commanded hold fix leave
         // the radar and enter the holding hangar. The @Published side-effects
         // (clear selection, arm a refill for the freed slot) stay here.
-        let captured = HoldingController.capture(aircraft: &aircraft, traffic: &traffic, fixes: holdingFixes)
+        let captured = HoldingController.capture(aircraft: &aircraft, traffic: &traffic, fixes: holdingFixesDomain)
         if !captured.isEmpty {
             if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
             if aircraft.count < airspaceCapacity {
@@ -783,7 +786,7 @@ final class MapViewModel: ObservableObject {
         // Fly the holding racetracks (runs every tick; only the drawing is gated
         // by the layer toggle).
         HoldingController.flyRacetracks(
-            traffic: &traffic, fixes: holdingFixes, physics: physics, dt: tickInterval,
+            traffic: &traffic, fixes: holdingFixesDomain, physics: physics, dt: tickInterval,
             sampleHistory: tickCount % historySampleTicks == 0, maxHistory: maxHistoryPoints)
 
         // Aircraft-to-aircraft collisions.
@@ -836,7 +839,7 @@ final class MapViewModel: ObservableObject {
 
         // Landing-sequence separation on final.
         let seqConflicts = SequencingSeparationService.conflicts(
-            among: aircraft, runways: runways, aircraftTypes: aircraftTypes)
+            among: aircraft, runways: runways, aircraftTypes: aircraftTypes.map(\.asDomain))
         if sequencingConflictIDs != seqConflicts { sequencingConflictIDs = seqConflicts }
 
         // Advance the exercise clock; finish when we reach the target duration.
@@ -946,7 +949,7 @@ final class MapViewModel: ObservableObject {
     func resolveDepartureCallsign(from normalizedText: String) -> String? {
         CallsignResolver.resolve(from: normalizedText,
                                  among: traffic.filter { $0.category == .departure },
-                                 airlines: airlines)
+                                 airlines: airlines.map(\.asDomain))
     }
 
     /// Resolves a live radar aircraft callsign from an already-normalised voice
@@ -954,7 +957,7 @@ final class MapViewModel: ObservableObject {
     /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
         let candidates = aircraft + traffic.filter { $0.holdingName != nil }
-        return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines)
+        return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines.map(\.asDomain))
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
