@@ -1,6 +1,15 @@
 {
-  "originHash" : "100e8f54469b1aa2afc7677134e4cb68d842d0dc9a1283d4121bf38e4608ff3e",
+  "originHash" : "33c64cf039f09e552992c6a9ece05138c603b8e76fce84d9511c1f75cbfc9501",
   "pins" : [
+    {
+      "identity" : "geonavkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/GeoNavKit.git",
+      "state" : {
+        "revision" : "cd9d341cb09c09aec55a4f272f630f944f7f3512",
+        "version" : "1.0.1"
+      }
+    },
     {
       "identity" : "ios-maps-sdk",
       "kind" : "remoteSourceControl",
