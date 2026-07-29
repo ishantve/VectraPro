@@ -1,42 +1,42 @@
 {
-  "originHash" : "e5f024fb304c5e77e4884a543f5af6855b80bb39a04646ef78c9765c2234fd9e",
-  "pins" : [
+  "originHash": "e5f024fb304c5e77e4884a543f5af6855b80bb39a04646ef78c9765c2234fd9e",
+  "pins": [
     {
-      "identity" : "atcparserkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ishantve/ATCParserKit.git",
-      "state" : {
-        "revision" : "fec8114a49262fa68cc1e1b0e79ae322f659bd04",
-        "version" : "1.0.0"
+      "identity": "atcparserkit",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/ishantve/ATCParserKit.git",
+      "state": {
+        "revision": "de923f7e504977d13bdf4160f993014e64511aa0",
+        "version": "1.1.1"
       }
     },
     {
-      "identity" : "geonavkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ishantve/GeoNavKit.git",
-      "state" : {
-        "revision" : "cd9d341cb09c09aec55a4f272f630f944f7f3512",
-        "version" : "1.0.1"
+      "identity": "geonavkit",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/ishantve/GeoNavKit.git",
+      "state": {
+        "revision": "cd9d341cb09c09aec55a4f272f630f944f7f3512",
+        "version": "1.0.1"
       }
     },
     {
-      "identity" : "ios-maps-sdk",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/googlemaps/ios-maps-sdk",
-      "state" : {
-        "revision" : "a951b24ac0ca7720f87d4be3d5bd539552d13882",
-        "version" : "10.15.0"
+      "identity": "ios-maps-sdk",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/googlemaps/ios-maps-sdk",
+      "state": {
+        "revision": "a951b24ac0ca7720f87d4be3d5bd539552d13882",
+        "version": "10.15.0"
       }
     },
     {
-      "identity" : "maplibre-gl-native-distribution",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/maplibre/maplibre-gl-native-distribution",
-      "state" : {
-        "revision" : "84a79bc375a301169390ac110c868f06c857b83f",
-        "version" : "6.27.0"
+      "identity": "maplibre-gl-native-distribution",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/maplibre/maplibre-gl-native-distribution",
+      "state": {
+        "revision": "84a79bc375a301169390ac110c868f06c857b83f",
+        "version": "6.27.0"
       }
     }
   ],
-  "version" : 3
+  "version": 3
 }
