@@ -143,13 +143,8 @@ final class HoldingTests: XCTestCase {
     }
 }
 
-final class CommandParserTests: XCTestCase {
-    func testParse() {
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("turn left heading 270")), [.headingTurn(270, .left)])
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("hold at papa juliet")), [.hold("PJ")])
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("climb flight level 250")), [.flightLevel(250)])
-    }
-}
+// CommandParser moved to the standalone ATCParserKit package; its parsing is
+// covered by that package's own test suite.
 
 final class CommandValidatorTests: XCTestCase {
     private func ctx(_ r: Runway? = nil, loc: Set<String> = [], fixes: [Fix] = []) -> CommandValidator.Context {

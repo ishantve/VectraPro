@@ -11,3 +11,6 @@ build/
 
 # macOS
 .DS_Store
+
+# local package resolutions (app workspace Package.resolved is authoritative)
+LocalPackages/**/Package.resolved

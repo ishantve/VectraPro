@@ -2,19 +2,19 @@
 //  CommandController.swift
 //  VectraPro
 //
-//  Receives raw voice transcripts, runs them through CommandParser,
-//  and dispatches the resulting AircraftCommands to the correct aircraft.
+//  Receives raw voice transcripts, parses them with ATCParserKit, and
+//  dispatches the resulting AircraftCommands to the correct aircraft.
 //
 //  Flow:
 //    raw transcript
-//      → CommandParser.normalize()          strip punctuation, expand digit words
+//      → ATCParser().parse()                normalize + callsign + commands
 //      → isTakeoffClearance check           early-exit if departure clearance
-//      → CommandParser.extractCallsign()    identify & strip callsign prefix
-//      → CommandParser.parse(commandText)   parse the instruction only
+//      → map ParsedCommand → AircraftCommand
 //      → route to aircraft                  via callsign or selected aircraft
 //
 
 import Foundation
+import ATCParserKit
 import ATCSimKit
 
 final class CommandController {
@@ -28,7 +28,13 @@ final class CommandController {
     // MARK: - Main entry point
 
     func process(_ transcript: String) {
-        let normalized = CommandParser.normalize(transcript)
+        // Parse once (normalize + callsign extraction + command parsing) via the
+        // shared ATCParserKit core.
+        guard let result = try? ATCParser().parse(transcript) else {
+            CommandFeedbackManager.shared.commandError("Command not recognized")
+            return
+        }
+        let normalized = result.normalized
 
         // 1. Departure clearance: "ACA 29 cleared for takeoff"
         if isTakeoffClearance(normalized) {
@@ -40,23 +46,17 @@ final class CommandController {
             return
         }
 
-        // 2. Extract callsign prefix (if present) and isolate the command text.
-        //    "air canada 125 heading 270" → callsign="air canada 125", cmd="heading 270"
-        //    "heading 270"               → no callsign found, cmd="heading 270"
-        let extracted   = CommandParser.extractCallsign(from: normalized)
-        let commandText = extracted?.commandText ?? normalized
-        let callsignText = extracted?.callsign    // raw spoken callsign for routing
-
-        // 3. Parse commands from the instruction portion only.
-        //    Flight-number digits are gone, so they can't collide with command values.
-        let commands = CommandParser.parse(commandText)
+        // 2. Map the parsed commands into the simulator's command enum.
+        //    The parser already stripped the callsign prefix, so flight-number
+        //    digits can't collide with command values.
+        let commands = result.commands.compactMap(AircraftCommand.init)
         guard !commands.isEmpty else {
             CommandFeedbackManager.shared.commandError("Command not recognized")
             return
         }
 
-        // 4. Route: extracted callsign → full-text callsign search → selected aircraft.
-        if let cs = callsignText,
+        // 3. Route: extracted callsign → full-text callsign search → selected aircraft.
+        if let cs = result.callsign,
            let callsign = mapViewModel?.resolveRadarCallsign(from: cs) {
             mapViewModel?.applyToCallsign(callsign, commands: commands)
         } else if let callsign = mapViewModel?.resolveRadarCallsign(from: normalized) {

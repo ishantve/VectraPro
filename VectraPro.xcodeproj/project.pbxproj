@@ -8,12 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		4E70000000000000000000C1 /* NetworkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E70000000000000000000C2 /* NetworkKit */; };
+		5EEC000000000000000000A1 /* SpeechKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5EEC000000000000000000A2 /* SpeechKit */; };
 		6E0C170000000000000000A1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoNavKit */; };
+		A7C9DD0000000000000000D1 /* ATCParserKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C9DD0000000000000000D2 /* ATCParserKit */; };
 		6E0C170000000000000000B1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000B2 /* GeoNavKit */; };
 		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
 		A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */; };
 		A7C000000000000000000E1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000E2 /* ATCSimKit */; };
-		5EEC000000000000000000A1 /* SpeechKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5EEC000000000000000000A2 /* SpeechKit */; };
 		A7C000000000000000000F1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000F2 /* ATCSimKit */; };
 		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
 /* End PBXBuildFile section */
@@ -67,6 +68,7 @@
 				8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */,
 				C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */,
 				6E0C170000000000000000A1 /* GeoNavKit in Frameworks */,
+				A7C9DD0000000000000000D1 /* ATCParserKit in Frameworks */,
 				4E70000000000000000000C1 /* NetworkKit in Frameworks */,
 				A7C000000000000000000E1 /* ATCSimKit in Frameworks */,
 				5EEC000000000000000000A1 /* SpeechKit in Frameworks */,
@@ -136,6 +138,7 @@
 				8B7FEE2D2FEC24E10055FDF8 /* MapLibre */,
 				C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */,
 				6E0C170000000000000000A2 /* GeoNavKit */,
+				A7C9DD0000000000000000D2 /* ATCParserKit */,
 				4E70000000000000000000C2 /* NetworkKit */,
 				A7C000000000000000000E2 /* ATCSimKit */,
 				5EEC000000000000000000A2 /* SpeechKit */,
@@ -229,6 +232,7 @@
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
 				6E0C170000000000000000A3 /* XCRemoteSwiftPackageReference "GeoNavKit" */,
+				A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */,
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
 				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
 				5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */,
@@ -639,13 +643,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/NetworkKit;
 		};
-		A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/ATCSimKit;
-		};
 		5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/SpeechKit;
+		};
+		A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/ATCSimKit;
 		};
 		C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -657,6 +661,14 @@
 		6E0C170000000000000000A3 /* XCRemoteSwiftPackageReference "GeoNavKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ishantve/GeoNavKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+		A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ishantve/ATCParserKit.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 1.0.0;
@@ -686,6 +698,16 @@
 			package = 4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */;
 			productName = NetworkKit;
 		};
+		A7C9DD0000000000000000D2 /* ATCParserKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */;
+			productName = ATCParserKit;
+		};
+		5EEC000000000000000000A2 /* SpeechKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */;
+			productName = SpeechKit;
+		};
 		6E0C170000000000000000A2 /* GeoNavKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6E0C170000000000000000A3 /* XCRemoteSwiftPackageReference "GeoNavKit" */;
@@ -710,11 +732,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */;
 			productName = ATCSimKit;
-		};
-		5EEC000000000000000000A2 /* SpeechKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */;
-			productName = SpeechKit;
 		};
 		A7C000000000000000000F2 /* ATCSimKit */ = {
 			isa = XCSwiftPackageProductDependency;
