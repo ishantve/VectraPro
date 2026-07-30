@@ -93,18 +93,66 @@ final class DeferredReportTests: XCTestCase {
             CommandMapping.reportCondition(code: command.code, slots: command))
 
         var tracker = PendingReportTracker()
-        let report = PendingReport(id: UUID(), callsign: "air india 123", condition: condition)
+        // The aircraft's own callsign, not the spoken form — see
+        // `testAReportRegisteredAgainstTheSpokenCallsignNeverFires`.
+        let report = PendingReport(id: UUID(), callsign: "AIC123", condition: condition)
         tracker.register(report)
 
         var fired: [UUID] = []
         for latitude in [28.40, 28.50, 28.58, 28.63, 28.70] {
-            let plane = Aircraft(callsign: "air india 123",
-                                 position: .init(latitude: latitude, longitude: 77.10),
-                                 headingDegrees: 0)
-            fired += tracker.evaluate(aircraft: [plane], fixes: [fix], runways: [])
+            fired += tracker.evaluate(aircraft: [plane(at: latitude)],
+                                      fixes: [fix], runways: [])
         }
 
         XCTAssertEqual(fired, [report.id])
+    }
+
+    /// The bug this pair exists to prevent.
+    ///
+    /// `RecognizedCommand.callsign` is what the controller said — "air india 123".
+    /// The aircraft is "AIC123". Registering the spoken form means the tracker
+    /// never finds the aircraft, and housekeeping drops the report on the very next
+    /// tick as belonging to something that has left the scene. Nothing is ever
+    /// spoken and nothing reports an error.
+    func testAReportRegisteredAgainstTheSpokenCallsignNeverFires() throws {
+        let command = try command("air india 123 report passing papa juliet")
+        let condition = try XCTUnwrap(
+            CommandMapping.reportCondition(code: command.code, slots: command))
+
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(),
+                                       callsign: "air india 123",   // wrong on purpose
+                                       condition: condition))
+
+        // Housekeeping sees a callsign no aircraft answers to.
+        XCTAssertEqual(tracker.forget(callsignsOtherThan: ["AIC123"]).count, 1)
+        XCTAssertTrue(tracker.pending.isEmpty)
+    }
+
+    func testTheSameReportAgainstTheAircraftCallsignSurvivesHousekeeping() throws {
+        let command = try command("air india 123 report passing papa juliet")
+        let condition = try XCTUnwrap(
+            CommandMapping.reportCondition(code: command.code, slots: command))
+
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123", condition: condition))
+
+        XCTAssertTrue(tracker.forget(callsignsOtherThan: ["AIC123"]).isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1)
+    }
+
+    /// The phrase still names the aircraft the way the controller said it — a pilot
+    /// reads back their own callsign, not an ICAO designator.
+    func testThePhraseKeepsTheSpokenCallsignEvenThoughTheTrackerUsesTheOther() throws {
+        let command = try command("air india 123 report passing papa juliet")
+        XCTAssertEqual(try XCTUnwrap(command.readback.deferred).spoken,
+                       "air india one two three, PASSING papa juliet")
+    }
+
+    private func plane(at latitude: Double) -> Aircraft {
+        Aircraft(callsign: "AIC123",
+                 position: .init(latitude: latitude, longitude: 77.10),
+                 headingDegrees: 0)
     }
 
     // MARK: - Instructions with nothing deferred
@@ -118,31 +166,59 @@ final class DeferredReportTests: XCTestCase {
     // MARK: - The coordinator
 
     func testCoordinatorRegistersOnlyWhatItCanSpeak() throws {
-        let coordinator = DeferredReportCoordinator.shared
-        coordinator.reset()
+        let coordinator = DeferredReportCoordinator()
 
-        coordinator.register(try command("air india 123 report passing papa juliet"))
+        coordinator.register(try command("air india 123 report passing papa juliet"),
+                             aircraftCallsign: "AIC123")
         XCTAssertEqual(coordinator.pendingCount, 1)
 
         // A plain vector adds nothing.
-        coordinator.register(try command("air india 123 turn right heading 250"))
+        coordinator.register(try command("air india 123 turn right heading 250"),
+                             aircraftCallsign: "AIC123")
         XCTAssertEqual(coordinator.pendingCount, 1)
 
         // Asking again does not owe it twice.
-        coordinator.register(try command("air india 123 report passing papa juliet"))
+        coordinator.register(try command("air india 123 report passing papa juliet"),
+                             aircraftCallsign: "AIC123")
         XCTAssertEqual(coordinator.pendingCount, 1)
 
-        coordinator.reset()
+    }
+
+    func testCoordinatorSpeaksTheReportWhenTheAircraftPassesTheFix() throws {
+        let coordinator = DeferredReportCoordinator()
+        coordinator.register(try command("air india 123 report passing papa juliet"),
+                             aircraftCallsign: "AIC123")
+        XCTAssertEqual(coordinator.pendingCount, 1)
+
+        for latitude in [28.40, 28.50, 28.58, 28.63, 28.70] {
+            coordinator.advance(aircraft: [plane(at: latitude)],
+                                allCallsigns: ["AIC123"],
+                                fixes: [fix], runways: [])
+        }
+        XCTAssertEqual(coordinator.pendingCount, 0, "the report came due and was spoken")
+    }
+
+    func testCoordinatorKeepsTheReportWhileTheAircraftIsStillFlying() throws {
+        let coordinator = DeferredReportCoordinator()
+        coordinator.register(try command("air india 123 report passing papa juliet"),
+                             aircraftCallsign: "AIC123")
+
+        // Approaching but not yet past.
+        for latitude in [28.30, 28.40, 28.50] {
+            coordinator.advance(aircraft: [plane(at: latitude)],
+                                allCallsigns: ["AIC123"],
+                                fixes: [fix], runways: [])
+        }
+        XCTAssertEqual(coordinator.pendingCount, 1, "still owed")
     }
 
     func testCoordinatorForgetsReportsForAircraftThatHaveGone() throws {
-        let coordinator = DeferredReportCoordinator.shared
-        coordinator.reset()
-        coordinator.register(try command("air india 123 report passing papa juliet"))
+        let coordinator = DeferredReportCoordinator()
+        coordinator.register(try command("air india 123 report passing papa juliet"),
+                             aircraftCallsign: "AIC123")
 
         coordinator.advance(aircraft: [], allCallsigns: ["BAW17"],
                             fixes: [fix], runways: [])
         XCTAssertEqual(coordinator.pendingCount, 0)
-        coordinator.reset()
     }
 }

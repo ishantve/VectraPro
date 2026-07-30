@@ -33,19 +33,28 @@ final class DeferredReportCoordinator {
     /// Rendered phrase per pending report.
     private var phrases: [UUID: Phrase] = [:]
 
-    private init() {}
+    /// Not private, so tests can work on their own instance instead of sharing the
+    /// app's — a singleton holding pending reports makes test order matter.
+    init() {}
 
     // MARK: - Registration
 
     /// Registers the deferred half of a command's readback, if it has one.
     ///
+    /// `aircraftCallsign` must be the aircraft's own callsign ("AIC123"), not the
+    /// spoken form the controller used ("air india one two three"). The tracker
+    /// finds the aircraft by it every tick, so a spoken form matches nothing and
+    /// the report is dropped as belonging to an aircraft that has left. The phrase
+    /// itself still names the aircraft the way it was spoken, which is what a pilot
+    /// would say.
+    ///
     /// A phrase still missing values is not registered: speaking a placeholder
     /// aloud is worse than not reporting, and an unresolved slot means the payload
     /// asks the pilot to say something the instruction never gave them.
     /// Code 320 is exactly that case until the backend corrects it.
-    func register(_ command: RecognizedCommand) {
+    func register(_ command: RecognizedCommand, aircraftCallsign: String?) {
         guard let deferred = command.readback.deferred,
-              let callsign = command.callsign,
+              let callsign = aircraftCallsign,
               let condition = CommandMapping.reportCondition(code: command.code, slots: command)
         else { return }
 

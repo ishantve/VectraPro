@@ -67,6 +67,9 @@ final class CommandController {
     // MARK: - Routing one aircraft's instructions
 
     private func route(_ commands: [RecognizedCommand], callsign: String?) {
+        // Resolved once. Both the apply path and the report tracker need the
+        // aircraft's own callsign; the spoken form only belongs in the readback.
+        let target = callsign.flatMap { mapViewModel?.resolveRadarCallsign(from: $0) }
         var effects: [AircraftCommand] = []
         var spoken: [RecognizedCommand] = []
 
@@ -105,7 +108,9 @@ final class CommandController {
 
         // "Report passing PJ" is answered now and reported later; register the
         // deferred half so it fires when the aircraft actually gets there.
-        for command in spoken { DeferredReportCoordinator.shared.register(command) }
+        for command in spoken {
+            DeferredReportCoordinator.shared.register(command, aircraftCallsign: target)
+        }
 
         let readback = ReadbackComposer.compose(spoken, callsign: callsign)
 
@@ -117,14 +122,17 @@ final class CommandController {
             return
         }
 
-        apply(effects, callsign: callsign, readback: readback)
+        apply(effects, callsign: callsign, target: target, readback: readback)
     }
 
-    private func apply(_ effects: [AircraftCommand], callsign: String?, readback: String?) {
+    private func apply(_ effects: [AircraftCommand],
+                       callsign: String?,
+                       target: String?,
+                       readback: String?) {
         guard let mapViewModel else { return }
 
-        if let callsign, let resolved = mapViewModel.resolveRadarCallsign(from: callsign) {
-            mapViewModel.applyToCallsign(resolved, commands: effects, readback: readback)
+        if let target {
+            mapViewModel.applyToCallsign(target, commands: effects, readback: readback)
         } else if callsign != nil {
             // A callsign was spoken but no aircraft answers to it — never fall back
             // to the selected aircraft here, or an instruction meant for one
