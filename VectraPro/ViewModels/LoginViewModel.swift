@@ -34,4 +34,14 @@ final class LoginViewModel: ObservableObject {
         // Post-login bootstrap: /organizations then /games (sequential).
         try await session.loadInitialData()
     }
+
+    /// Released classes need this. The target compiles with
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so a class's compiler-generated
+    /// deinit is an isolated one, and the runtime hops an isolated deinit onto the
+    /// main executor — which aborts the process on this toolchain (Swift 6.2.4).
+    /// Singletons hide it by never being released; anything created per screen or
+    /// per view is released for real. Declaring the deinit `nonisolated` says what is
+    /// true — tearing this down needs no actor — and skips the hop.
+    /// `IsolatedDeinitScanTests` is what catches a class that forgets it.
+    nonisolated deinit { }
 }
