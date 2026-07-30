@@ -799,6 +799,14 @@ final class MapViewModel: ObservableObject {
             }
         }
 
+        // Reports the pilots owe: speak any that have just come due, now that
+        // positions have advanced this tick.
+        DeferredReportCoordinator.shared.advance(
+            aircraft: aircraft,
+            allCallsigns: Set((aircraft + traffic).map(\.callsign)),
+            fixes: navigationFixesDomain,
+            runways: runways)
+
         // Aircraft that reached the runway on the localizer have landed.
         if !landedIDs.isEmpty {
             if let sel = selectedAircraftID, landedIDs.contains(sel) { selectedAircraftID = nil }

@@ -1,0 +1,219 @@
+//
+//  PendingReportTrackerTests.swift
+//  ATCSimKit
+//
+//  When a "report …" instruction actually comes due.
+//
+//  The test that matters most is `testAPassWideOfTheFixStillFires`: a proximity
+//  check would miss it, and a missed report is a silent failure — the pilot simply
+//  never says anything and nobody knows why.
+//
+
+import XCTest
+import CoreLocation
+@testable import ATCSimKit
+
+final class PendingReportTrackerTests: XCTestCase {
+
+    private let fix = Fix(fixName: "PJ", type: "WAYPOINT", latitude: 28.60, longitude: 77.10)
+
+    private func aircraft(at latitude: Double, longitude: Double,
+                          callsign: String = "AIC123") -> Aircraft {
+        Aircraft(callsign: callsign,
+                 position: .init(latitude: latitude, longitude: longitude),
+                 headingDegrees: 0)
+    }
+
+    /// Flies the aircraft through a series of positions, returning the ids fired.
+    private func fly(_ tracker: inout PendingReportTracker,
+                     through positions: [(Double, Double)],
+                     callsign: String = "AIC123") -> [UUID] {
+        var fired: [UUID] = []
+        for (latitude, longitude) in positions {
+            fired += tracker.evaluate(
+                aircraft: [aircraft(at: latitude, longitude: longitude, callsign: callsign)],
+                fixes: [fix],
+                runways: [])
+        }
+        return fired
+    }
+
+    // MARK: - Passing a point
+
+    func testPassingAFixFiresOnceTheAircraftIsPastIt() {
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+        tracker.register(report)
+
+        // Northbound along 77.10, straight over the fix at 28.60.
+        let fired = fly(&tracker, through: [(28.40, 77.10), (28.50, 77.10),
+                                            (28.58, 77.10), (28.62, 77.10),
+                                            (28.70, 77.10)])
+        XCTAssertEqual(fired, [report.id])
+        XCTAssertTrue(tracker.pending.isEmpty, "a fired report is not owed twice")
+    }
+
+    func testAPassWideOfTheFixStillFires() {
+        // Eight miles abeam — outside any capture radius a hold would use, but the
+        // aircraft has still passed the point and the report is still due.
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+        tracker.register(report)
+
+        let fired = fly(&tracker, through: [(28.40, 77.25), (28.52, 77.25),
+                                            (28.60, 77.25), (28.68, 77.25)])
+        XCTAssertEqual(fired, [report.id])
+    }
+
+    func testAnAircraftFlyingAwayFromTheStartDoesNotReportImmediately() {
+        // Without requiring an approach first, the very first opening distance
+        // would look exactly like a pass.
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+
+        let fired = fly(&tracker, through: [(28.50, 77.10), (28.40, 77.10),
+                                            (28.30, 77.10), (28.20, 77.10)])
+        XCTAssertTrue(fired.isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1, "still owed — it never got there")
+    }
+
+    func testNothingFiresOnTheFirstEvaluation() {
+        // One position is not a direction of travel.
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+        XCTAssertTrue(fly(&tracker, through: [(28.59, 77.10)]).isEmpty)
+    }
+
+    // MARK: - Distance from a point
+
+    func testDistanceReportFiresOnCrossingTheRange() {
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123",
+                                   condition: .distanceFromFix(nauticalMiles: 10, fix: "PJ"))
+        tracker.register(report)
+
+        // Inbound from about 24 NM south, through 10 NM (≈0.167°).
+        let fired = fly(&tracker, through: [(28.20, 77.10), (28.35, 77.10),
+                                            (28.42, 77.10), (28.47, 77.10)])
+        XCTAssertEqual(fired, [report.id])
+    }
+
+    func testDistanceReportDoesNotFireBeforeTheRange() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .distanceFromFix(nauticalMiles: 10, fix: "PJ")))
+        // Stays 15 NM or more out.
+        XCTAssertTrue(fly(&tracker, through: [(28.20, 77.10), (28.25, 77.10),
+                                              (28.32, 77.10)]).isEmpty)
+    }
+
+    func testDistanceReportAlsoFiresOutbound() {
+        // "Report 10 miles from PJ" while departing is still a range crossing.
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123",
+                                   condition: .distanceFromFix(nauticalMiles: 10, fix: "PJ"))
+        tracker.register(report)
+
+        let fired = fly(&tracker, through: [(28.60, 77.10), (28.68, 77.10),
+                                            (28.78, 77.10)])
+        XCTAssertEqual(fired, [report.id])
+    }
+
+    // MARK: - Localizer
+
+    func testLocalizerReportNeedsTheAircraftToBeClearedFirst() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .establishedOnLocalizer))
+        // No intercept clearance — nothing to be established on.
+        XCTAssertTrue(tracker.evaluate(aircraft: [aircraft(at: 28.5, longitude: 77.1)],
+                                       fixes: [fix], runways: []).isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1)
+    }
+
+    // MARK: - Housekeeping
+
+    func testAskingTwiceDoesNotOweTheReportTwice() {
+        var tracker = PendingReportTracker()
+        let first = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+        let second = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+
+        XCTAssertNil(tracker.register(first))
+        XCTAssertEqual(tracker.register(second), first.id, "the earlier one is displaced")
+        XCTAssertEqual(tracker.pending.count, 1)
+        XCTAssertEqual(tracker.pending.first?.id, second.id)
+    }
+
+    func testDifferentConditionsForOneAircraftBothStand() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .distanceFromFix(nauticalMiles: 10, fix: "PJ")))
+        XCTAssertEqual(tracker.pending.count, 2)
+    }
+
+    func testReportsAreForgottenWhenTheAircraftLeavesTheScene() {
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+        tracker.register(report)
+
+        XCTAssertEqual(tracker.forget(callsignsOtherThan: ["BAW17"]), [report.id])
+        XCTAssertTrue(tracker.pending.isEmpty)
+    }
+
+    func testReportsSurviveWhileTheAircraftIsStillAround() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+        XCTAssertTrue(tracker.forget(callsignsOtherThan: ["aic123", "BAW17"]).isEmpty,
+                      "callsign comparison must not be case-sensitive")
+        XCTAssertEqual(tracker.pending.count, 1)
+    }
+
+    func testAnUnknownFixNeverFires() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("NOPE")))
+        XCTAssertTrue(fly(&tracker, through: [(28.4, 77.1), (28.6, 77.1), (28.8, 77.1)]).isEmpty)
+    }
+
+    // MARK: - Mapping
+
+    func testConditionsComeFromTheCode() {
+        XCTAssertEqual(
+            CommandMapping.reportCondition(
+                code: "316",
+                slots: StaticCommandSlots(texts: ["SIGNIFICANT POINT": ["PJ"]])),
+            .passingFix("PJ"))
+
+        XCTAssertEqual(
+            CommandMapping.reportCondition(
+                code: "319",
+                slots: StaticCommandSlots(integers: ["DISTANCE": [10]],
+                                          texts: ["DME STATION": ["PJ"]])),
+            .distanceFromFix(nauticalMiles: 10, fix: "PJ"))
+
+        XCTAssertEqual(
+            CommandMapping.reportCondition(code: "405", slots: StaticCommandSlots()),
+            .establishedOnLocalizer)
+
+        // 320's condition uses the point its own template names, not the station
+        // its readback mistakenly mentions.
+        XCTAssertEqual(
+            CommandMapping.reportCondition(
+                code: "320",
+                slots: StaticCommandSlots(integers: ["DISTANCE": [10]],
+                                          texts: ["SIGNIFICANT POINT": ["PJ"]])),
+            .distanceFromFix(nauticalMiles: 10, fix: "PJ"))
+    }
+
+    func testCommandsThatAskForNothingDeferredHaveNoCondition() {
+        XCTAssertNil(CommandMapping.reportCondition(code: "247",
+                                                    slots: StaticCommandSlots()))
+        XCTAssertNil(CommandMapping.reportCondition(code: "435",
+                                                    slots: StaticCommandSlots()))
+    }
+}

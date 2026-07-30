@@ -41,6 +41,20 @@ final class CommandTemplateStore {
     /// Bundled name; also the fallback if a fetched payload ever fails to decode.
     private static let bundledResource = "CommandTemplates"
 
+    /// Payload entries that cannot be used as shipped.
+    ///
+    /// Code 320 asks the pilot to report a distance "FROM [SIGNIFICANT POINT]" but
+    /// its readback names [DME STATION], which the instruction never supplies — so
+    /// the reply has an unfillable slot and can never be spoken. The template is
+    /// right and the readback is the copy-paste slip, so the readback is corrected
+    /// here. The decoder still reports the mismatch, and this entry goes away once
+    /// the payload is fixed at source.
+    private static let corrections: [TemplateSet.Correction] = [
+        .init(id: "320",
+              readback: "WILCO, [CALLSIGN]. Later: [CALLSIGN], "
+                      + "[DISTANCE] MILES DME FROM [SIGNIFICANT POINT]."),
+    ]
+
     func load() {
         guard let url = Bundle.main.url(forResource: Self.bundledResource,
                                         withExtension: "json") else {
@@ -49,6 +63,7 @@ final class CommandTemplateStore {
         }
         do {
             let set = try TemplateSet(data: try Data(contentsOf: url))
+                .applying(Self.corrections)
             templates = set
             recognizer = CommandRecognizer(templates: set)
             report(set)

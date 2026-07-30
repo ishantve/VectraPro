@@ -238,6 +238,46 @@ public enum CommandMapping {
         },
     ]
 
+    // MARK: - Deferred reports
+
+    /// When a "report …" instruction should actually be reported.
+    ///
+    /// These templates carry a `Later:` branch in their readback — the pilot says
+    /// WILCO now and reports when the condition occurs. The words come from the
+    /// template; deciding *when* needs position and geometry, so it belongs here
+    /// with the rest of the code-to-behaviour mapping.
+    ///
+    /// Returns nil for codes that ask for nothing deferred.
+    public static func reportCondition(code: String, slots: CommandSlots) -> ReportCondition? {
+        switch code {
+        case "316":   // REPORT PASSING [SIGNIFICANT POINT]
+            return slots.text("SIGNIFICANT POINT").map { .passingFix($0) }
+
+        case "317":   // REPORT [DISTANCE] MILES GNSS FROM [DME STATION]
+            return distanceReport(slots, fixSlot: "DME STATION")
+        case "318":   // … GNSS FROM [SIGNIFICANT POINT]
+            return distanceReport(slots, fixSlot: "SIGNIFICANT POINT")
+        case "319":   // … DME FROM [DME STATION]
+            return distanceReport(slots, fixSlot: "DME STATION")
+        case "320":   // … DME FROM [SIGNIFICANT POINT]
+            return distanceReport(slots, fixSlot: "SIGNIFICANT POINT")
+
+        case "405":   // REPORT ESTABLISHED ON ILS LOCALIZER
+            return .establishedOnLocalizer
+
+        default:
+            return nil
+        }
+    }
+
+    private static func distanceReport(_ slots: CommandSlots,
+                                       fixSlot: String) -> ReportCondition? {
+        guard let miles = slots.integer("DISTANCE"), let fix = slots.text(fixSlot) else {
+            return nil
+        }
+        return .distanceFromFix(nauticalMiles: Double(miles), fix: fix)
+    }
+
     // MARK: - Slot readers
 
     /// Heading 360 and heading 0 are the same direction; the simulator stores it

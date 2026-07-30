@@ -102,6 +102,11 @@ final class CommandController {
         }
 
         guard !spoken.isEmpty else { return }
+
+        // "Report passing PJ" is answered now and reported later; register the
+        // deferred half so it fires when the aircraft actually gets there.
+        for command in spoken { DeferredReportCoordinator.shared.register(command) }
+
         let readback = ReadbackComposer.compose(spoken, callsign: callsign)
 
         guard !effects.isEmpty else {
