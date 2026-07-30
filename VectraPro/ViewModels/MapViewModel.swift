@@ -431,12 +431,22 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
+    /// Where spoken and logged output goes. Named rather than reached for, so a
+    /// test can hand over a spy — the real one talks to the device synthesiser.
+    private let feedback: CommandFeedback
+    /// Reports aircraft owe, evaluated each tick.
+    private let reports: DeferredReportAnnouncing
+
     init(physics: AircraftPhysics? = nil,
          collision: AircraftCollisionDetector? = nil,
-         spawner: AircraftSpawner? = nil) {
+         spawner: AircraftSpawner? = nil,
+         feedback: CommandFeedback? = nil,
+         reports: DeferredReportAnnouncing? = nil) {
         self.physics   = physics ?? .shared
         self.collision = collision ?? .shared
         self.spawner   = spawner ?? .shared
+        self.feedback  = feedback ?? CommandFeedbackManager.shared
+        self.reports   = reports ?? DeferredReportCoordinator.shared
         aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
     }
 
@@ -451,7 +461,7 @@ final class MapViewModel: ObservableObject {
     /// Routes all audio feedback through CommandFeedbackManager.
     func apply(_ commands: [AircraftCommand], readback: String? = nil) {
         guard let id = selectedAircraftID else {
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
             return
         }
         applyCommands(commands, toAircraftWithID: id, readback: readback)
@@ -481,7 +491,7 @@ final class MapViewModel: ObservableObject {
                 holdingFixes: holdingFixesDomain,
                 navigationFixes: navigationFixesDomain)
             if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
-                CommandFeedbackManager.shared.commandError(reason)
+                feedback.commandError(reason)
                 return
             }
         }
@@ -513,7 +523,7 @@ final class MapViewModel: ObservableObject {
             }
             return
         }
-        CommandFeedbackManager.shared.aircraftNotFound()
+        feedback.aircraftNotFound()
     }
 
     /// Speaks the ICAO readback when one was rendered, otherwise the legacy
@@ -522,9 +532,9 @@ final class MapViewModel: ObservableObject {
                           callsign: String,
                           commands: [AircraftCommand]) {
         if let readback, !readback.isEmpty {
-            CommandFeedbackManager.shared.readback(readback)
+            feedback.readback(readback)
         } else {
-            CommandFeedbackManager.shared.commandAccepted(callsign: callsign, commands: commands)
+            feedback.commandAccepted(callsign: callsign, commands: commands)
         }
     }
 
@@ -760,7 +770,7 @@ final class MapViewModel: ObservableObject {
 
         // Reports the pilots owe: speak any that have just come due, now that
         // positions have advanced this tick.
-        DeferredReportCoordinator.shared.advance(
+        reports.advance(
             aircraft: aircraft,
             allCallsigns: Set((aircraft + traffic).map(\.callsign)),
             fixes: navigationFixesDomain,
@@ -895,7 +905,7 @@ final class MapViewModel: ObservableObject {
         guard let idx = traffic.firstIndex(where: {
             $0.callsign.uppercased() == callsign.uppercased() && $0.category == .departure
         }) else {
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
             return
         }
         var ac = traffic[idx]
@@ -912,7 +922,7 @@ final class MapViewModel: ObservableObject {
 
         traffic.remove(at: idx)
         aircraft.append(ac)
-        CommandFeedbackManager.shared.commandAccepted(callsign: ac.callsign, commands: [])
+        feedback.commandAccepted(callsign: ac.callsign, commands: [])
     }
 
     /// Resolves a departure callsign from an already-normalised voice transcript.
@@ -942,7 +952,7 @@ final class MapViewModel: ObservableObject {
         guard let id = (aircraft + traffic).first(where: {
             $0.callsign.uppercased() == callsign.uppercased()
         })?.id else {
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
             return
         }
         applyCommands(commands, toAircraftWithID: id, readback: readback)

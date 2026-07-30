@@ -16,6 +16,7 @@ import ATCParserKit
 import ATCSimKit
 @testable import VectraPro
 
+@MainActor
 final class DeferredReportTests: XCTestCase {
 
     private var recognizer: CommandRecognizer!
@@ -166,7 +167,8 @@ final class DeferredReportTests: XCTestCase {
     // MARK: - The coordinator
 
     func testCoordinatorRegistersOnlyWhatItCanSpeak() throws {
-        let coordinator = DeferredReportCoordinator()
+        let coordinator = DeferredReportCoordinator.shared
+        coordinator.reset()
 
         coordinator.register(try command("air india 123 report passing papa juliet"),
                              aircraftCallsign: "AIC123")
@@ -181,11 +183,13 @@ final class DeferredReportTests: XCTestCase {
         coordinator.register(try command("air india 123 report passing papa juliet"),
                              aircraftCallsign: "AIC123")
         XCTAssertEqual(coordinator.pendingCount, 1)
+        coordinator.reset()
 
     }
 
     func testCoordinatorSpeaksTheReportWhenTheAircraftPassesTheFix() throws {
-        let coordinator = DeferredReportCoordinator()
+        let coordinator = DeferredReportCoordinator.shared
+        coordinator.reset()
         coordinator.register(try command("air india 123 report passing papa juliet"),
                              aircraftCallsign: "AIC123")
         XCTAssertEqual(coordinator.pendingCount, 1)
@@ -196,10 +200,12 @@ final class DeferredReportTests: XCTestCase {
                                 fixes: [fix], runways: [])
         }
         XCTAssertEqual(coordinator.pendingCount, 0, "the report came due and was spoken")
+        coordinator.reset()
     }
 
     func testCoordinatorKeepsTheReportWhileTheAircraftIsStillFlying() throws {
-        let coordinator = DeferredReportCoordinator()
+        let coordinator = DeferredReportCoordinator.shared
+        coordinator.reset()
         coordinator.register(try command("air india 123 report passing papa juliet"),
                              aircraftCallsign: "AIC123")
 
@@ -210,15 +216,18 @@ final class DeferredReportTests: XCTestCase {
                                 fixes: [fix], runways: [])
         }
         XCTAssertEqual(coordinator.pendingCount, 1, "still owed")
+        coordinator.reset()
     }
 
     func testCoordinatorForgetsReportsForAircraftThatHaveGone() throws {
-        let coordinator = DeferredReportCoordinator()
+        let coordinator = DeferredReportCoordinator.shared
+        coordinator.reset()
         coordinator.register(try command("air india 123 report passing papa juliet"),
                              aircraftCallsign: "AIC123")
 
         coordinator.advance(aircraft: [], allCallsigns: ["BAW17"],
                             fixes: [fix], runways: [])
         XCTAssertEqual(coordinator.pendingCount, 0)
+        coordinator.reset()
     }
 }

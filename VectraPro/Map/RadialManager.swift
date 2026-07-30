@@ -11,7 +11,17 @@ import CoreLocation
 import GeoNavKit
 import UIKit
 
-final class RadialManager {
+/// Deliberately not actor-isolated.
+///
+/// The app target is `@MainActor` by default, which made this class's implicit
+/// deinit an isolated one — and an isolated deinit is hopped onto the main executor
+/// by the concurrency runtime. Deallocating a `MapViewModel` therefore crashed in
+/// `swift_task_deinitOnExecutorImpl` with a malloc abort. It never showed up in the
+/// app because the only view model is a singleton that is never released, but it
+/// makes a second instance impossible — which is what a test needs.
+///
+/// Nothing here touches shared mutable state or the UI, so isolation buys nothing.
+nonisolated final class RadialManager {
 
     /// 20, 50, 90, 150 and their opposites.
     static let defaultRadials: Set<Int> = {

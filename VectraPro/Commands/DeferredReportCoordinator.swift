@@ -25,7 +25,15 @@ import Foundation
 import ATCParserKit
 import ATCSimKit
 
-final class DeferredReportCoordinator {
+/// The tick-side half of deferred reports, named so `MapViewModel` can be given a
+/// stand-in instead of the app's own — a real one speaks.
+@MainActor
+protocol DeferredReportAnnouncing {
+    func advance(aircraft: [Aircraft], allCallsigns: Set<String>,
+                 fixes: [Fix], runways: [Runway])
+}
+
+final class DeferredReportCoordinator: DeferredReportAnnouncing {
 
     static let shared = DeferredReportCoordinator()
 
@@ -33,9 +41,7 @@ final class DeferredReportCoordinator {
     /// Rendered phrase per pending report.
     private var phrases: [UUID: Phrase] = [:]
 
-    /// Not private, so tests can work on their own instance instead of sharing the
-    /// app's — a singleton holding pending reports makes test order matter.
-    init() {}
+    private init() {}
 
     // MARK: - Registration
 
