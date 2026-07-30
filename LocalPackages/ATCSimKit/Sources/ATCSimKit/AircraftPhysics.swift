@@ -48,13 +48,16 @@ public final class AircraftPhysics {
             case .presentHeading:
                 aircraft.turnDirection = nil
                 aircraft.targetHeading = nil
-            case .flightLevel(let flightLevel):
+            case .stopTurn(let heading):
+                // Keep turning the way it already is, just stop on this heading.
+                aircraft.targetHeading = heading
+            case .altitude(let feet):
                 aircraft.minAltitudeFeet = nil
                 aircraft.maxAltitudeFeet = nil
-                aircraft.targetAltitudeFeet = Double(flightLevel) * 100
+                aircraft.targetAltitudeFeet = feet
             case .altitudeBlock(let low, let high):
-                let lo = Double(min(low, high)) * 100
-                let hi = Double(max(low, high)) * 100
+                let lo = min(low, high)
+                let hi = max(low, high)
                 aircraft.minAltitudeFeet = lo
                 aircraft.maxAltitudeFeet = hi
                 let alt = aircraft.altitudeFeet
@@ -73,11 +76,31 @@ public final class AircraftPhysics {
                 aircraft.minSpeedKnots = nil
                 aircraft.maxSpeedKnots = knots
                 if aircraft.speedKnots > knots { aircraft.targetSpeedKnots = knots }
+            case .stopClimb(let limit):
+                // Only ever takes climb away. An aircraft already at or above the
+                // level simply stops where it is; it must not be turned into a
+                // descent, which is the opposite instruction.
+                let current = aircraft.altitudeFeet
+                guard let target = aircraft.targetAltitudeFeet, target > current else { break }
+                aircraft.targetAltitudeFeet = max(current, min(target, limit))
+            case .stopDescent(let limit):
+                let current = aircraft.altitudeFeet
+                guard let target = aircraft.targetAltitudeFeet, target < current else { break }
+                aircraft.targetAltitudeFeet = min(current, max(target, limit))
             case .hold(let fixName):
                 // Start navigating direct to the holding fix; the view model
                 // steers the heading toward it each tick (auto-turn).
                 aircraft.holdingTargetName = fixName
+                aircraft.directToFix = nil
                 aircraft.turnDirection = nil
+            case .proceedDirect(let fixName):
+                // Same steering as a hold, but the aircraft is not captured on
+                // arrival — it carries on rather than entering a racetrack.
+                aircraft.directToFix = fixName
+                aircraft.holdingTargetName = nil
+                aircraft.turnDirection = nil
+            case .squawk(let code):
+                aircraft.squawk = code
             case .interceptLocalizer(let runway):
                 // Cleared to intercept the localizer for this runway. The view
                 // model drives the actual intercept + tracking each tick.

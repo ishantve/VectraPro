@@ -39,6 +39,9 @@ public struct Aircraft: Identifiable {
     public var holdingName: String? = nil
     /// Holding fix the aircraft is currently flying toward (auto-turn).
     public var holdingTargetName: String? = nil
+    /// Fix the aircraft is routing direct to without holding there. Cleared on
+    /// arrival, after which it continues on the heading it arrived with.
+    public var directToFix: String? = nil
     /// Inbound leg course (toward the fix) for the holding racetrack.
     public var holdingInboundCourse: Double? = nil
     /// Position around the holding loop as a fraction (0…1, 0 = fix).

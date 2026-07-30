@@ -165,6 +165,12 @@ final class MapViewModel: ObservableObject {
         holdingFixes.map(\.asDomain)
     }
 
+    /// Every fix an aircraft may be routed direct to — waypoints and VORs as well
+    /// as holding fixes, since "proceed direct" is not limited to holds.
+    private var navigationFixesDomain: [ATCSimKit.Fix] {
+        fixes.map(\.asDomain)
+    }
+
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
@@ -473,18 +479,27 @@ final class MapViewModel: ObservableObject {
 
     /// Apply parsed commands to the selected aircraft.
     /// Routes all audio feedback through CommandFeedbackManager.
-    func apply(_ commands: [AircraftCommand]) {
+    func apply(_ commands: [AircraftCommand], readback: String? = nil) {
         guard let id = selectedAircraftID else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        applyCommands(commands, toAircraftWithID: id)
+        applyCommands(commands, toAircraftWithID: id, readback: readback)
+    }
+
+    /// Callsign of the aircraft a keypad command would act on — needed to render
+    /// its readback, which names the aircraft.
+    var selectedCallsign: String? {
+        guard let id = selectedAircraftID else { return nil }
+        return (aircraft + traffic).first { $0.id == id }?.callsign
     }
 
     /// Central command application. Radar aircraft get the command directly.
     /// A holding aircraft keeps holding for speed/altitude clearances, but is
     /// released back onto the radar for a vectoring / direct / hold command.
-    private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
+    private func applyCommands(_ commands: [AircraftCommand],
+                               toAircraftWithID id: UUID,
+                               readback: String? = nil) {
         // Validate the whole utterance against the aircraft + scene before applying
         // anything (altitude/speed envelope, turn limits, hold-fix existence, and
         // the localizer-intercept checks). On failure, speak the reason and apply
@@ -493,7 +508,8 @@ final class MapViewModel: ObservableObject {
             let context = CommandValidator.Context(
                 runways: runways,
                 activeLocalizerRunways: activeLocalizerRunways,
-                holdingFixes: holdingFixesDomain)
+                holdingFixes: holdingFixesDomain,
+                navigationFixes: navigationFixesDomain)
             if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
                 CommandFeedbackManager.shared.commandError(reason)
                 return
@@ -503,7 +519,7 @@ final class MapViewModel: ObservableObject {
         // Live radar aircraft.
         if let i = aircraft.firstIndex(where: { $0.id == id }) {
             physics.apply(commands, to: &aircraft[i])
-            CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+            announce(readback, callsign: aircraft[i].callsign, commands: commands)
             return
         }
         // Holding aircraft (in the hangar).
@@ -519,15 +535,27 @@ final class MapViewModel: ObservableObject {
                 aircraft.append(ac)
                 let last = aircraft.count - 1
                 physics.apply(commands, to: &aircraft[last])
-                CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[last].callsign, commands: commands)
+                announce(readback, callsign: aircraft[last].callsign, commands: commands)
             } else {
                 // Speed / altitude clearance: obey while remaining in the hold.
                 physics.apply(commands, to: &traffic[ti])
-                CommandFeedbackManager.shared.commandAccepted(callsign: traffic[ti].callsign, commands: commands)
+                announce(readback, callsign: traffic[ti].callsign, commands: commands)
             }
             return
         }
         CommandFeedbackManager.shared.aircraftNotFound()
+    }
+
+    /// Speaks the ICAO readback when one was rendered, otherwise the legacy
+    /// English built from the command enum.
+    private func announce(_ readback: String?,
+                          callsign: String,
+                          commands: [AircraftCommand]) {
+        if let readback, !readback.isEmpty {
+            CommandFeedbackManager.shared.readback(readback)
+        } else {
+            CommandFeedbackManager.shared.commandAccepted(callsign: callsign, commands: commands)
+        }
     }
 
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
@@ -535,9 +563,11 @@ final class MapViewModel: ObservableObject {
     private func commandsLeaveHold(_ commands: [AircraftCommand]) -> Bool {
         commands.contains { cmd in
             switch cmd {
-            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold, .interceptLocalizer:
+            case .heading, .headingTurn, .relativeTurn, .presentHeading, .stopTurn,
+                 .hold, .proceedDirect, .interceptLocalizer:
                 return true
-            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:
+            case .speed, .minSpeed, .maxSpeed, .altitude, .altitudeBlock,
+                 .stopClimb, .stopDescent, .squawk:
                 return false
             }
         }
@@ -750,6 +780,10 @@ final class MapViewModel: ObservableObject {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             // Auto-turn toward a commanded holding fix (proceed direct).
             HoldingController.steer(&aircraft[index], fixes: holdingFixesDomain)
+            // Direct routing to any fix — steered the same way, but the aircraft
+            // passes the fix and carries on instead of entering a racetrack.
+            DirectRouteController.steer(&aircraft[index], fixes: navigationFixesDomain)
+            DirectRouteController.releaseOnArrival(&aircraft[index], fixes: navigationFixesDomain)
             // Localizer intercept: align with the centreline, then track it in.
             LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
@@ -961,14 +995,21 @@ final class MapViewModel: ObservableObject {
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
-    func applyToCallsign(_ callsign: String, commands: [AircraftCommand]) {
+    ///
+    /// `readback` carries ICAO phraseology already rendered from the backend's own
+    /// `readBackText`. When present it is spoken instead of the English that
+    /// `CommandFeedbackManager` builds from the command enum — by that point the
+    /// template is forgotten, so the real phraseology could never be used.
+    func applyToCallsign(_ callsign: String,
+                         commands: [AircraftCommand],
+                         readback: String? = nil) {
         guard let id = (aircraft + traffic).first(where: {
             $0.callsign.uppercased() == callsign.uppercased()
         })?.id else {
             CommandFeedbackManager.shared.aircraftNotFound()
             return
         }
-        applyCommands(commands, toAircraftWithID: id)
+        applyCommands(commands, toAircraftWithID: id, readback: readback)
     }
 
     // MARK: - Approach enabling

@@ -3,14 +3,20 @@
 //  VectraPro
 //
 //  Logic for the radar command keypad, kept separate from its view
-//  (`CommandKeyboard`). One function per key — fill each in independently.
+//  (`CommandKeyboard`).
 //
-//  Some commands need a numeric value (the "*" in the key, e.g. ↑SPD*). For
-//  those, `requiresValue` is true and the view collects a number via the
-//  numeric keypad, then calls `perform(_:value:)`.
+//  A key names a phraseology code (see `KeyboardCommandCatalog`); everything after
+//  that is the pipeline speech already uses — `CommandMapping` for the effect, the
+//  template for the readback. So the keypad and the microphone cannot drift apart,
+//  and the keypad now produces proper ICAO readbacks, which it never did before.
+//
+//  Some commands need a numeric value (the "*" in the key, e.g. ↑SPD*). For those,
+//  `requiresValue` is true and the view collects a number via the numeric keypad,
+//  then calls `perform(_:value:)`.
 //
 
 import Foundation
+import ATCParserKit
 import ATCSimKit
 
 @MainActor
@@ -21,97 +27,52 @@ final class CommandKeyboardHandler {
     /// The view-model commands are applied to — injected (defaults to the shared
     /// instance) rather than reached into globally, so the dependency is explicit.
     private let radar: MapViewModel
-    private init(radar: MapViewModel? = nil) {
+    private let store: CommandTemplateStore
+    private let renderer = ReadbackRenderer()
+
+    private init(radar: MapViewModel? = nil, store: CommandTemplateStore? = nil) {
         self.radar = radar ?? .shared
+        self.store = store ?? .shared
     }
 
-    // MARK: - Valued (numeric-entry) commands
-
-    private enum Valued {
-        case increaseSpeed, decreaseSpeed, maintainSpeed, minSpeed, maxSpeed
-        case climbMaintain, descendMaintain, block
-        case turnLeftHeading, turnRightHeading, turnDegreesLeft, turnDegreesRight, flyHeading
-    }
-
-    private func valuedKind(for command: String) -> Valued? {
-        switch command {
-        case "↑SPD*":   return .increaseSpeed
-        case "↓SPD*":   return .decreaseSpeed
-        case "SPD*":    return .maintainSpeed
-        case "SPD≥*":   return .minSpeed
-        case "SPD≤*":   return .maxSpeed
-        case "C/M*":    return .climbMaintain
-        case "D/M*":    return .descendMaintain
-        case "MBLK*-*": return .block
-        case "TLH":     return .turnLeftHeading
-        case "TRH":     return .turnRightHeading
-        case "T*DL":    return .turnDegreesLeft
-        case "T*DR":    return .turnDegreesRight
-        case "FH":      return .flyHeading
-        default:        return nil
-        }
-    }
+    // MARK: - Key metadata
 
     /// True if the command needs a number entered before it applies.
     func requiresValue(_ command: String) -> Bool {
-        valuedKind(for: command) != nil
+        (KeyboardCommandCatalog.command(for: command)?.valueCount ?? 0) > 0
     }
 
     /// How many numbers the command needs (block altitude needs two).
     func valueCount(for command: String) -> Int {
-        valuedKind(for: command) == .block ? 2 : 1
+        max(1, KeyboardCommandCatalog.command(for: command)?.valueCount ?? 1)
     }
 
     /// Full command sentence shown on the keypad; the keypad replaces "xxx"
     /// with the value being typed.
     func prompt(for command: String) -> String {
-        switch valuedKind(for: command) {
-        case .increaseSpeed: return "Increase speed to xxx knots"
-        case .decreaseSpeed: return "Reduce speed to xxx knots"
-        case .maintainSpeed:    return "Maintain xxx knots"
-        case .minSpeed:         return "Maintain xxx knots or greater"
-        case .maxSpeed:         return "Do not exceed xxx knots"
-        case .climbMaintain:     return "Climb and maintain FL xxx"
-        case .descendMaintain:   return "Descend and maintain FL xxx"
-        case .block:             return "Maintain block FL xxx through FL xxx"
-        case .turnLeftHeading:   return "Turn left heading xxx"
-        case .turnRightHeading:  return "Turn right heading xxx"
-        case .turnDegreesLeft:   return "Turn xxx degrees left"
-        case .turnDegreesRight:  return "Turn xxx degrees right"
-        case .flyHeading:        return "Fly heading xxx"
-        case nil:                return command
-        }
+        KeyboardCommandCatalog.command(for: command)?.prompt ?? command
     }
+
+    // MARK: - Applying
 
     /// Apply a single-value command with the number entered on the keypad.
     func perform(_ command: String, value: Int) {
-        switch valuedKind(for: command) {
-        case .increaseSpeed:   increaseSpeed(to: value)
-        case .decreaseSpeed:   decreaseSpeed(to: value)
-        case .maintainSpeed:   maintainSpeed(value)
-        case .minSpeed:        maintainSpeedOrGreater(value)
-        case .maxSpeed:        doNotExceedSpeed(value)
-        case .climbMaintain:    climbMaintain(value)
-        case .descendMaintain:  descendMaintain(value)
-        case .turnLeftHeading:  turnLeftHeading(value)
-        case .turnRightHeading: turnRightHeading(value)
-        case .turnDegreesLeft:  turnDegreesLeft(value)
-        case .turnDegreesRight: turnDegreesRight(value)
-        case .flyHeading:       flyHeading(value)
-        case .block, nil:       break
-        }
+        apply(command, values: [value])
     }
 
     /// Apply a two-value (block altitude) command.
     func perform(_ command: String, low: Int, high: Int) {
-        guard valuedKind(for: command) == .block else { return }
-        maintainBlock(low: low, high: high)
+        apply(command, values: [low, high])
     }
-
-    // MARK: - Valueless commands
 
     /// Routes a tapped key (its title) to its function.
     func perform(_ command: String) {
+        if KeyboardCommandCatalog.command(for: command) != nil {
+            apply(command, values: [])
+            return
+        }
+        // Keys that need input the keypad cannot collect, or phraseology with no
+        // behaviour yet. Left as they were rather than wired to something wrong.
         switch command {
         case "ILOC Rwy*": ilocRunway()
         case "C/T Rwy*":  clearedToRunway()
@@ -119,7 +80,6 @@ final class CommandKeyboardHandler {
         case "HLD":       hold()
         case "H/O":       handOff()
         case "DIR":       direct()
-        case "FPH":       flyPresentHeading()
         default:
             #if DEBUG
             print("CommandKeyboard: unhandled command \(command)")
@@ -127,88 +87,52 @@ final class CommandKeyboardHandler {
         }
     }
 
-    // MARK: - Speed commands
+    /// The one path every keypad command takes: code + values → effect + readback.
+    private func apply(_ key: String, values: [Int]) {
+        guard let binding = KeyboardCommandCatalog.command(for: key) else { return }
 
-    /// "Increase speed to xxx knots."
-    func increaseSpeed(to knots: Int) {
-        radar.apply([.speed(Double(knots))])
+        let slots = StaticCommandSlots(
+            integers: binding.slot.map { [$0: values] } ?? [:])
+
+        switch CommandMapping.map(code: binding.code, slots: slots) {
+        case .commands(let effects):
+            radar.apply(effects, readback: readback(for: binding, values: values))
+        case .communicationOnly:
+            if let spoken = readback(for: binding, values: values) {
+                CommandFeedbackManager.shared.readback(spoken)
+            }
+        case .unmapped:
+            // A key bound to a code the simulator has no behaviour for. Reported
+            // rather than ignored — a silent key is indistinguishable from a
+            // working one.
+            CommandFeedbackManager.shared.commandError(
+                "Unable, \(binding.prompt.lowercased()) not implemented")
+        }
     }
 
-    /// "Decrease / reduce speed to xxx knots."
-    func decreaseSpeed(to knots: Int) {
-        radar.apply([.speed(Double(knots))])
+    /// ICAO readback for the chosen template, spoken to the selected aircraft.
+    /// Nil when the vocabulary is unavailable, in which case the legacy English
+    /// built from the command enum is used instead.
+    private func readback(for binding: KeyboardCommand, values: [Int]) -> String? {
+        guard let template = store.templates?.template(id: binding.code),
+              let slot = binding.slot else {
+            return store.templates?.template(id: binding.code).flatMap {
+                renderer.render($0, values: [:], callsign: radar.selectedCallsign).text
+            }
+        }
+        let rendered = renderer.render(
+            template,
+            values: [slot: values.map { SlotValue.integer($0) }],
+            callsign: radar.selectedCallsign)
+        return rendered.text
     }
 
-    /// "Maintain xxx knots."
-    func maintainSpeed(_ knots: Int) {
-        radar.apply([.speed(Double(knots))])
-    }
+    // MARK: - Keys awaiting more input or more behaviour
 
-    /// "Maintain xxx knots or greater."
-    func maintainSpeedOrGreater(_ knots: Int) {
-        radar.apply([.minSpeed(Double(knots))])
-    }
-
-    /// "Do not exceed xxx knots."
-    func doNotExceedSpeed(_ knots: Int) {
-        radar.apply([.maxSpeed(Double(knots))])
-    }
-
-    // MARK: - Altitude commands
-
-    /// "Climb and maintain FL xxx."
-    func climbMaintain(_ flightLevel: Int) {
-        radar.apply([.flightLevel(flightLevel)])
-    }
-
-    /// "Descend and maintain FL xxx."
-    func descendMaintain(_ flightLevel: Int) {
-        radar.apply([.flightLevel(flightLevel)])
-    }
-
-    /// "Maintain block FL low through FL high."
-    func maintainBlock(low: Int, high: Int) {
-        radar.apply([.altitudeBlock(low: low, high: high)])
-    }
-
-    // MARK: - Vectoring commands
-
-    /// "Turn left heading xxx" — absolute heading, forced left turn.
-    func turnLeftHeading(_ heading: Int) {
-        radar.apply([.headingTurn(Double(heading % 360), .left)])
-    }
-
-    /// "Turn right heading xxx" — absolute heading, forced right turn.
-    func turnRightHeading(_ heading: Int) {
-        radar.apply([.headingTurn(Double(heading % 360), .right)])
-    }
-
-    /// "Turn xxx degrees left" — relative turn.
-    func turnDegreesLeft(_ degrees: Int) {
-        radar.apply([.relativeTurn(Double(degrees), .left)])
-    }
-
-    /// "Turn xxx degrees right" — relative turn.
-    func turnDegreesRight(_ degrees: Int) {
-        radar.apply([.relativeTurn(Double(degrees), .right)])
-    }
-
-    /// "Fly heading xxx" — absolute heading, shortest turn.
-    func flyHeading(_ heading: Int) {
-        radar.apply([.heading(Double(heading % 360))])
-    }
-
-    /// "Fly present heading" — stop the turn and hold the current heading.
-    func flyPresentHeading() {
-        radar.apply([.presentHeading])
-    }
-
-    // MARK: - Other commands (fill these in)
-
-    func ilocRunway()        { /* TODO */ }
-    func clearedToRunway()   { /* TODO */ }
-    func goAround()          { /* TODO */ }
-    func hold()              { /* TODO */ }
-    func handOff()           { /* TODO */ }
-    func direct()            { /* TODO */ }
+    func ilocRunway()        { /* needs a runway; see code 454 */ }
+    func clearedToRunway()   { /* needs a runway; see code 436 */ }
+    func goAround()          { /* code 327 — no behaviour yet */ }
+    func hold()              { /* needs a fix; see code 453 */ }
+    func handOff()           { /* needs a unit and frequency; see code 448 */ }
+    func direct()            { /* needs a fix; see code 445 */ }
 }

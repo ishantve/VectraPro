@@ -151,8 +151,8 @@ final class CommandValidatorTests: XCTestCase {
         .init(runways: r.map { [$0] } ?? [], activeLocalizerRunways: loc, holdingFixes: fixes)
     }
     func testEnvelopes() {
-        XCTAssertEqual(CommandValidator.validate([.flightLevel(250)], for: F.aircraft(), context: ctx()), .ok)
-        if case .ok = CommandValidator.validate([.flightLevel(600)], for: F.aircraft(), context: ctx()) { XCTFail() }
+        XCTAssertEqual(CommandValidator.validate([.altitude(feet: 25_000)], for: F.aircraft(), context: ctx()), .ok)
+        if case .ok = CommandValidator.validate([.altitude(feet: 60_000)], for: F.aircraft(), context: ctx()) { XCTFail() }
         if case .ok = CommandValidator.validate([.speed(50)], for: F.aircraft(), context: ctx()) { XCTFail() }
     }
     func testHoldFixMustExist() {
