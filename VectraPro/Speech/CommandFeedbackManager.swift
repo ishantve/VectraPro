@@ -51,7 +51,7 @@ final class CommandFeedbackManager: ObservableObject {
     /// backend's own `readBackText` could never be used.
     func readback(_ spoken: String) {
         log(spoken, isError: false)
-        FeedbackSound.speak(spoken, as: .pilot)
+        FeedbackSound.speak(spoken)
     }
 
     // MARK: - Command results
@@ -71,7 +71,7 @@ final class CommandFeedbackManager: ObservableObject {
     /// readback still being spoken.
     func commandError(_ phrase: String) {
         log(phrase, isError: true)
-        FeedbackSound.speak(phrase, as: .system, interrupting: true)
+        FeedbackSound.speak(phrase, interrupting: true)
     }
 
     /// Standard error: no aircraft selected / found when a command is issued.
