@@ -28,6 +28,11 @@ public final class AircraftPhysics {
     private let rotationSpeedKnots       = 150.0  // Vr — transition to climbout
     private let climboutAltitudeFt       = 1000.0 // feet AGL — end of climbout phase
 
+    /// Altitude an aircraft climbs to when it goes around. A published missed
+    /// approach would come from the procedure; there is no procedure model, so one
+    /// figure standing in is honest rather than invented detail.
+    public static let missedApproachAltitudeFeet = 3000.0
+
     // MARK: - Command application
 
     /// Applies ATC commands to a single aircraft struct.
@@ -101,6 +106,20 @@ public final class AircraftPhysics {
                 aircraft.turnDirection = nil
             case .squawk(let code):
                 aircraft.squawk = code
+            case .clearedForTakeoff(let runway):
+                // Recorded, not acted on: the aircraft is still in the hangar and
+                // putting it on a runway threshold is the scene's job.
+                aircraft.pendingTakeoffRunway = runway ?? ""
+            case .goAround:
+                // Off the approach and climbing. Dropping the localizer is what takes
+                // it out of the landing sequence.
+                aircraft.interceptRunway = nil
+                aircraft.targetHeading = nil
+                aircraft.turnDirection = nil
+                aircraft.minAltitudeFeet = nil
+                aircraft.maxAltitudeFeet = nil
+                aircraft.targetAltitudeFeet = Self.missedApproachAltitudeFeet
+                aircraft.targetSpeedKnots = Aircraft.defaultSpeedKnots
             case .interceptLocalizer(let runway):
                 // Cleared to intercept the localizer for this runway. The view
                 // model drives the actual intercept + tracking each tick.

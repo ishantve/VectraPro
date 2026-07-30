@@ -134,6 +134,10 @@ final class CommandFeedbackManager: ObservableObject {
             return "proceed direct to \(fix.uppercased())"
         case .squawk(let code):
             return "squawk \(code)"
+        case .clearedForTakeoff(let runway):
+            return runway.map { "runway \($0) cleared for takeoff" } ?? "cleared for takeoff"
+        case .goAround:
+            return "going around"
         case .interceptLocalizer(let runway):
             return "intercept the localizer runway \(runway)"
         }

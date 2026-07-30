@@ -42,6 +42,10 @@ public struct Aircraft: Identifiable {
     /// Fix the aircraft is routing direct to without holding there. Cleared on
     /// arrival, after which it continues on the heading it arrived with.
     public var directToFix: String? = nil
+    /// Set when a takeoff clearance has been issued but the aircraft has not yet
+    /// been placed on the runway. Empty string means "the assigned runway".
+    /// Cleared by whoever moves it out of the hangar.
+    public var pendingTakeoffRunway: String? = nil
     /// Inbound leg course (toward the fix) for the holding racetrack.
     public var holdingInboundCourse: Double? = nil
     /// Position around the holding loop as a fraction (0…1, 0 = fix).

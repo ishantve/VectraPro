@@ -44,4 +44,12 @@ public enum AircraftCommand: Equatable {
     case interceptLocalizer(runway: String)   // intercept the localizer for a runway
     /// Set the transponder code.
     case squawk(code: String)
+    /// Cleared for takeoff. Requests the clearance rather than performing it: moving
+    /// an aircraft from the hangar onto the runway is a change to the scene, not to
+    /// this aircraft's flight state, so it is left to whoever owns the scene — the
+    /// same division `hold` and `interceptLocalizer` already use.
+    case clearedForTakeoff(runway: String?)
+    /// Abandon the approach and climb away. Purely this aircraft's own state, so
+    /// unlike a takeoff clearance it needs nothing from the scene.
+    case goAround
 }

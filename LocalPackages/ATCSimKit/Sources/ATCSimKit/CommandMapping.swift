@@ -119,11 +119,12 @@ public enum CommandMapping {
 
     /// Codes that change an aircraft, and how.
     ///
-    /// What is still missing reports as `unmapped` on purpose, and
-    /// `CommandMappingTests` prints the list — so the remaining work is explicit
-    /// rather than assumed. Those left need new behaviour rather than a mapping
-    /// entry: levelling off in the direction already being flown, going around,
-    /// entering and leaving a hold, a full approach clearance.
+    /// One code is deliberately absent. 304 assigns a standard departure — a named
+    /// route — and there is no route or procedure model to assign it to. Mapping it
+    /// would mean inventing one for a single template, so it reports as `unmapped`
+    /// and the controller is told the instruction is not implemented, which is true.
+    /// `CommandMappingTests` prints whatever is unmapped, so this stays visible
+    /// rather than becoming a silent gap.
     private static let actionable: [String: (CommandSlots) -> [AircraftCommand]] = [
 
         // MARK: Vertical — climb, descend, maintain
@@ -205,6 +206,12 @@ public enum CommandMapping {
         "376": { slots in
             slots.text("NUMBER").map { [.interceptLocalizer(runway: $0)] } ?? []
         },
+
+        // MARK: Clearances
+        "436": { slots in                                        // RUNWAY [n] CLEARED FOR TAKEOFF
+            [.clearedForTakeoff(runway: slots.text("NUMBER"))]
+        },
+        "327": { _ in [.goAround] },                             // GO AROUND
 
         // MARK: Transponder
         "218": { slots in                                        // SQUAWK [CODE]

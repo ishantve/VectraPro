@@ -153,6 +153,19 @@ public enum CommandValidator {
                     return .rejected("Unable, \(code) is not a valid squawk")
                 }
 
+            case .clearedForTakeoff:
+                guard aircraft.category == .departure else {
+                    return .rejected("Unable, \(aircraft.callsign) is not a departure")
+                }
+                guard aircraft.takeoffState == nil else {
+                    return .rejected("Unable, already cleared for takeoff")
+                }
+
+            case .goAround:
+                guard aircraft.takeoffState == nil else {
+                    return .rejected("Unable, aircraft is departing")
+                }
+
             case .heading, .headingTurn, .presentHeading, .stopTurn:
                 break   // absolute heading already bounded at parse; nothing to add
             }

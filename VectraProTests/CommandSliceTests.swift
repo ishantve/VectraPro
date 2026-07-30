@@ -153,14 +153,29 @@ final class CommandSliceTests: XCTestCase {
     }
 
     func testUnmappedButRecognisedPhraseIsNotMistakenForSuccess() throws {
-        // "GO AROUND" is recognised phraseology the simulator has no behaviour for
-        // yet. It must report as unmapped rather than quietly doing nothing, which
-        // would be indistinguishable from a command that worked.
-        let result = recognizer.recognize("air india 123 go around")
+        // A standard departure assigns a named route, and there is no route model to
+        // assign it to — so it is deliberately unmapped. It must report as such
+        // rather than quietly doing nothing, which would be indistinguishable from a
+        // command that worked. This is the only remaining gap.
+        let result = recognizer.recognize("air india 123 radar alpha one departure")
         let command = try XCTUnwrap(result.commands.first)
-        XCTAssertEqual(command.code, "327")
+        XCTAssertEqual(command.code, "304")
         XCTAssertEqual(command.outcome, .ok)
-        XCTAssertEqual(CommandMapping.map(code: "327", slots: command), .unmapped)
+        XCTAssertEqual(CommandMapping.map(code: "304", slots: command), .unmapped)
+    }
+
+    func testGoAroundNowTakesEffect() throws {
+        let (effects, readback, _) = effectsAndReadback("air india 123 go around")
+        XCTAssertEqual(effects, [.goAround])
+        XCTAssertEqual(readback, "GOING AROUND, air india one two three")
+    }
+
+    func testTakeoffClearanceIsRecordedForTheScene() throws {
+        let (effects, readback, _) = effectsAndReadback(
+            "air india 123 radar runway 27 cleared for take off")
+        XCTAssertEqual(effects, [.clearedForTakeoff(runway: "27")])
+        XCTAssertEqual(readback,
+                       "RADAR RUNWAY two seven CLEARED FOR TAKEOFF, air india one two three")
     }
 
     // MARK: - Routing, level off, transponder

@@ -310,6 +310,51 @@ final class CommandMappingTests: XCTestCase {
                        .rejected("Unable, conflicting heading instructions"))
     }
 
+    // MARK: - Clearances
+
+    func testTakeoffClearanceIsRecordedNotPerformed() {
+        // The scene, not the physics, puts an aircraft on a runway — so the command
+        // records the clearance and stops. Same division `hold` uses.
+        XCTAssertEqual(map("436", texts: ["NUMBER": ["27L"]]),
+                       .commands([.clearedForTakeoff(runway: "27L")]))
+
+        var aircraft = Aircraft(callsign: "AIC123",
+                                position: .init(latitude: 28.5, longitude: 77.1),
+                                headingDegrees: 90)
+        AircraftPhysics.shared.apply([.clearedForTakeoff(runway: "27L")], to: &aircraft)
+        XCTAssertEqual(aircraft.pendingTakeoffRunway, "27L")
+        XCTAssertNil(aircraft.takeoffState, "rolling is the scene's decision, not this one")
+    }
+
+    func testGoAroundTakesTheAircraftOffTheApproach() {
+        XCTAssertEqual(map("327"), .commands([.goAround]))
+
+        var aircraft = Aircraft(callsign: "AIC123",
+                                position: .init(latitude: 28.5, longitude: 77.1),
+                                headingDegrees: 270)
+        aircraft.altitudeFeet = 2000
+        AircraftPhysics.shared.apply([.interceptLocalizer(runway: "27L")], to: &aircraft)
+        AircraftPhysics.shared.apply([.goAround], to: &aircraft)
+
+        // Dropping the localizer is what removes it from the landing sequence.
+        XCTAssertNil(aircraft.interceptRunway)
+        XCTAssertEqual(aircraft.targetAltitudeFeet,
+                       AircraftPhysics.missedApproachAltitudeFeet)
+    }
+
+    func testATakeoffClearanceIsOnlyForADeparture() {
+        var arrival = Aircraft(callsign: "AIC123",
+                               position: .init(latitude: 28.5, longitude: 77.1),
+                               headingDegrees: 90)
+        arrival.category = .arrival
+        let context = CommandValidator.Context(runways: [], activeLocalizerRunways: [],
+                                               holdingFixes: [])
+        guard case .rejected = CommandValidator.validate([.clearedForTakeoff(runway: nil)],
+                                                         for: arrival, context: context) else {
+            return XCTFail("an arrival cannot be cleared for takeoff")
+        }
+    }
+
     // MARK: - Coverage
 
     /// Every code in the payload, by category. Kept here rather than read from the

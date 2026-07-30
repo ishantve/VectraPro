@@ -194,7 +194,6 @@ final class CommandController {
             }
             return
         }
-
         let commands = result.commands.compactMap(AircraftCommand.init)
         guard !commands.isEmpty else {
             CommandFeedbackManager.shared.commandError("Command not recognized")

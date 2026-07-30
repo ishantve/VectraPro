@@ -544,10 +544,10 @@ final class MapViewModel: ObservableObject {
         commands.contains { cmd in
             switch cmd {
             case .heading, .headingTurn, .relativeTurn, .presentHeading, .stopTurn,
-                 .hold, .proceedDirect, .interceptLocalizer:
+                 .hold, .proceedDirect, .interceptLocalizer, .goAround:
                 return true
             case .speed, .minSpeed, .maxSpeed, .altitude, .altitudeBlock,
-                 .stopClimb, .stopDescent, .squawk:
+                 .stopClimb, .stopDescent, .squawk, .clearedForTakeoff:
                 return false
             }
         }
@@ -743,6 +743,7 @@ final class MapViewModel: ObservableObject {
         tickCount += 1
         advanceSpawners()
         advanceRadarPromotion()
+        rollClearedDepartures()
 
         var landedIDs = Set<UUID>()
         for index in aircraft.indices {
@@ -908,6 +909,24 @@ final class MapViewModel: ObservableObject {
             feedback.aircraftNotFound()
             return
         }
+        rollForTakeoff(at: idx)
+        feedback.commandAccepted(callsign: aircraft.last?.callsign ?? callsign, commands: [])
+    }
+
+    /// Acts on takeoff clearances that have been issued but not yet carried out.
+    ///
+    /// `AircraftPhysics` records the clearance on the aircraft and stops there —
+    /// putting one on a runway threshold moves it between the hangar and the radar,
+    /// which is a change to the scene rather than to the aircraft's flight state.
+    /// The same division `hold` and `interceptLocalizer` already use.
+    private func rollClearedDepartures() {
+        while let idx = traffic.firstIndex(where: { $0.pendingTakeoffRunway != nil }) {
+            rollForTakeoff(at: idx)
+        }
+    }
+
+    /// Moves a hangar departure onto its runway and starts the roll.
+    private func rollForTakeoff(at idx: Int) {
         var ac = traffic[idx]
         let (threshold, heading) = RunwayGeometry.departureThreshold(for: ac, in: runways, center: center)
 
@@ -919,10 +938,10 @@ final class MapViewModel: ObservableObject {
         ac.targetAltitudeFeet = 5000   // climb to FL050 after liftoff
         ac.takeoffState       = .groundRoll(runwayHeading: heading)
         ac.history            = []
+        ac.pendingTakeoffRunway = nil
 
         traffic.remove(at: idx)
         aircraft.append(ac)
-        feedback.commandAccepted(callsign: ac.callsign, commands: [])
     }
 
     /// Resolves a departure callsign from an already-normalised voice transcript.
@@ -936,7 +955,10 @@ final class MapViewModel: ObservableObject {
     /// transcript. Holding aircraft (in the hangar) are included so they can be
     /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
-        let candidates = aircraft + traffic.filter { $0.holdingName != nil }
+        // Departures waiting in the hangar are included: a takeoff clearance names
+        // an aircraft that is not on the radar yet.
+        let candidates = aircraft
+            + traffic.filter { $0.holdingName != nil || $0.category == .departure }
         return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines.map(\.asDomain))
     }
 
