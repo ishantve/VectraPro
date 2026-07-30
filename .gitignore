@@ -14,3 +14,9 @@ build/
 
 # local package resolutions (app workspace Package.resolved is authoritative)
 LocalPackages/**/Package.resolved
+
+# Temporary symlink to an unpublished ATCParserKit, used while the app is built
+# against the local package. It points outside the repository, so committing it
+# would leave the project unopenable for anyone else. Remove the symlink and
+# restore the remote dependency once ATCParserKit 2.0.0 is published.
+LocalPackages/ATCParserKit
