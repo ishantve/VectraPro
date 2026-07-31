@@ -90,6 +90,12 @@ final class CommandKeyboardHandler {
     /// The one path every keypad command takes: code + values → effect + readback.
     private func apply(_ key: String, values: [Int]) {
         guard let binding = KeyboardCommandCatalog.command(for: key) else { return }
+        guard store.templates != nil else {
+            // The reply comes from the template, so without the vocabulary a key would
+            // act on an aircraft and then say nothing about it.
+            CommandFeedbackManager.shared.commandError("Unable, phraseology unavailable")
+            return
+        }
 
         let slots = StaticCommandSlots(
             integers: binding.slot.map { [$0: values] } ?? [:])

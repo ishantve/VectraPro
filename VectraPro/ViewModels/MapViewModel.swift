@@ -536,16 +536,20 @@ final class MapViewModel: ObservableObject {
         feedback.aircraftNotFound()
     }
 
-    /// Speaks the ICAO readback when one was rendered, otherwise the legacy
-    /// English built from the command enum.
+    /// Speaks the readback rendered from the template that was spoken.
+    ///
+    /// Nothing assembles a reply here any more. A missing readback means a command was
+    /// applied without the vocabulary that describes it, which both input paths refuse
+    /// outright — so it is a programming error rather than a case to paper over with
+    /// English of our own.
     private func announce(_ readback: String?,
                           callsign: String,
                           commands: [AircraftCommand]) {
-        if let readback, !readback.isEmpty {
-            feedback.readback(readback)
-        } else {
-            feedback.commandAccepted(callsign: callsign, commands: commands)
+        guard let readback, !readback.isEmpty else {
+            assertionFailure("applied \(commands.count) command(s) to \(callsign) with no readback")
+            return
         }
+        feedback.readback(readback)
     }
 
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
@@ -912,17 +916,6 @@ final class MapViewModel: ObservableObject {
 
     /// Moves a departure aircraft from the hangar to its assigned runway threshold
     /// and starts the takeoff ground roll.
-    func clearForTakeoff(callsign: String) {
-        guard let idx = traffic.firstIndex(where: {
-            $0.callsign.uppercased() == callsign.uppercased() && $0.category == .departure
-        }) else {
-            feedback.aircraftNotFound()
-            return
-        }
-        rollForTakeoff(at: idx)
-        feedback.commandAccepted(callsign: aircraft.last?.callsign ?? callsign, commands: [])
-    }
-
     /// Acts on takeoff clearances that have been issued but not yet carried out.
     ///
     /// `AircraftPhysics` records the clearance on the aircraft and stops there —
@@ -952,13 +945,6 @@ final class MapViewModel: ObservableObject {
 
         traffic.remove(at: idx)
         aircraft.append(ac)
-    }
-
-    /// Resolves a departure callsign from an already-normalised voice transcript.
-    func resolveDepartureCallsign(from normalizedText: String) -> String? {
-        CallsignResolver.resolve(from: normalizedText,
-                                 among: traffic.filter { $0.category == .departure },
-                                 airlines: airlines.map(\.asDomain))
     }
 
     /// Resolves a live radar aircraft callsign from an already-normalised voice

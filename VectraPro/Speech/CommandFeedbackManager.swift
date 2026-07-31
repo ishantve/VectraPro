@@ -45,26 +45,16 @@ final class CommandFeedbackManager: ObservableObject {
     /// Speaks a readback that was already rendered as ICAO phraseology.
     ///
     /// The text arrives finished — template wording, numbers spoken digit by digit,
-    /// callsign once at the end. Nothing here composes it, which is the point:
-    /// `readback(for:)` below builds its own English from the simulator's command
-    /// enum, and by then which template was spoken has been forgotten, so the
-    /// backend's own `readBackText` could never be used.
+    /// callsign once at the end. Nothing here composes it, and nothing here can: the
+    /// English this class used to assemble from the command enum had already lost
+    /// which template was spoken, so the backend's own `readBackText` could never be
+    /// used. That code is gone.
     func readback(_ spoken: String) {
         log(spoken, isError: false)
         FeedbackSound.speak(spoken)
     }
 
     // MARK: - Command results
-
-    /// ATC-style readback after a command is successfully applied.
-    func commandAccepted(callsign: String, commands: [AircraftCommand]) {
-        let detail = commands.isEmpty
-            ? "wilco"
-            : commands.map { readback(for: $0) }.joined(separator: ", ")
-        let text = "\(callsign), \(detail)"
-        log(text, isError: false)
-        FeedbackSound.speak(text)
-    }
 
     /// Speaks an error phrase when a command cannot be applied.
     /// Interrupts: a rejection the controller needs to hear now outranks a
@@ -95,51 +85,4 @@ final class CommandFeedbackManager: ObservableObject {
         }
     }
 
-    /// Altitudes are described the way they would have been said.
-    private func spokenAltitude(_ feet: Double) -> String {
-        feet >= 10_000 ? "flight level \(Int(feet / 100))" : "\(Int(feet)) feet"
-    }
-
-    // MARK: - Readback text per command type
-
-    private func readback(for command: AircraftCommand) -> String {
-        switch command {
-        case .heading(let h):
-            return "heading \(Int(h))"
-        case .headingTurn(let h, let dir):
-            return "turn \(dir == .left ? "left" : "right") heading \(Int(h))"
-        case .relativeTurn(let deg, let dir):
-            return "turn \(dir == .left ? "left" : "right") \(Int(deg)) degrees"
-        case .presentHeading:
-            return "present heading"
-        case .stopTurn(let h):
-            return "stop turn heading \(Int(h))"
-        case .altitude(let feet):
-            return spokenAltitude(feet)
-        case .altitudeBlock(let low, let high):
-            return "maintain block flight level \(Int(low / 100)) through \(Int(high / 100))"
-        case .speed(let kts):
-            return "\(Int(kts)) knots"
-        case .minSpeed(let kts):
-            return "maintain \(Int(kts)) knots or greater"
-        case .maxSpeed(let kts):
-            return "do not exceed \(Int(kts)) knots"
-        case .stopClimb(let feet):
-            return "stop climb at \(spokenAltitude(feet))"
-        case .stopDescent(let feet):
-            return "stop descent at \(spokenAltitude(feet))"
-        case .hold(let fix):
-            return "hold at \(fix.uppercased())"
-        case .proceedDirect(let fix):
-            return "proceed direct to \(fix.uppercased())"
-        case .squawk(let code):
-            return "squawk \(code)"
-        case .clearedForTakeoff(let runway):
-            return runway.map { "runway \($0) cleared for takeoff" } ?? "cleared for takeoff"
-        case .goAround:
-            return "going around"
-        case .interceptLocalizer(let runway):
-            return "intercept the localizer runway \(runway)"
-        }
-    }
 }

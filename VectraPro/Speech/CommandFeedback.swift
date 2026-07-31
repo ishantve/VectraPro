@@ -21,10 +21,6 @@ protocol CommandFeedback {
     /// ICAO phraseology already rendered from a template — spoken as it stands.
     func readback(_ spoken: String)
 
-    /// Legacy English assembled from the command enum, for the paths that have no
-    /// template readback yet.
-    func commandAccepted(callsign: String, commands: [AircraftCommand])
-
     /// A rejection the controller needs to hear.
     func commandError(_ phrase: String)
 

@@ -308,6 +308,19 @@ public enum CommandMapping {
     /// they already build for validation.
     public typealias Context = CommandValidator.Context
 
+    /// Codes whose reply cannot be given without the aircraft.
+    ///
+    /// Listed so a caller can refuse rather than guess. Answering one of these without
+    /// having found the aircraft means asserting something unchecked — the affirmative
+    /// branch of a confirmation, or a heading nobody read.
+    public static let answeredFromAircraft: Set<String> = [
+        "216",   // CONFIRM SQUAWK
+        "258",   // REPORT HEADING AND FLIGHT LEVEL
+        "409",   // CONFIRM ESTABLISHED ON ILS LOCALIZER
+        "430",   // CONFIRM [LEVEL]
+        "443",   // REPORT RADIALS
+    ]
+
     // MARK: - Values only the aircraft knows
 
     /// Fills the slots a readback asks for that the instruction never supplied.

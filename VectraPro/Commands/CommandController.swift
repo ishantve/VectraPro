@@ -45,7 +45,10 @@ final class CommandController {
 
     func process(_ transcript: String) {
         guard let recognizer = store.recognizer else {
-            processWithLegacyParser(transcript)
+            // Everything downstream is keyed on the vocabulary, so there is nothing
+            // sensible to do without it. Saying so beats accepting commands and
+            // handling them differently from every other part of the app.
+            CommandFeedbackManager.shared.commandError("Unable, phraseology unavailable")
             return
         }
 
@@ -93,6 +96,15 @@ final class CommandController {
                 // carried out, and nothing would ever explain the silence.
                 if case .rejected(let reason) = namedPointRejection(for: command) {
                     CommandFeedbackManager.shared.commandError(reason)
+                    continue
+                }
+
+                // A question about an aircraft nobody found cannot be answered.
+                // Falling through would speak the affirmative branch — telling the
+                // controller a level is being maintained without having checked.
+                if CommandMapping.answeredFromAircraft.contains(command.code),
+                   aircraft(for: target) == nil {
+                    CommandFeedbackManager.shared.aircraftNotFound()
                     continue
                 }
                 switch CommandMapping.map(code: command.code, slots: command) {
@@ -155,8 +167,14 @@ final class CommandController {
             // aircraft lands on another.
             CommandFeedbackManager.shared.aircraftNotFound()
         } else {
-            mapViewModel.apply(effects)
+            mapViewModel.apply(effects, readback: readback)
         }
+    }
+
+    /// The aircraft a reply would be about, if one was found.
+    private func aircraft(for target: String?) -> Aircraft? {
+        guard let mapViewModel, let target else { return nil }
+        return mapViewModel.aircraft(callsign: target)
     }
 
     /// The phrase to answer a command with.
@@ -168,9 +186,7 @@ final class CommandController {
     /// "maintaining two six zero".
     private func reply(to command: RecognizedCommand, target: String?) -> Phrase {
         let primary = command.readback.primary
-        guard let mapViewModel,
-              let aircraft = target.flatMap(mapViewModel.aircraft(callsign:))
-        else { return primary }
+        guard let mapViewModel, let aircraft = aircraft(for: target) else { return primary }
         let context = mapViewModel.validationContext
 
         // A question the aircraft answers about itself: heading, level, radial. The
@@ -253,46 +269,6 @@ final class CommandController {
         case .frequency(let text):     return text
         case .text(let text):          return text
         }
-    }
-
-    // MARK: - Legacy path
-
-    /// The pre-template parser, kept as a fallback for a missing or unreadable
-    /// vocabulary. Scheduled for removal once the payload is served by the backend.
-    private func processWithLegacyParser(_ transcript: String) {
-        guard let result = try? ATCParser().parse(transcript) else {
-            CommandFeedbackManager.shared.commandError("Command not recognized")
-            return
-        }
-        let normalized = result.normalized
-
-        if isTakeoffClearance(normalized) {
-            if let callsign = mapViewModel?.resolveDepartureCallsign(from: normalized) {
-                mapViewModel?.clearForTakeoff(callsign: callsign)
-            } else {
-                CommandFeedbackManager.shared.aircraftNotFound()
-            }
-            return
-        }
-        let commands = result.commands.compactMap(AircraftCommand.init)
-        guard !commands.isEmpty else {
-            CommandFeedbackManager.shared.commandError("Command not recognized")
-            return
-        }
-
-        if let cs = result.callsign,
-           let callsign = mapViewModel?.resolveRadarCallsign(from: cs) {
-            mapViewModel?.applyToCallsign(callsign, commands: commands)
-        } else if let callsign = mapViewModel?.resolveRadarCallsign(from: normalized) {
-            mapViewModel?.applyToCallsign(callsign, commands: commands)
-        } else {
-            mapViewModel?.apply(commands)
-        }
-    }
-
-    private func isTakeoffClearance(_ normalized: String) -> Bool {
-        normalized.contains("clear") &&
-        (normalized.contains("takeoff") || normalized.contains("take off"))
     }
 
     /// Released classes need this. The target compiles with
