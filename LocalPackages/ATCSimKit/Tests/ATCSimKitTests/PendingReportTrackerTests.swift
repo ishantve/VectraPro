@@ -4,9 +4,10 @@
 //
 //  When a "report …" instruction actually comes due.
 //
-//  The test that matters most is `testAPassWideOfTheFixStillFires`: a proximity
-//  check would miss it, and a missed report is a silent failure — the pilot simply
-//  never says anything and nobody knows why.
+//  Passing a point needs both halves of its rule pinned. `testAPassSlightlyOffTrack
+//  StillFires` guards the one a plain radius would miss; `testATurnFarFromThePoint
+//  IsNotAPass` guards the one closest approach alone got wrong, which is worse — it
+//  reported a pass that never happened.
 //
 
 import XCTest
@@ -53,16 +54,42 @@ final class PendingReportTrackerTests: XCTestCase {
         XCTAssertTrue(tracker.pending.isEmpty, "a fired report is not owed twice")
     }
 
-    func testAPassWideOfTheFixStillFires() {
-        // Eight miles abeam — outside any capture radius a hold would use, but the
-        // aircraft has still passed the point and the report is still due.
+    func testAPassSlightlyOffTrackStillFires() {
+        // About two miles abeam — outside the radius a hold would capture with, but
+        // plainly a pass, and a vectored aircraft will often be no closer.
         var tracker = PendingReportTracker()
         let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
         tracker.register(report)
 
-        let fired = fly(&tracker, through: [(28.40, 77.25), (28.52, 77.25),
-                                            (28.60, 77.25), (28.68, 77.25)])
+        let fired = fly(&tracker, through: [(28.50, 77.135), (28.56, 77.135),
+                                            (28.60, 77.135), (28.66, 77.135)])
         XCTAssertEqual(fired, [report.id])
+    }
+
+    func testATurnFarFromThePointIsNotAPass() {
+        // Closest approach alone made this a pass: the aircraft closes on the point,
+        // turns twenty miles short, and opens again. Nothing passed anything, and
+        // announcing "passing" here is a wrong readback rather than a missing one.
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+
+        // Northbound to 28.28 (~19 NM short of the fix at 28.60), then back south.
+        let fired = fly(&tracker, through: [(28.10, 77.10), (28.20, 77.10),
+                                            (28.28, 77.10), (28.20, 77.10),
+                                            (28.10, 77.10)])
+        XCTAssertTrue(fired.isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1, "still owed — it never got there")
+    }
+
+    func testTheRadiusIsConfigurable() {
+        // A deployment that wants a tighter or looser idea of "passing" can say so.
+        var tight = PendingReportTracker(passingRadiusNM: 1)
+        tight.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                    condition: .passingFix("PJ")))
+        // The same two-mile-abeam track that fires with the default radius.
+        XCTAssertTrue(fly(&tight, through: [(28.50, 77.135), (28.56, 77.135),
+                                            (28.60, 77.135), (28.66, 77.135)]).isEmpty)
     }
 
     func testAnAircraftFlyingAwayFromTheStartDoesNotReportImmediately() {

@@ -5,15 +5,23 @@
 //  "Report passing PAPA JULIET" — the pilot says WILCO now, and reports later,
 //  when it happens. This decides when "later" is.
 //
-//  ── Why closest approach, not proximity ──────────────────────────────────────
-//  The obvious test is "within N miles of the fix", the way a hold captures an
-//  aircraft. It is wrong here: an aircraft can pass a point comfortably outside
-//  any fixed radius, and then the report never fires and nobody notices — the same
-//  class of silent failure this rewrite exists to remove. So a pass is detected by
-//  the distance turning around: it was closing, now it is opening.
+//  ── Closest approach, inside a radius ───────────────────────────────────────
+//  Two rules together, because either alone is wrong.
 //
-//  A distance report is the same measurement read differently — the moment the
-//  aircraft crosses the requested range, in either direction.
+//  A fixed radius alone — the way a hold captures an aircraft — misses a genuine
+//  pass slightly off track, and then the report never fires and nobody notices.
+//
+//  Closest approach alone is worse in a quieter way: every turn produces a local
+//  minimum in distance, so an aircraft that happened to swing toward a point twenty
+//  miles away and then away again "passed" it. That is not passing, and reporting it
+//  is a wrong readback rather than a missing one.
+//
+//  So a pass is a turnaround in distance that happens *within* `passingRadius` of
+//  the point. Off-track by a couple of miles still counts; twenty miles away does
+//  not.
+//
+//  A distance report needs no radius: it names its own range, so crossing that range
+//  is the whole condition.
 //
 //  ── What this holds ─────────────────────────────────────────────────────────
 //  Conditions only, never the words. The phrase is rendered from the template that
@@ -65,9 +73,20 @@ public struct PendingReport: Equatable, Sendable {
 
 public struct PendingReportTracker: Equatable, Sendable {
 
+    /// How close an aircraft must come for a turnaround to count as passing a point.
+    ///
+    /// Five miles is deliberately generous against the mile or two a fix would
+    /// normally be passed by, so a vectored aircraft still reports, while staying far
+    /// below the distances at which a turn elsewhere in the airspace would otherwise
+    /// look like a pass.
+    public static let defaultPassingRadiusNM = 5.0
+
+    public let passingRadiusM: Double
     private var reports: [PendingReport] = []
 
-    public init() {}
+    public init(passingRadiusNM: Double = PendingReportTracker.defaultPassingRadiusNM) {
+        self.passingRadiusM = passingRadiusNM * Distance.metersPerNauticalMile
+    }
 
     public var pending: [PendingReport] { reports }
 
@@ -137,8 +156,11 @@ public struct PendingReportTracker: Equatable, Sendable {
             defer { report.lastDistanceM = distance }
             guard let previous = report.lastDistanceM else { return false }
             if distance < previous { report.hasApproached = true }
-            // Closing, then opening — the aircraft has just gone by.
-            return report.hasApproached && distance > previous
+            // Closing, then opening, and near enough for that to mean passing. The
+            // radius is what stops a turn made twenty miles away counting as a pass.
+            return report.hasApproached
+                && distance > previous
+                && previous <= passingRadiusM
 
         case .distanceFromFix(let nauticalMiles, let name):
             guard let distance = distanceM(from: aircraft, toFixNamed: name, in: fixes) else {
