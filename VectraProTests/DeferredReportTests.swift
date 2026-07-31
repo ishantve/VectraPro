@@ -287,6 +287,110 @@ final class DeferredReportTests: XCTestCase {
                        "RADAR TURN RIGHT HEADING two five zero, air india one two three.")
     }
 
+    // MARK: - Questions the aircraft answers about itself
+
+    /// Was silence before this: the readback asks for a heading and a level the
+    /// request never supplied, so the phrase could not be completed and nothing was
+    /// spoken at all.
+    func testReportHeadingAndLevelIsAnsweredFromTheAircraft() throws {
+        let command = try command("air india 123 report heading and flight level")
+        XCTAssertEqual(command.code, "258")
+        XCTAssertFalse(command.readback.primary.unresolvedSlots.isEmpty,
+                       "the request carries neither value")
+
+        var aircraft = plane(level: 260)
+        aircraft.headingDegrees = 90
+        let values = try XCTUnwrap(CommandMapping.reportedValues(code: command.code,
+                                                                aircraft: aircraft,
+                                                                context: sceneContext))
+        XCTAssertEqual(command.readback.primary.filling(values).spoken,
+                       "air india one two three, HEADING zero nine zero, "
+                       + "FLIGHT LEVEL two six zero.")
+    }
+
+    func testReportRadialsUsesTheNearestVOR() throws {
+        let command = try command("air india 123 report radials")
+        XCTAssertEqual(command.code, "443")
+
+        let vor = Fix(fixName: "DPN", type: "VOR", latitude: 28.50, longitude: 77.10)
+        let context = CommandValidator.Context(runways: [], activeLocalizerRunways: [],
+                                              holdingFixes: [], navigationFixes: [vor])
+        // Aircraft due north of the station, so it is on the 360 radial.
+        var aircraft = plane(level: 260)
+        aircraft.position = .init(latitude: 28.80, longitude: 77.10)
+
+        let values = try XCTUnwrap(CommandMapping.reportedValues(code: command.code,
+                                                                aircraft: aircraft,
+                                                                context: context))
+        let spoken = try XCTUnwrap(command.readback.primary.filling(values).spoken)
+        // Spoken as a name, not spelled out — "[VOR NAME]" is a station's name.
+        XCTAssertTrue(spoken.contains("DPN"), spoken)
+        XCTAssertTrue(spoken.contains("zero zero zero") || spoken.contains("three six zero"),
+                      spoken)
+    }
+
+    func testReportRadialsWithNoVORInTheExerciseAnswersNothingRatherThanGuessing() throws {
+        let command = try command("air india 123 report radials")
+        let values = try XCTUnwrap(CommandMapping.reportedValues(code: command.code,
+                                                                aircraft: plane(level: 260),
+                                                                context: sceneContext))
+        XCTAssertTrue(values.isEmpty, "no station to measure from")
+        // The phrase stays incomplete, which is what the controller is told about.
+        XCTAssertNil(command.readback.primary.filling(values).spoken)
+    }
+
+    func testACommandThatAnswersNothingAboutItselfIsUnaffected() throws {
+        let command = try command("air india 123 turn right heading 250")
+        XCTAssertNil(CommandMapping.reportedValues(code: command.code,
+                                                   aircraft: plane(level: 260),
+                                                   context: sceneContext))
+    }
+
+    /// Nothing enabled may be accepted and then answered with silence.
+    ///
+    /// Rendered with the request's own slots filled, so what stays unresolved is what
+    /// the instruction genuinely cannot supply. Each of those must be answerable from
+    /// the aircraft, or the caller must have something to report — which is what
+    /// CommandController does with a phrase it cannot complete.
+    func testNoEnabledTemplateIsAcceptedAndThenLeftUnanswered() throws {
+        var aircraft = plane(level: 260)
+        aircraft.headingDegrees = 90
+        let renderer = ReadbackRenderer()
+
+        for template in recognizer.matcher.templates.enabled {
+            // Everything the request itself names, so only readback-only slots remain.
+            // Enough of each: a block clearance echoes [LEVEL] twice, and one value
+            // would leave the second occurrence looking unsupplied.
+            var supplied: [String: [SlotValue]] = [:]
+            for name in Set(template.pattern.slotNames) {
+                let needed = max(template.readback.slotNames.filter { $0 == name }.count, 1)
+                supplied[name] = Array(repeating: .integer(260), count: needed)
+            }
+            let readback = renderer.render(template, values: supplied,
+                                           callsign: "air india 123")
+            guard readback.isRequired, readback.primary.spoken == nil else { continue }
+
+            let answerable = CommandMapping.reportedValues(code: template.id,
+                                                           aircraft: aircraft,
+                                                           context: sceneContext) != nil
+                || CommandMapping.confirm(code: template.id,
+                                          slots: StaticCommandSlots(),
+                                          aircraft: aircraft,
+                                          context: sceneContext) != nil
+                || Self.knownUnanswerable.contains(template.id)
+
+            XCTAssertTrue(answerable,
+                          "[\(template.id)] would be accepted and then say nothing — "
+                          + "needs \(readback.primary.unresolvedSlots)")
+        }
+    }
+
+    /// Phraseology the simulator has no model to answer from. The controller is told
+    /// so; it is not left in silence.
+    private static let knownUnanswerable: Set<String> = [
+        "442",   // WHAT ARE YOUR INTENTIONS — no intent model
+    ]
+
     // MARK: - The coordinator
 
     func testCoordinatorRegistersOnlyWhatItCanSpeak() throws {

@@ -127,7 +127,14 @@ final class CommandController {
             // Nothing to apply: answer directly rather than going through the
             // apply path, which would report "aircraft not found" for a plain
             // acknowledgement.
-            if let readback { CommandFeedbackManager.shared.readback(readback) }
+            if let readback {
+                CommandFeedbackManager.shared.readback(readback)
+            } else {
+                // A reply that cannot be completed. "What are your intentions" asks
+                // for something the simulator has no model of, and going quiet is
+                // indistinguishable from the command having worked.
+                reportUnanswerable(spoken)
+            }
             return
         }
 
@@ -161,13 +168,25 @@ final class CommandController {
     /// "maintaining two six zero".
     private func reply(to command: RecognizedCommand, target: String?) -> Phrase {
         let primary = command.readback.primary
+        guard let mapViewModel,
+              let aircraft = target.flatMap(mapViewModel.aircraft(callsign:))
+        else { return primary }
+        let context = mapViewModel.validationContext
+
+        // A question the aircraft answers about itself: heading, level, radial. The
+        // request carries no such value, so without this the phrase stays incomplete
+        // and is never spoken.
+        if let values = CommandMapping.reportedValues(code: command.code,
+                                                     aircraft: aircraft,
+                                                     context: context) {
+            return primary.filling(values)
+        }
+
         guard let alternate = command.readback.alternate,
-              let mapViewModel,
-              let aircraft = target.flatMap(mapViewModel.aircraft(callsign:)),
               let outcome = CommandMapping.confirm(code: command.code,
                                                    slots: command,
                                                    aircraft: aircraft,
-                                                   context: mapViewModel.validationContext)
+                                                   context: context)
         else { return primary }
 
         switch outcome {
@@ -192,6 +211,16 @@ final class CommandController {
         guard !named.isEmpty else { return .ok }
         return CommandValidator.validate(fixNames: named,
                                          context: mapViewModel.validationContext)
+    }
+
+    /// Says so when phraseology was understood but cannot be answered.
+    private func reportUnanswerable(_ commands: [RecognizedCommand]) {
+        let missing = commands
+            .filter { $0.readback.isRequired }
+            .flatMap { $0.readback.primary.unresolvedSlots }
+        guard !missing.isEmpty else { return }
+        CommandFeedbackManager.shared.commandError(
+            "Unable, \(missing.map { $0.lowercased() }.joined(separator: " and ")) not available")
     }
 
     // MARK: - Reporting what was not understood

@@ -24,6 +24,7 @@
 //
 
 import Foundation
+import GeoNavKit
 
 // MARK: - Slot access
 
@@ -306,6 +307,53 @@ public enum CommandMapping {
     /// Scene inputs a confirmation may need. Aliased so callers pass the same context
     /// they already build for validation.
     public typealias Context = CommandValidator.Context
+
+    // MARK: - Values only the aircraft knows
+
+    /// Fills the slots a readback asks for that the instruction never supplied.
+    ///
+    /// Some phraseology asks the pilot to state something: its own heading and level,
+    /// or its radial from a VOR. The request carries no such value, so the readback is
+    /// left with unfillable slots — and a phrase that cannot be completed is not spoken
+    /// at all, which is how "report heading and flight level" came to be answered with
+    /// silence. The aircraft is what knows these, so supplying them belongs here.
+    ///
+    /// Returns nil when the code asks for nothing of the sort, and an empty dictionary
+    /// when it does but the scene cannot answer — a caller can then say so rather than
+    /// going quiet.
+    public static func reportedValues(code: String,
+                                      aircraft: Aircraft,
+                                      context: Context) -> [String: ConfirmedValue]? {
+        switch code {
+        case "258":   // REPORT HEADING AND FLIGHT LEVEL
+            return ["THREE DIGITS": .integer(Int(aircraft.headingDegrees.rounded()) % 360),
+                    "LEVEL": .integer(aircraft.flightLevel)]
+
+        case "443":   // REPORT RADIALS
+            guard let vor = nearestVOR(to: aircraft, in: context.navigationFixes),
+                  let position = FixLookup.coordinate(of: vor),
+                  let name = vor.fixName else { return [:] }
+            // The radial is the bearing measured *from* the station outward, which is
+            // the reverse of the bearing an aircraft would fly to reach it.
+            let radial = Int(Geo.bearing(from: position, to: aircraft.position).rounded()) % 360
+            return ["THREE DIGITS": .integer(radial), "VOR NAME": .text(name)]
+
+        default:
+            return nil
+        }
+    }
+
+    /// Closest VOR to the aircraft, or nil when the exercise has none.
+    private static func nearestVOR(to aircraft: Aircraft, in fixes: [Fix]) -> Fix? {
+        fixes
+            .filter { $0.type?.uppercased() == "VOR" }
+            .compactMap { fix -> (fix: Fix, distance: Double)? in
+                guard let position = FixLookup.coordinate(of: fix) else { return nil }
+                return (fix, Geo.distanceMeters(from: aircraft.position, to: position))
+            }
+            .min { $0.distance < $1.distance }?
+            .fix
+    }
 
     // MARK: - Deferred reports
 
