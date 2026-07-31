@@ -355,6 +355,65 @@ final class CommandMappingTests: XCTestCase {
         }
     }
 
+    // MARK: - Confirmations
+
+    private func plane(level: Int = 260, squawk: String = "4567") -> Aircraft {
+        var aircraft = Aircraft(callsign: "AIC123",
+                                position: .init(latitude: 28.5, longitude: 77.1),
+                                headingDegrees: 90)
+        aircraft.altitudeFeet = Double(level) * 100
+        aircraft.squawk = squawk
+        return aircraft
+    }
+
+    private var sceneContext: CommandValidator.Context {
+        CommandValidator.Context(runways: [], activeLocalizerRunways: [], holdingFixes: [])
+    }
+
+    private func confirm(_ code: String,
+                         integers: [String: [Int]] = [:],
+                         texts: [String: [String]] = [:],
+                         aircraft: Aircraft) -> CommandMapping.ConfirmationOutcome? {
+        CommandMapping.confirm(code: code,
+                               slots: StaticCommandSlots(integers: integers, texts: texts),
+                               aircraft: aircraft,
+                               context: sceneContext)
+    }
+
+    func testConfirmingTheLevelAnAircraftIsAtAffirms() {
+        XCTAssertEqual(confirm("430", integers: ["LEVEL": [260]],
+                               aircraft: plane(level: 260)),
+                       .affirm)
+    }
+
+    /// Without this the simulator agrees to whatever it was asked: an aircraft at
+    /// FL280 replying "maintaining two six zero".
+    func testConfirmingTheWrongLevelIsContradictedWithTheRealOne() {
+        XCTAssertEqual(confirm("430", integers: ["LEVEL": [260]],
+                               aircraft: plane(level: 280)),
+                       .negative(actual: ["ACTUAL LEVEL": .integer(280)]))
+    }
+
+    func testConfirmingASquawk() {
+        XCTAssertEqual(confirm("216", texts: ["CODE": ["4567"]],
+                               aircraft: plane(squawk: "4567")),
+                       .affirm)
+        XCTAssertEqual(confirm("216", texts: ["CODE": ["4567"]],
+                               aircraft: plane(squawk: "2000")),
+                       .negative(actual: ["ACTUAL CODE": .text("2000")]))
+    }
+
+    func testAnAircraftNotOnAnApproachIsNotEstablished() {
+        // Nothing to be established on, so the honest answer is negative rather than
+        // an affirmative that happens to be the first branch in the payload.
+        XCTAssertEqual(confirm("409", aircraft: plane()), .negative(actual: [:]))
+    }
+
+    func testCodesThatAskNothingHaveNoConfirmation() {
+        XCTAssertNil(confirm("247", integers: ["THREE DIGITS": [270]], aircraft: plane()))
+        XCTAssertNil(confirm("435", aircraft: plane()))
+    }
+
     // MARK: - Coverage
 
     /// Every code in the payload, by category. Kept here rather than read from the

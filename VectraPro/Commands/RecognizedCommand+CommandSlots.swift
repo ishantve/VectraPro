@@ -45,3 +45,46 @@ extension RecognizedCommand: @retroactive CommandSlots {
         return matching[occurrence].value
     }
 }
+
+
+// MARK: - Filling a reply from aircraft state
+
+extension Phrase {
+
+    /// A copy with the simulator's values put into the slots the transcript could not
+    /// fill — the aircraft's actual level or squawk, in a reply that has to contradict
+    /// what was asked.
+    ///
+    /// Rendering uses each slot's own kind, so a level is still read digit by digit
+    /// and a code four digits at a time, exactly as the affirmative reply would be.
+    func filling(_ values: [String: CommandMapping.ConfirmedValue]) -> Phrase {
+        guard !values.isEmpty else { return self }
+
+        let spoken = segments.reduce(into: [String: String]()) { result, segment in
+            guard case .slot(let name, let kind, nil) = segment,
+                  let value = values[name] else { return }
+            switch value {
+            case .integer(let number):
+                result[name] = SlotValue.integer(number).spoken(as: kind)
+            case .text(let text):
+                // Parsed for the slot's kind rather than spoken verbatim: a squawk of
+                // "2000" has to come out as four digits, not as a number.
+                switch SlotValue.parse([text], as: kind) {
+                case .ok(let parsed), .outOfRange(let parsed):
+                    result[name] = parsed.spoken(as: kind)
+                case .unparsed:
+                    result[name] = text
+                }
+            }
+        }
+        guard !spoken.isEmpty else { return self }
+
+        return Phrase(
+            segments: segments.map { segment in
+                guard case .slot(let name, let kind, nil) = segment,
+                      let filled = spoken[name] else { return segment }
+                return .slot(name: name, kind: kind, spoken: filled)
+            },
+            unresolvedSlots: unresolvedSlots.filter { spoken[$0] == nil })
+    }
+}

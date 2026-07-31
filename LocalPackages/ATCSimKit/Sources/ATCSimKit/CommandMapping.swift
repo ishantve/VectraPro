@@ -245,6 +245,68 @@ public enum CommandMapping {
         },
     ]
 
+    // MARK: - Confirmations
+
+    /// A value the aircraft actually has, for a reply that has to contradict the
+    /// question. Raw rather than spoken: how a level or a squawk is read aloud belongs
+    /// to the layer that speaks, not to the simulator.
+    public enum ConfirmedValue: Equatable, Sendable {
+        case integer(Int)
+        case text(String)
+    }
+
+    public enum ConfirmationOutcome: Equatable, Sendable {
+        /// The question is true of the aircraft — the affirmative reply stands.
+        case affirm
+        /// It is not. The alternate reply is the one to speak, and these are the values
+        /// it needs, keyed by the placeholder that asks for them.
+        case negative(actual: [String: ConfirmedValue])
+    }
+
+    /// Answers a confirmation question against the aircraft, or nil when the code is
+    /// not asking one.
+    ///
+    /// Some phraseology asks rather than instructs — "confirm flight level two six
+    /// zero" — and its readback carries both replies, separated by "If not:". Deciding
+    /// which one is true needs the aircraft, so it belongs here with the rest of the
+    /// code-to-behaviour mapping. Answering without checking would have the simulator
+    /// assert whatever it was asked.
+    public static func confirm(code: String,
+                               slots: CommandSlots,
+                               aircraft: Aircraft,
+                               context: Context) -> ConfirmationOutcome? {
+        switch code {
+        case "430":   // CONFIRM [LEVEL]
+            guard let asked = slots.integer("LEVEL") else { return nil }
+            let actual = aircraft.flightLevel
+            return asked == actual
+                ? .affirm
+                : .negative(actual: ["ACTUAL LEVEL": .integer(actual)])
+
+        case "216":   // CONFIRM SQUAWK [CODE]
+            guard let asked = slots.text("CODE") else { return nil }
+            return asked == aircraft.squawk
+                ? .affirm
+                : .negative(actual: ["ACTUAL CODE": .text(aircraft.squawk)])
+
+        case "409":   // CONFIRM ESTABLISHED ON ILS LOCALIZER
+            // Established means cleared for the localizer and actually inside its cone.
+            guard let runway = aircraft.interceptRunway,
+                  LocalizerGuidanceService.isInCone(aircraft: aircraft, runway: runway,
+                                                    runways: context.runways) else {
+                return .negative(actual: [:])
+            }
+            return .affirm
+
+        default:
+            return nil
+        }
+    }
+
+    /// Scene inputs a confirmation may need. Aliased so callers pass the same context
+    /// they already build for validation.
+    public typealias Context = CommandValidator.Context
+
     // MARK: - Deferred reports
 
     /// When a "report …" instruction should actually be reported.

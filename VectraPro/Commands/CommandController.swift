@@ -120,7 +120,8 @@ final class CommandController {
             DeferredReportCoordinator.shared.register(command, aircraftCallsign: target)
         }
 
-        let readback = ReadbackComposer.compose(spoken, callsign: callsign)
+        let readback = ReadbackComposer.compose(spoken.map { reply(to: $0, target: target) },
+                                                callsign: callsign)
 
         guard !effects.isEmpty else {
             // Nothing to apply: answer directly rather than going through the
@@ -148,6 +149,32 @@ final class CommandController {
             CommandFeedbackManager.shared.aircraftNotFound()
         } else {
             mapViewModel.apply(effects)
+        }
+    }
+
+    /// The phrase to answer a command with.
+    ///
+    /// Usually its primary readback. A confirmation question — "confirm flight level
+    /// two six zero" — has a second reply behind "If not:", and which one is true
+    /// depends on the aircraft. Answering with the affirmative regardless would have
+    /// the simulator agree to whatever it was asked: an aircraft at FL280 replying
+    /// "maintaining two six zero".
+    private func reply(to command: RecognizedCommand, target: String?) -> Phrase {
+        let primary = command.readback.primary
+        guard let alternate = command.readback.alternate,
+              let mapViewModel,
+              let aircraft = target.flatMap(mapViewModel.aircraft(callsign:)),
+              let outcome = CommandMapping.confirm(code: command.code,
+                                                   slots: command,
+                                                   aircraft: aircraft,
+                                                   context: mapViewModel.validationContext)
+        else { return primary }
+
+        switch outcome {
+        case .affirm:
+            return primary
+        case .negative(let actual):
+            return alternate.filling(actual)
         }
     }
 

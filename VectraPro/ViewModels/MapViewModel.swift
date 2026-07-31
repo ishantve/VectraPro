@@ -142,6 +142,11 @@ final class MapViewModel: ObservableObject {
         fixes.map(\.asDomain)
     }
 
+    /// The aircraft answering to a callsign, radar or hangar.
+    func aircraft(callsign: String) -> Aircraft? {
+        (aircraft + traffic).first { $0.callsign.caseInsensitiveCompare(callsign) == .orderedSame }
+    }
+
     /// Scene inputs for validation, shared by the command path and the report path.
     var validationContext: CommandValidator.Context {
         CommandValidator.Context(runways: runways,

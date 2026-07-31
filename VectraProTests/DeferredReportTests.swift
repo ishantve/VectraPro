@@ -215,6 +215,78 @@ final class DeferredReportTests: XCTestCase {
                        .ok)
     }
 
+    // MARK: - "If not:" — answering a confirmation truthfully
+
+    private func plane(level: Int, squawk: String = "4567") -> Aircraft {
+        var aircraft = Aircraft(callsign: "AIC123",
+                                position: .init(latitude: 28.5, longitude: 77.1),
+                                headingDegrees: 90)
+        aircraft.altitudeFeet = Double(level) * 100
+        aircraft.squawk = squawk
+        return aircraft
+    }
+
+    private var sceneContext: CommandValidator.Context {
+        CommandValidator.Context(runways: [], activeLocalizerRunways: [], holdingFixes: [])
+    }
+
+    /// The reply the app would speak, choosing between the two branches the way
+    /// CommandController does.
+    private func reply(to command: RecognizedCommand, aircraft: Aircraft) -> String? {
+        guard let alternate = command.readback.alternate,
+              let outcome = CommandMapping.confirm(code: command.code, slots: command,
+                                                   aircraft: aircraft, context: sceneContext)
+        else { return command.readback.primary.spoken }
+
+        switch outcome {
+        case .affirm:                return command.readback.primary.spoken
+        case .negative(let actual):  return alternate.filling(actual).spoken
+        }
+    }
+
+    func testConfirmingTheLevelAnAircraftIsAtGetsTheAffirmativeReply() throws {
+        let command = try command("air india 123 confirm 260")
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 260)),
+                       "MAINTAINING two six zero, air india one two three")
+    }
+
+    /// The defect this closes: the alternate branch was parsed and rendered but never
+    /// used, so the affirmative was spoken whatever the aircraft was doing — an
+    /// aircraft at FL280 telling the controller it was maintaining FL260.
+    func testConfirmingTheWrongLevelGetsTheNegativeReplyWithTheRealLevel() throws {
+        let command = try command("air india 123 confirm 260")
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 280)),
+                       "NEGATIVE, two eight zero, air india one two three")
+    }
+
+    func testTheRealLevelIsSpokenDigitByDigitLikeAnyOther() throws {
+        // Filled from aircraft state, but read the same way the question was.
+        let command = try command("air india 123 confirm 260")
+        let spoken = try XCTUnwrap(reply(to: command, aircraft: plane(level: 90)))
+        XCTAssertTrue(spoken.contains("zero nine zero"), spoken)
+    }
+
+    func testConfirmingASquawk() throws {
+        let command = try command("air india 123 confirm squawk 4567")
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 260, squawk: "4567")),
+                       "SQUAWKING four five six seven, air india one two three")
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 260, squawk: "2000")),
+                       "NEGATIVE, SQUAWKING two zero zero zero, air india one two three")
+    }
+
+    func testAnAircraftNotOnAnApproachIsNotEstablished() throws {
+        let command = try command("air india 123 confirm established on ils localizer")
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 30)),
+                       "NEGATIVE, air india one two three")
+    }
+
+    func testACommandWithNoAlternateIsUnaffected() throws {
+        let command = try command("air india 123 turn right heading 250")
+        XCTAssertNil(command.readback.alternate)
+        XCTAssertEqual(reply(to: command, aircraft: plane(level: 260)),
+                       "RADAR TURN RIGHT HEADING two five zero, air india one two three.")
+    }
+
     // MARK: - The coordinator
 
     func testCoordinatorRegistersOnlyWhatItCanSpeak() throws {
