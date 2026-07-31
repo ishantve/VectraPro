@@ -17,8 +17,15 @@
 //  is a wrong readback rather than a missing one.
 //
 //  So a pass is a turnaround in distance that happens *within* `passingRadius` of
-//  the point. Off-track by a couple of miles still counts; twenty miles away does
-//  not.
+//  the point — overhead, not merely nearby. An aircraft vectored off and then flown
+//  back on a parallel track goes abeam the point without ever passing it, and must
+//  not report; only actually crossing over it counts.
+//
+//  Closeness is measured along the path flown, not at the sampled positions. With a
+//  radius as tight as a mile, an aircraft can cross overhead *between* two ticks and
+//  leave no sample inside the radius at all — so the rule would depend on the tick
+//  rate rather than on where the aircraft went. The segment between successive
+//  positions is measured instead.
 //
 //  A distance report needs no radius: it names its own range, so crossing that range
 //  is the whole condition.
@@ -30,6 +37,7 @@
 //  handed back by id and the caller looks up what to say.
 //
 
+import CoreLocation
 import Foundation
 import GeoNavKit
 
@@ -56,6 +64,11 @@ public struct PendingReport: Equatable, Sendable {
 
     /// Distance at the previous evaluation — how a crossing is recognised.
     var lastDistanceM: Double?
+    /// Position at the previous evaluation, so the path between ticks can be measured
+    /// rather than only the ticks themselves.
+    var lastPosition: CLLocationCoordinate2D?
+    /// Closest the aircraft has actually come, counting the path flown between ticks.
+    var closestSeenM: Double
     /// Set once the aircraft has been seen closing on the point. Without it, an
     /// aircraft that starts out flying away would "pass" the fix immediately.
     var hasApproached: Bool
@@ -65,7 +78,16 @@ public struct PendingReport: Equatable, Sendable {
         self.callsign = callsign
         self.condition = condition
         self.lastDistanceM = nil
+        self.lastPosition = nil
+        self.closestSeenM = .greatestFiniteMagnitude
         self.hasApproached = false
+    }
+
+    /// Compared on what identifies the report, not on how far along its tracking has
+    /// got. Two reports for the same aircraft and condition are the same debt whether
+    /// or not one has already seen the aircraft move.
+    public static func == (lhs: PendingReport, rhs: PendingReport) -> Bool {
+        lhs.id == rhs.id && lhs.callsign == rhs.callsign && lhs.condition == rhs.condition
     }
 }
 
@@ -75,11 +97,14 @@ public struct PendingReportTracker: Equatable, Sendable {
 
     /// How close an aircraft must come for a turnaround to count as passing a point.
     ///
-    /// Five miles is deliberately generous against the mile or two a fix would
-    /// normally be passed by, so a vectored aircraft still reports, while staying far
-    /// below the distances at which a turn elsewhere in the airspace would otherwise
-    /// look like a pass.
-    public static let defaultPassingRadiusNM = 5.0
+    /// One mile: overhead within navigation tolerance, which is what a controller
+    /// means by "report passing". Anything looser reports an aircraft that merely went
+    /// past at a distance — a track parallel to the point, three miles abeam, is not a
+    /// pass however neatly the distance turns around.
+    ///
+    /// It is also the radius `HoldingController` already captures a hold with, so the
+    /// simulator keeps one idea of being at a fix rather than two.
+    public static let defaultPassingRadiusNM = 1.0
 
     public let passingRadiusM: Double
     private var reports: [PendingReport] = []
@@ -150,17 +175,31 @@ public struct PendingReportTracker: Equatable, Sendable {
                        runways: [Runway]) -> Bool {
         switch report.condition {
         case .passingFix(let name):
-            guard let distance = distanceM(from: aircraft, toFixNamed: name, in: fixes) else {
-                return false
+            guard let fix = FixLookup.position(named: name, in: fixes) else { return false }
+            let distance = Geo.distanceMeters(from: aircraft.position, to: fix)
+
+            // How close the aircraft came since the last tick, including the ground
+            // it covered in between — not just where it happened to be sampled.
+            if let from = report.lastPosition {
+                report.closestSeenM = min(report.closestSeenM,
+                                          Self.distanceM(from: fix,
+                                                         toSegmentFrom: from,
+                                                         to: aircraft.position))
             }
-            defer { report.lastDistanceM = distance }
+            report.closestSeenM = min(report.closestSeenM, distance)
+
+            defer {
+                report.lastDistanceM = distance
+                report.lastPosition = aircraft.position
+            }
             guard let previous = report.lastDistanceM else { return false }
             if distance < previous { report.hasApproached = true }
-            // Closing, then opening, and near enough for that to mean passing. The
-            // radius is what stops a turn made twenty miles away counting as a pass.
+            // Closing, then opening, and it actually got near the point. The radius is
+            // what stops a turn twenty miles away, or a parallel track three miles
+            // abeam, counting as a pass.
             return report.hasApproached
                 && distance > previous
-                && previous <= passingRadiusM
+                && report.closestSeenM <= passingRadiusM
 
         case .distanceFromFix(let nauticalMiles, let name):
             guard let distance = distanceM(from: aircraft, toFixNamed: name, in: fixes) else {
@@ -187,5 +226,36 @@ public struct PendingReportTracker: Equatable, Sendable {
                            in fixes: [Fix]) -> Double? {
         guard let position = FixLookup.position(named: name, in: fixes) else { return nil }
         return Geo.distanceMeters(from: aircraft.position, to: position)
+    }
+
+    /// Closest the straight track from `from` to `to` comes to `point`.
+    ///
+    /// A flat local projection: over the few miles a single tick covers, the error is
+    /// far below the tolerance being tested against, and it avoids depending on how
+    /// finely the simulation happens to sample.
+    static func distanceM(from point: CLLocationCoordinate2D,
+                          toSegmentFrom from: CLLocationCoordinate2D,
+                          to end: CLLocationCoordinate2D) -> Double {
+        let metersPerDegreeLat = 111_320.0
+        let metersPerDegreeLon = metersPerDegreeLat * cos(point.latitude * .pi / 180)
+
+        func vector(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> (x: Double, y: Double) {
+            ((b.longitude - a.longitude) * metersPerDegreeLon,
+             (b.latitude - a.latitude) * metersPerDegreeLat)
+        }
+
+        let segment = vector(from, end)
+        let toPoint = vector(from, point)
+        let lengthSquared = segment.x * segment.x + segment.y * segment.y
+        guard lengthSquared > 0 else {
+            return Geo.distanceMeters(from: from, to: point)
+        }
+
+        // Where along the segment the point projects, clamped to its ends.
+        let t = max(0, min(1, (toPoint.x * segment.x + toPoint.y * segment.y) / lengthSquared))
+        let closest = (x: segment.x * t, y: segment.y * t)
+        let dx = toPoint.x - closest.x
+        let dy = toPoint.y - closest.y
+        return (dx * dx + dy * dy).squareRoot()
     }
 }

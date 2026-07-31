@@ -55,15 +55,35 @@ final class PendingReportTrackerTests: XCTestCase {
     }
 
     func testAPassSlightlyOffTrackStillFires() {
-        // About two miles abeam — outside the radius a hold would capture with, but
-        // plainly a pass, and a vectored aircraft will often be no closer.
+        // About half a mile abeam — not exactly overhead, which no aircraft is, but
+        // within navigation tolerance and plainly a pass.
         var tracker = PendingReportTracker()
         let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
         tracker.register(report)
 
-        let fired = fly(&tracker, through: [(28.50, 77.135), (28.56, 77.135),
-                                            (28.60, 77.135), (28.66, 77.135)])
+        let fired = fly(&tracker, through: [(28.55, 77.109), (28.58, 77.109),
+                                            (28.60, 77.109), (28.64, 77.109)])
         XCTAssertEqual(fired, [report.id])
+    }
+
+    /// Straight from a real session.
+    ///
+    /// The aircraft was tracking to the point on a radial and was given the report.
+    /// It was then vectored away, turned back onto the original heading, and so flew a
+    /// track parallel to the point, three miles abeam. Going abeam is not passing, and
+    /// reporting it told the controller something that had not happened.
+    func testATrackParallelToThePointIsNotAPass() {
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+
+        // Northbound three miles east of the fix — closest approach happens abeam.
+        let fired = fly(&tracker, through: [(28.48, 77.157), (28.54, 77.157),
+                                            (28.60, 77.157), (28.66, 77.157),
+                                            (28.72, 77.157)])
+        XCTAssertTrue(fired.isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1,
+                       "still owed — it can still report if it actually overflies")
     }
 
     func testATurnFarFromThePointIsNotAPass() {
@@ -83,13 +103,21 @@ final class PendingReportTrackerTests: XCTestCase {
     }
 
     func testTheRadiusIsConfigurable() {
-        // A deployment that wants a tighter or looser idea of "passing" can say so.
-        var tight = PendingReportTracker(passingRadiusNM: 1)
+        // A deployment that wants a looser idea of "passing" can say so, and the same
+        // parallel track that is refused by default then reports.
+        let parallel = [(28.48, 77.157), (28.54, 77.157), (28.60, 77.157),
+                        (28.66, 77.157), (28.72, 77.157)]
+
+        var tight = PendingReportTracker()
         tight.register(PendingReport(id: UUID(), callsign: "AIC123",
-                                    condition: .passingFix("PJ")))
-        // The same two-mile-abeam track that fires with the default radius.
-        XCTAssertTrue(fly(&tight, through: [(28.50, 77.135), (28.56, 77.135),
-                                            (28.60, 77.135), (28.66, 77.135)]).isEmpty)
+                                     condition: .passingFix("PJ")))
+        XCTAssertTrue(fly(&tight, through: parallel).isEmpty)
+
+        var loose = PendingReportTracker(passingRadiusNM: 5)
+        let report = PendingReport(id: UUID(), callsign: "AIC123",
+                                   condition: .passingFix("PJ"))
+        loose.register(report)
+        XCTAssertEqual(fly(&loose, through: parallel), [report.id])
     }
 
     func testAnAircraftFlyingAwayFromTheStartDoesNotReportImmediately() {
@@ -111,6 +139,31 @@ final class PendingReportTrackerTests: XCTestCase {
         tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
                                        condition: .passingFix("PJ")))
         XCTAssertTrue(fly(&tracker, through: [(28.59, 77.10)]).isEmpty)
+    }
+
+    func testAnOverheadPassIsFoundEvenWhenNoTickLandsInsideTheRadius() {
+        // Coarse steps on purpose: successive positions are 1.2 NM either side of the
+        // fix, so no sampled position is within a mile of it. The aircraft still flew
+        // straight over, and measuring the path rather than the samples is what sees
+        // that. Otherwise the rule would depend on the tick rate.
+        var tracker = PendingReportTracker()
+        let report = PendingReport(id: UUID(), callsign: "AIC123", condition: .passingFix("PJ"))
+        tracker.register(report)
+
+        let fired = fly(&tracker, through: [(28.50, 77.10), (28.56, 77.10),
+                                            (28.58, 77.10), (28.62, 77.10),
+                                            (28.68, 77.10)])
+        XCTAssertEqual(fired, [report.id])
+    }
+
+    func testTheSegmentMeasurementDoesNotExcuseAParallelTrack() {
+        // The same coarse sampling on a track three miles abeam must still be refused —
+        // measuring the path finds where the aircraft went, not somewhere nearer.
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("PJ")))
+        XCTAssertTrue(fly(&tracker, through: [(28.50, 77.157), (28.58, 77.157),
+                                              (28.62, 77.157), (28.70, 77.157)]).isEmpty)
     }
 
     // MARK: - Distance from a point
