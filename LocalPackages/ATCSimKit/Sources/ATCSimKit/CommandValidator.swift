@@ -173,6 +173,53 @@ public enum CommandValidator {
         return .ok
     }
 
+    // MARK: - Named points
+
+    /// Checks every point a command names against the scene.
+    ///
+    /// Command validation above only sees points that turn into an `AircraftCommand`
+    /// — a hold or a direct routing. Plenty of phraseology names a point without
+    /// changing anything the aircraft does: a report, or a level change coordinated
+    /// with another unit "at" a point. Those never reached any check, so an unknown
+    /// point was accepted, read back, and then quietly meant nothing.
+    ///
+    /// Deliberately checked against `navigationFixes` rather than `holdingFixes`:
+    /// naming a point is not the same as holding at one, and only the latter is
+    /// restricted to holding fixes.
+    public static func validate(fixNames: [String], context: Context) -> Result {
+        for name in fixNames where !name.isEmpty {
+            guard FixLookup.fix(named: name, in: context.navigationFixes) != nil else {
+                return .rejected("Unable, \(name) not found")
+            }
+        }
+        return .ok
+    }
+
+    // MARK: - Deferred reports
+
+    /// Checks a report the controller is asking for before the pilot agrees to it.
+    ///
+    /// Report conditions never reach the command validation above, because the
+    /// phraseology that carries them has no effect on an aircraft and so produces no
+    /// `AircraftCommand`. That left a gap: "report passing XYZ" for a point that does
+    /// not exist was answered "wilco" and then never reported — the aircraft simply
+    /// flew on and nothing said why. A hold or a direct routing to the same unknown
+    /// fix is rejected properly, so a report should be too.
+    public static func validate(_ condition: ReportCondition, context: Context) -> Result {
+        switch condition {
+        case .passingFix(let fix), .distanceFromFix(_, let fix):
+            guard FixLookup.fix(named: fix, in: context.navigationFixes) != nil else {
+                return .rejected("Unable, \(fix) not found")
+            }
+            return .ok
+
+        case .establishedOnLocalizer:
+            // Nothing to check: a controller may ask for this before issuing the
+            // approach clearance, and it simply waits until there is one.
+            return .ok
+        }
+    }
+
     // MARK: - Command-kind matching (for the mutual-exclusion checks)
 
     /// Rejections are read out, so an altitude is described the way it would have

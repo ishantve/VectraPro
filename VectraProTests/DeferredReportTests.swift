@@ -164,6 +164,57 @@ final class DeferredReportTests: XCTestCase {
         XCTAssertNil(CommandMapping.reportCondition(code: command.code, slots: command))
     }
 
+    // MARK: - Named points are checked before the pilot agrees
+
+    private func context(_ fixes: [Fix]) -> CommandValidator.Context {
+        CommandValidator.Context(runways: [], activeLocalizerRunways: [],
+                                 holdingFixes: [], navigationFixes: fixes)
+    }
+
+    /// The fix names a command puts on the air, as the controller reads them.
+    private func namedPoints(_ command: RecognizedCommand) -> [String] {
+        command.slots.compactMap { slot in
+            guard slot.kind == .fix, case .fix(let name)? = slot.value else { return nil }
+            return name
+        }
+    }
+
+    func testAReportForAPointThatIsNotInTheSceneIsRefused() throws {
+        // Nothing named XYZ exists, so the report could never happen. Saying "wilco"
+        // and then staying silent for the rest of the exercise is the failure this
+        // prevents.
+        let command = try command("air india 123 report passing xray yankee zulu")
+        XCTAssertEqual(CommandValidator.validate(fixNames: namedPoints(command),
+                                                 context: context([fix])),
+                       .rejected("Unable, XYZ not found"))
+    }
+
+    func testAReportForAKnownPointIsAccepted() throws {
+        let command = try command("air india 123 report passing papa juliet")
+        XCTAssertEqual(CommandValidator.validate(fixNames: namedPoints(command),
+                                                 context: context([fix])),
+                       .ok)
+    }
+
+    /// The check reads the command's slots, not its effect, so it also covers
+    /// phraseology that names a point without doing anything to the aircraft.
+    func testAPointNamedByACoordinationMessageIsAlsoChecked() throws {
+        let command = try command(
+            "air india 123 radar request level change from delhi at xray yankee zulu")
+        XCTAssertEqual(command.code, "123")
+        XCTAssertEqual(CommandValidator.validate(fixNames: namedPoints(command),
+                                                 context: context([fix])),
+                       .rejected("Unable, XYZ not found"))
+    }
+
+    func testACommandNamingNoPointIsUnaffected() throws {
+        let command = try command("air india 123 turn right heading 250")
+        XCTAssertTrue(namedPoints(command).isEmpty)
+        XCTAssertEqual(CommandValidator.validate(fixNames: namedPoints(command),
+                                                 context: context([])),
+                       .ok)
+    }
+
     // MARK: - The coordinator
 
     func testCoordinatorRegistersOnlyWhatItCanSpeak() throws {

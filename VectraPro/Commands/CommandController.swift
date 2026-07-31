@@ -87,6 +87,14 @@ final class CommandController {
                 continue
 
             case .ok:
+                // Every point the command names is checked before the pilot agrees
+                // to it. Accepting "report passing XYZ" or "level change at XYZ" for
+                // a point that does not exist means the instruction can never be
+                // carried out, and nothing would ever explain the silence.
+                if case .rejected(let reason) = namedPointRejection(for: command) {
+                    CommandFeedbackManager.shared.commandError(reason)
+                    continue
+                }
                 switch CommandMapping.map(code: command.code, slots: command) {
                 case .commands(let mapped):
                     effects.append(contentsOf: mapped)
@@ -141,6 +149,22 @@ final class CommandController {
         } else {
             mapViewModel.apply(effects)
         }
+    }
+
+    /// Whether every point the command names exists in the scene.
+    ///
+    /// Reads the fix-shaped slots rather than the command's effect, so it covers
+    /// phraseology that names a point without changing anything — a report, or a
+    /// level change coordinated "at" a point — as well as a hold or a direct routing.
+    private func namedPointRejection(for command: RecognizedCommand) -> CommandValidator.Result {
+        guard let mapViewModel else { return .ok }
+        let named = command.slots.compactMap { slot -> String? in
+            guard slot.kind == .fix, case .fix(let name)? = slot.value else { return nil }
+            return name
+        }
+        guard !named.isEmpty else { return .ok }
+        return CommandValidator.validate(fixNames: named,
+                                         context: mapViewModel.validationContext)
     }
 
     // MARK: - Reporting what was not understood

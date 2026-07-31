@@ -180,6 +180,55 @@ final class PendingReportTrackerTests: XCTestCase {
         XCTAssertTrue(fly(&tracker, through: [(28.4, 77.1), (28.6, 77.1), (28.8, 77.1)]).isEmpty)
     }
 
+    // MARK: - Validation
+
+    private func context(_ fixes: [Fix]) -> CommandValidator.Context {
+        CommandValidator.Context(runways: [], activeLocalizerRunways: [],
+                                 holdingFixes: [], navigationFixes: fixes)
+    }
+
+    func testAReportForAKnownPointIsAccepted() {
+        XCTAssertEqual(CommandValidator.validate(.passingFix("PJ"), context: context([fix])),
+                       .ok)
+        XCTAssertEqual(
+            CommandValidator.validate(.distanceFromFix(nauticalMiles: 10, fix: "PJ"),
+                                      context: context([fix])),
+            .ok)
+    }
+
+    /// The gap this closes.
+    ///
+    /// A report condition never reaches command validation, because the phraseology
+    /// carrying it produces no AircraftCommand. So "report passing XYZ" for a point
+    /// that does not exist used to be answered "wilco" and then never reported —
+    /// the tracker looked the fix up every tick, found nothing, and stayed silent
+    /// forever. A hold to the same unknown fix is rejected, so this must be too.
+    func testAReportForAnUnknownPointIsRejected() {
+        XCTAssertEqual(CommandValidator.validate(.passingFix("XYZ"), context: context([fix])),
+                       .rejected("Unable, XYZ not found"))
+        XCTAssertEqual(
+            CommandValidator.validate(.distanceFromFix(nauticalMiles: 10, fix: "XYZ"),
+                                      context: context([fix])),
+            .rejected("Unable, XYZ not found"))
+    }
+
+    func testALocalizerReportNeedsNothingValidated() {
+        // A controller may ask for it before issuing the approach clearance; it just
+        // waits until there is one.
+        XCTAssertEqual(CommandValidator.validate(.establishedOnLocalizer, context: context([])),
+                       .ok)
+    }
+
+    func testAnUnknownFixWouldOtherwiseNeverFire() {
+        // What the validation prevents, shown directly: the tracker cannot report a
+        // point it cannot find, and says nothing about it.
+        var tracker = PendingReportTracker()
+        tracker.register(PendingReport(id: UUID(), callsign: "AIC123",
+                                       condition: .passingFix("XYZ")))
+        XCTAssertTrue(fly(&tracker, through: [(28.4, 77.1), (28.6, 77.1), (28.8, 77.1)]).isEmpty)
+        XCTAssertEqual(tracker.pending.count, 1, "owed forever, in silence")
+    }
+
     // MARK: - Mapping
 
     func testConditionsComeFromTheCode() {

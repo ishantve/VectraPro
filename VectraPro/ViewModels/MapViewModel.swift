@@ -135,10 +135,19 @@ final class MapViewModel: ObservableObject {
         holdingFixes.map(\.asDomain)
     }
 
-    /// Every fix an aircraft may be routed direct to — waypoints and VORs as well
-    /// as holding fixes, since "proceed direct" is not limited to holds.
-    private var navigationFixesDomain: [ATCSimKit.Fix] {
+    /// Every fix an aircraft may be routed direct to or asked to report — waypoints
+    /// and VORs as well as holding fixes, since "proceed direct" and "report passing"
+    /// are not limited to holds.
+    var navigationFixesDomain: [ATCSimKit.Fix] {
         fixes.map(\.asDomain)
+    }
+
+    /// Scene inputs for validation, shared by the command path and the report path.
+    var validationContext: CommandValidator.Context {
+        CommandValidator.Context(runways: runways,
+                                 activeLocalizerRunways: activeLocalizerRunways,
+                                 holdingFixes: holdingFixesDomain,
+                                 navigationFixes: navigationFixesDomain)
     }
 
     /// Public: coordinate of a holding fix by name (used by the map controller
@@ -485,12 +494,8 @@ final class MapViewModel: ObservableObject {
         // the localizer-intercept checks). On failure, speak the reason and apply
         // nothing.
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
-            let context = CommandValidator.Context(
-                runways: runways,
-                activeLocalizerRunways: activeLocalizerRunways,
-                holdingFixes: holdingFixesDomain,
-                navigationFixes: navigationFixesDomain)
-            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
+            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac,
+                                                                       context: validationContext) {
                 feedback.commandError(reason)
                 return
             }
