@@ -211,6 +211,77 @@ The registry is empty today. That is the point: the first field ever added is a 
 registration, not a redesign. A synthetic migration in `EventSchemaTests` proves the chain works
 before anything needs it.
 
+### 2.5 Event identity — `eventID`
+
+Every recorded event has a stable identity, so that bookmarks, instructor annotations, analytics and
+cloud sync can all refer to *one specific event* and keep referring to it.
+
+**Ordering never uses it.** Ordering is `(tick, ordinal)`, full stop. The id is deliberately opaque so
+that nothing can be tempted to sort by it — which is also why it is not, say, a zero-padded ordinal.
+
+#### Generation
+
+```
+eventID = UUIDv8( SHA256( sessionID.bytes ‖ "evt" ‖ ordinal.littleEndian ) [0..<16] )
+```
+
+- **`sessionID`** — a UUID, so it carries ~122 bits of entropy. Two events in different sessions can
+  only collide if their sessions did.
+- **`ordinal`** — unique within a session by construction: one counter, one owner (`InputGateway`).
+- **`"evt"`** — a domain separator, so this hash space cannot collide with any other thing we later
+  derive from a session id (a snapshot id, a chunk id).
+- **UUIDv8** (RFC 9562, "custom") with the version and variant nibbles set. Not v4 — it is not random
+  — and not v5 — that is specified as SHA-1. Claiming v8 says truthfully "derived, by a scheme of our
+  own".
+
+#### `tick` is deliberately *not* part of it
+
+`ordinal` alone identifies an event within a session. Mixing in `tick` would be redundant, and worse:
+it would tie identity to a value that a future feature might legitimately re-stamp (a repaired
+recording, a re-based branch). An annotation must not lose its anchor because a tick was corrected.
+
+#### The payload is deliberately *not* part of it
+
+A content hash would be attractive for deduplication, and is wrong here. Payloads are **migrated on
+read** (§2.3), so an id derived from content would change the moment a migration touched the event —
+silently orphaning every annotation that pointed at it. Identity has to survive the shape changing,
+which means it can only be derived from things that never change.
+
+#### Derived, not stored
+
+The id is **computed**, not written into the log. `Event.id(in:)` takes the session id and returns it.
+
+- **It cannot disagree with its position.** A stored id could be corrupted or copied wrong; a derived
+  one is always exactly what `(sessionID, ordinal)` implies.
+- **It costs no bytes.** ~1,000 events a session, 16 bytes each, is not much — but it is not nothing,
+  and there is nothing to buy with it.
+- **The scheme stays cheap to change.** Nothing on disk encodes it, so revising this decision is a
+  code change rather than a migration. Worth saying plainly: if this strategy is wrong, we can replace
+  it without touching a single recording.
+
+The cost of deriving: an `Event` alone cannot name itself — it needs its session. That is honest
+rather than inconvenient, since a per-session ordinal is meaningless without knowing the session, and
+anything carrying events across a boundary (sync, export) carries the session id anyway.
+
+#### One implementation requirement this creates
+
+Uniqueness rests entirely on `ordinal` never repeating within a session. So after a crash, when
+recording resumes on the same log, **the gateway's counter must be seeded from
+`EventStore.lastPosition`** rather than restarting at 1. `EventStore` already refuses a non-increasing
+append, so a mistake here fails loudly at the first event rather than quietly minting a duplicate id —
+but the seeding is a requirement of this scheme, not an incidental detail.
+
+#### What it enables, and what it does not
+
+| Use | How |
+|---|---|
+| Bookmarks, annotations | foreign key `(sessionID, eventID)` in the catalogue, outside the sealed log |
+| Deduplication on sync | same session + same ordinal ⇒ same id ⇒ the same event, whatever its payload version |
+| Analytics references | a stable handle that survives migrations and re-reads |
+| Cross-session debugging | ids are unique across sessions, so two lineages can be compared in one view |
+| **Ordering** | **never** — use `(tick, ordinal)` |
+| Content equality | never — two events with the same id are the same *event*, not necessarily the same *bytes*, since the payload may have been migrated |
+
 ### 2.4 What Phase C adds
 
 Nothing to the model. Replay reads what recording wrote. If Phase C needs a new payload case, the

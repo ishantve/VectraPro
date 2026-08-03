@@ -24,6 +24,14 @@ import CryptoKit
 /// SHA-256, hex-encoded.
 public enum SHA256 {
 
+    /// The raw digest, for callers that need bytes rather than hex — deriving an id, for instance.
+    ///
+    /// Here rather than beside its caller so `CryptoKit` stays imported in exactly one file. An
+    /// `@_exported import` would have leaked it into every consumer of this package.
+    static func bytes(_ data: Data) -> [UInt8] {
+        Array(CryptoKit.SHA256.hash(data: data))
+    }
+
     /// Hex digest of `data`. Lowercase, no separators — the form that goes into a manifest.
     public static func hex(_ data: Data) -> String {
         CryptoKit.SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
