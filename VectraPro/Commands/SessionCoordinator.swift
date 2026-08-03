@@ -32,6 +32,13 @@ final class SessionCoordinator {
         return base.appendingPathComponent("Sessions", isDirectory: true)
     }
 
+    /// The app's coordinator.
+    ///
+    /// A singleton because sessions live in one place on disk and a second coordinator would open a second
+    /// catalogue over the same directory. Created lazily so a test can build its own against a temporary root
+    /// without this one ever touching Application Support.
+    static let shared = SessionCoordinator()
+
     let sessions: SessionManager
     let branches: BranchManager
 

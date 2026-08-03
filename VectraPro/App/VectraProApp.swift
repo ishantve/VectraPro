@@ -42,7 +42,7 @@ extension VectraProApp {
         let radar = MapViewModel.shared
         guard radar.recording == nil else { return }   // idempotent: `.task` can run again
 
-        let coordinator = SessionCoordinator()
+        let coordinator = SessionCoordinator.shared
         coordinator.recoverAfterLaunch()
         radar.recording = coordinator
     }

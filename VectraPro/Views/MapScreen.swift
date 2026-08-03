@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ATCReplayKit
 import ATCSimKit
 
 struct MapScreen: View {
@@ -21,6 +22,22 @@ struct MapScreen: View {
     @State private var showLayers = false
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
     @State private var openLeftMenu: LeftMenu?
+    // MARK: - Replay
+    //
+    // Replay drives the radar that is already on screen rather than opening a second one: a reviewer watches the
+    // same picture the trainee flew, and the only thing added is a transport bar over it.
+
+    /// The browser sheet.
+    @State private var showsRecordings = false
+
+    /// The transport, present only while replaying. Its absence *is* "not replaying" — the screen keeps no
+    /// separate flag, because a flag and a transport are two things that would have to agree.
+    @State private var replay: ReplayTransport?
+
+    /// Observed so the bar redraws as the replay advances. `ReplayClock` is the authority; this is a reference to
+    /// it, not a copy of it.
+    @StateObject private var replayClock = ReplayClock()
+
     /// Which operations popup is open (nil = none). Only one at a time.
     enum OperationsPopup { case flightData }
     @State private var activePopup: OperationsPopup?
@@ -83,6 +100,9 @@ struct MapScreen: View {
                 // Always-visible top icons; the globe toggles the layer buttons.
                 HStack(spacing: 12) {
                     windowToggleButton
+                    topActionButton("clock.arrow.circlepath", isOn: replay != nil) {
+                        showsRecordings = true
+                    }
                     topActionButton("flag.fill") { /* TODO */ }
                     topActionButton("person.2.fill") { /* TODO */ }
                     topActionButton("globe", isOn: showLayers) {
@@ -143,6 +163,22 @@ struct MapScreen: View {
             .padding(.leading, 24)
             .padding(.bottom, 12)
         }
+        .sheet(isPresented: $showsRecordings) {
+            ReplayBrowserView(coordinator: .shared) { sessionID in
+                startReplay(of: sessionID)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let replay {
+                ReplayTransportBar(clock: replayClock, transport: replay) {
+                    continueFromReplay(replay)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 100)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: replay == nil)
         .overlay(alignment: .bottomLeading) {
             feedbackLogView
                 .padding(.leading, 24)
@@ -291,7 +327,10 @@ struct MapScreen: View {
                             VStack(alignment: .trailing, spacing: 10) {
                                 HStack(spacing: 10) {
                                     windowToggleButton
-                                    topActionButton("flag.fill") { /* TODO */ }
+                                    topActionButton("clock.arrow.circlepath", isOn: replay != nil) {
+                        showsRecordings = true
+                    }
+                    topActionButton("flag.fill") { /* TODO */ }
                                     topActionButton("person.2.fill") { /* TODO */ }
                                     topActionButton("globe", isOn: showLayers) {
                                         withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
@@ -399,6 +438,37 @@ struct MapScreen: View {
     }
 
     /// Left-side tool column: 4 tools + Instructor Mode (2). Clickable; actions TBD.
+    // MARK: - Replay actions
+
+    /// Loads a recording and shows the transport over the radar.
+    ///
+    /// The engine is built with the screen's own clock, so the bar observes the same authority the engine writes —
+    /// rather than the screen keeping a copy that would need syncing.
+    private func startReplay(of sessionID: SessionID) {
+        let engine = ReplayEngine(radar: viewModel, recording: .shared, clock: replayClock)
+        do {
+            try engine.load(sessionID)
+            replay = ReplayTransport(engine: engine)
+        } catch {
+            feedbackManager.commandError("Unable to open that recording")
+            #if DEBUG
+            print("[MapScreen] replay load failed: \(error)")
+            #endif
+        }
+    }
+
+    /// Forks here and hands the radar back to a live exercise.
+    ///
+    /// Dismissing the bar is all the screen has to do — the world is already live, because it was reached by
+    /// simulating rather than by being restored.
+    private func continueFromReplay(_ transport: ReplayTransport) {
+        guard transport.perform(.continueLive(label: "Continued")) else {
+            feedbackManager.commandError("Unable to continue from here")
+            return
+        }
+        replay = nil
+    }
+
     /// Back button and clock. Both layouts show it; each pads it differently.
     private var exerciseHeader: some View {
         ExerciseHeader(elapsedSeconds: viewModel.elapsedSeconds,
