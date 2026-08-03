@@ -29,6 +29,15 @@ import ATCSimKit
 /// stand-in instead of the app's own — a real one speaks.
 @MainActor
 protocol DeferredReportAnnouncing {
+
+    /// Takes on a report the pilot now owes.
+    ///
+    /// Added to the protocol so the command controller can register through it rather than reaching for
+    /// the shared coordinator. Registering is **simulation state** — the reports outstanding are part of
+    /// the world and are restored with it. Only the announcement, when the tick comes due, is a side
+    /// effect.
+    func register(_ command: RecognizedCommand, aircraftCallsign: String?)
+
     func advance(aircraft: [Aircraft], allCallsigns: Set<String>,
                  fixes: [Fix], runways: [Runway])
 }
@@ -36,6 +45,18 @@ protocol DeferredReportAnnouncing {
 final class DeferredReportCoordinator: DeferredReportAnnouncing {
 
     static let shared = DeferredReportCoordinator()
+
+    /// Where a due report is spoken.
+    ///
+    /// Injected rather than reached for. Announcing is a **side effect** — the report itself is simulation
+    /// state, but saying it out loud is not — so it has to cross the gate, or seeking through the tick a
+    /// report comes due on would speak it at a reviewer who is scrubbing. See `SideEffects.swift`.
+    ///
+    /// Optional and resolved lazily: the shared coordinator is created before any view model exists, so it
+    /// cannot be handed a gate at init.
+    var feedback: CommandFeedback?
+
+    private var resolvedFeedback: CommandFeedback { feedback ?? CommandFeedbackManager.shared }
 
     private var tracker = PendingReportTracker()
     /// Rendered phrase per pending report.
@@ -88,7 +109,7 @@ final class DeferredReportCoordinator: DeferredReportAnnouncing {
         for id in tracker.evaluate(aircraft: aircraft, fixes: fixes, runways: runways) {
             defer { phrases[id] = nil }
             guard let spoken = phrases[id]?.spoken else { continue }
-            CommandFeedbackManager.shared.readback(spoken)
+            resolvedFeedback.readback(spoken)
         }
     }
 

@@ -390,9 +390,23 @@ final class MapViewModel: ObservableObject {
 
     /// Where spoken and logged output goes. Named rather than reached for, so a
     /// test can hand over a spy — the real one talks to the device synthesiser.
-    private let feedback: CommandFeedback
+    /// The side-effect boundary. Everything non-deterministic the simulation causes goes through this —
+    /// see `SideEffects.swift` for why it is one object rather than a check at each call site.
+    ///
+    /// Not private: the command controller and the keypad share it, because two gates could sit in two
+    /// modes and a seek would silence only one of them.
+    let sideEffects: SideEffectGate
+
+    /// Reads as before at every call site; now the gate rather than the manager.
+    private var feedback: CommandFeedback { sideEffects }
     /// Reports aircraft owe, evaluated each tick.
-    private let reports: DeferredReportAnnouncing
+    /// Simulation state, not a side effect — the reports a pilot owes are part of the world.
+    ///
+    /// Not private: the command controller registers into the same tracker the step loop advances. Two
+    /// trackers would mean a report registered into one and never announced from the other.
+    let deferredReports: DeferredReportAnnouncing
+
+    private var reports: DeferredReportAnnouncing { deferredReports }
 
     init(physics: AircraftPhysics? = nil,
          collision: AircraftCollisionDetector? = nil,
@@ -402,8 +416,11 @@ final class MapViewModel: ObservableObject {
         self.physics   = physics ?? .shared
         self.collision = collision ?? .shared
         self.spawner   = spawner ?? .shared
-        self.feedback  = feedback ?? CommandFeedbackManager.shared
-        self.reports   = reports ?? DeferredReportCoordinator.shared
+        self.sideEffects = SideEffectGate(presentation: feedback ?? CommandFeedbackManager.shared)
+        self.deferredReports = reports ?? DeferredReportCoordinator.shared
+        // The coordinator exists before any view model does, so it cannot be handed the gate at its own
+        // init. Announcing a due report is a side effect and must cross the same gate as everything else.
+        (self.deferredReports as? DeferredReportCoordinator)?.feedback = self.sideEffects
         promotion = RadarPromotionSchedule(using: &streams.traffic)
         aircraft = [self.spawner.makeRandomAircraft(context: spawnContext, rng: &streams.spawner)]
     }

@@ -47,7 +47,7 @@ final class KeypadValidationTests: XCTestCase {
     }
 
     private final class SilentReports: DeferredReportAnnouncing {
-        func register(_ condition: ReportCondition, aircraftCallsign: String) {}
+        func register(_ command: RecognizedCommand, aircraftCallsign: String?) {}
         func advance(aircraft: [Aircraft], allCallsigns: Set<String>,
                      fixes: [ATCSimKit.Fix], runways: [Runway]) {}
         func clear() {}

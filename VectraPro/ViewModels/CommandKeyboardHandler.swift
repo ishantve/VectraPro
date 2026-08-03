@@ -30,6 +30,11 @@ final class CommandKeyboardHandler {
     private let store: CommandTemplateStore
     private let renderer = ReadbackRenderer()
 
+    /// Everything this handler says out loud, behind the side-effect boundary — see `SideEffects.swift`.
+    /// Taken from the view model so the keypad and the microphone share one gate; two gates could be in
+    /// two modes, and a seek would silence one of them.
+    private var feedback: CommandFeedback { radar.sideEffects }
+
     /// Not private: a test needs a handler pointed at its own view model rather than the shared one, and
     /// so will a second live session. The defaults keep every existing call site unchanged.
     /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated, and
@@ -101,7 +106,7 @@ final class CommandKeyboardHandler {
         guard store.templates != nil else {
             // The reply comes from the template, so without the vocabulary a key would
             // act on an aircraft and then say nothing about it.
-            CommandFeedbackManager.shared.commandError("Unable, phraseology unavailable")
+            feedback.commandError("Unable, phraseology unavailable")
             return
         }
 
@@ -113,13 +118,13 @@ final class CommandKeyboardHandler {
             radar.apply(effects, readback: readback(for: binding, values: values))
         case .communicationOnly:
             if let spoken = readback(for: binding, values: values) {
-                CommandFeedbackManager.shared.readback(spoken)
+                feedback.readback(spoken)
             }
         case .unmapped:
             // A key bound to a code the simulator has no behaviour for. Reported
             // rather than ignored — a silent key is indistinguishable from a
             // working one.
-            CommandFeedbackManager.shared.commandError(
+            feedback.commandError(
                 "Unable, \(binding.prompt.lowercased()) not implemented")
         }
     }

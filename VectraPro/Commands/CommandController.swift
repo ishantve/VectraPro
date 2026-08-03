@@ -36,9 +36,27 @@ final class CommandController {
     private weak var mapViewModel: MapViewModel?
     private let store: CommandTemplateStore
 
-    init(mapViewModel: MapViewModel, store: CommandTemplateStore = .shared) {
+    /// Everything this controller says out loud, behind the side-effect boundary.
+    ///
+    /// Injected rather than reached for. It used to call `CommandFeedbackManager.shared` from ten places,
+    /// which made every one of them a side effect replay could not suppress — see `SideEffects.swift`.
+    private let feedback: CommandFeedback
+
+    /// Where a deferred report is registered.
+    ///
+    /// **Not** a side effect: the reports a pilot owes are simulation state, restored with everything else
+    /// and advanced by the step loop. Only the *announcement* is a side effect, and that goes through
+    /// `feedback` when the tick comes due. Injected so this controller reaches for nothing global.
+    private let reports: DeferredReportAnnouncing
+
+    init(mapViewModel: MapViewModel,
+         store: CommandTemplateStore = .shared,
+         feedback: CommandFeedback? = nil,
+         reports: DeferredReportAnnouncing? = nil) {
         self.mapViewModel = mapViewModel
         self.store = store
+        self.feedback = feedback ?? mapViewModel.sideEffects
+        self.reports = reports ?? mapViewModel.deferredReports
     }
 
     // MARK: - Main entry point
@@ -48,7 +66,7 @@ final class CommandController {
             // Everything downstream is keyed on the vocabulary, so there is nothing
             // sensible to do without it. Saying so beats accepting commands and
             // handling them differently from every other part of the app.
-            CommandFeedbackManager.shared.commandError("Unable, phraseology unavailable")
+            feedback.commandError("Unable, phraseology unavailable")
             return
         }
 
@@ -80,7 +98,7 @@ final class CommandController {
             switch command.outcome {
             case .invalidValue(let slot, let value):
                 // The controller said something illegal — say so, and drop it.
-                CommandFeedbackManager.shared.commandError(
+                feedback.commandError(
                     "Unable, \(readable(slot)) \(readable(value)) is not valid")
                 continue
 
@@ -95,7 +113,7 @@ final class CommandController {
                 // a point that does not exist means the instruction can never be
                 // carried out, and nothing would ever explain the silence.
                 if case .rejected(let reason) = namedPointRejection(for: command) {
-                    CommandFeedbackManager.shared.commandError(reason)
+                    feedback.commandError(reason)
                     continue
                 }
 
@@ -104,7 +122,7 @@ final class CommandController {
                 // controller a level is being maintained without having checked.
                 if CommandMapping.answeredFromAircraft.contains(command.code),
                    aircraft(for: target) == nil {
-                    CommandFeedbackManager.shared.aircraftNotFound()
+                    feedback.aircraftNotFound()
                     continue
                 }
                 switch CommandMapping.map(code: command.code, slots: command) {
@@ -118,7 +136,7 @@ final class CommandController {
                     // Recognised phraseology the simulator has not implemented.
                     // Reported rather than ignored, so a gap in the mapping table
                     // cannot pass for a command that worked.
-                    CommandFeedbackManager.shared.commandError(
+                    feedback.commandError(
                         "Unable, \(command.category) instruction not implemented")
                 }
             }
@@ -129,7 +147,7 @@ final class CommandController {
         // "Report passing PJ" is answered now and reported later; register the
         // deferred half so it fires when the aircraft actually gets there.
         for command in spoken {
-            DeferredReportCoordinator.shared.register(command, aircraftCallsign: target)
+            reports.register(command, aircraftCallsign: target)
         }
 
         let readback = ReadbackComposer.compose(spoken.map { reply(to: $0, target: target) },
@@ -140,7 +158,7 @@ final class CommandController {
             // apply path, which would report "aircraft not found" for a plain
             // acknowledgement.
             if let readback {
-                CommandFeedbackManager.shared.readback(readback)
+                feedback.readback(readback)
             } else {
                 // A reply that cannot be completed. "What are your intentions" asks
                 // for something the simulator has no model of, and going quiet is
@@ -165,7 +183,7 @@ final class CommandController {
             // A callsign was spoken but no aircraft answers to it — never fall back
             // to the selected aircraft here, or an instruction meant for one
             // aircraft lands on another.
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
         } else {
             mapViewModel.apply(effects, readback: readback)
         }
@@ -235,7 +253,7 @@ final class CommandController {
             .filter { $0.readback.isRequired }
             .flatMap { $0.readback.primary.unresolvedSlots }
         guard !missing.isEmpty else { return }
-        CommandFeedbackManager.shared.commandError(
+        feedback.commandError(
             "Unable, \(missing.map { $0.lowercased() }.joined(separator: " and ")) not available")
     }
 
@@ -243,10 +261,10 @@ final class CommandController {
 
     private func report(unrecognized fragments: [String]) {
         guard !fragments.isEmpty else {
-            CommandFeedbackManager.shared.commandError("Command not recognized")
+            feedback.commandError("Command not recognized")
             return
         }
-        CommandFeedbackManager.shared.commandError(
+        feedback.commandError(
             "Say again — did not understand \(fragments.joined(separator: ", "))")
     }
 
