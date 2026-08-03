@@ -106,57 +106,33 @@ final class ReplayGateTests: XCTestCase {
         let sessionID = try XCTUnwrap(coordinator.sessions.active?.id)
         coordinator.stopRecording(tickCount: 600)
 
-        // ── Read the recording back, from disk ────────────────────────────────────
-        let manifest = try coordinator.sessions.manifest(for: sessionID)
-        let recorded = try coordinator.sessions.events(for: sessionID)
+        // ── Replay, through the engine ────────────────────────────────────────────
+        //
+        // Driven by `ReplayEngine` rather than by a loop written here. The gate used to carry its own driver,
+        // which meant it was validating test code: the engine could have been wrong in exactly the way the
+        // driver was right. Now the thing that ships is the thing under test.
+        let replayed = makeSimulation()
+        let engine = ReplayEngine(radar: replayed, sessions: coordinator.sessions)
+        let loaded = try engine.load(sessionID)
 
-        XCTAssertEqual(manifest.seed, seed, "the seed did not survive the recording")
-        XCTAssertTrue(manifest.payloadIsIntact)
-        XCTAssertFalse(recorded.isEmpty, "nothing was recorded — the gate would pass vacuously")
-
-        let commands = recorded.filter { $0.payload.affectsSimulation }
-        XCTAssertEqual(commands.count, Self.script.count,
+        XCTAssertEqual(loaded.manifest.seed, seed, "the seed did not survive the recording")
+        XCTAssertTrue(loaded.manifest.payloadIsIntact)
+        XCTAssertTrue(loaded.isReproducibleHere)
+        XCTAssertEqual(loaded.inputsByTick.values.map(\.count).reduce(0, +), Self.script.count,
                        "every instruction should be recorded exactly once")
 
-        // ── Replay: seed + recorded commands, nothing else ────────────────────────
-        let replayed = makeSimulation()
-        replayed.reset(seed: manifest.seed)
-        replayed.stopSimulation()
-        replayed.sideEffects.mode = .suppressed
-
-        var byTick: [Int: [Event]] = [:]
-        for event in commands { byTick[event.tick, default: []].append(event) }
-
         var replayFingerprints: [Int: UInt64] = [:]
-        for tick in 1...600 {
-            // Keyed on the clock's *current* reading, not the loop counter. An event recorded at tick N was
-            // issued while the clock read N — before the step that takes it to N+1 — so replay must inject it
-            // at the same point. Driving off the loop counter applied everything one tick late, which is the
-            // divergence this gate first reported: the recording was correct and the driver was not.
-            let due = byTick[replayed.elapsedSeconds] ?? []
-            for event in due.sorted(by: { $0.ordinal < $1.ordinal }) {
-                guard case .commandIssued(let code, let callsign, let slots) = event.payload else { continue }
-                try Self.apply(code: code, callsign: callsign, slots: slots, to: replayed)
-            }
-            replayed.advanceStep()
-            if tick % 60 == 0 { replayFingerprints[tick] = replayed.stateHash.value }
+        while engine.currentTick < 600, engine.stepForward() {
+            if engine.currentTick % 60 == 0 { replayFingerprints[engine.currentTick] = replayed.stateHash.value }
         }
 
         // ── Compare ───────────────────────────────────────────────────────────────
-        // Diagnostic: which aircraft each side acted on, and what the recording actually holds.
-        for event in commands.prefix(2) {
-            print("GATE recorded: \(event.payload)")
-        }
-        print("GATE live aircraft: \(live.listAircraft.map(\.callsign).sorted())")
-        print("GATE replay aircraft: \(replayed.listAircraft.map(\.callsign).sorted())")
-        print("GATE live tick60=\(liveFingerprints[60] ?? 0) replay tick60=\(replayFingerprints[60] ?? 0)")
-
         XCTAssertEqual(liveFingerprints.count, 10)
         for tick in liveFingerprints.keys.sorted() {
             XCTAssertEqual(replayFingerprints[tick], liveFingerprints[tick],
                            """
                            diverged at tick \(tick).
-                           recorded: \(commands.map { "\($0.tick):\($0.payload)" })
+                           recorded: \(loaded.inputsByTick.sorted { $0.key < $1.key }.map { "\($0.key)" })
                            live aircraft:   \(live.listAircraft.map(\.callsign).sorted())
                            replay aircraft: \(replayed.listAircraft.map(\.callsign).sorted())
                            """)
@@ -221,45 +197,6 @@ final class ReplayGateTests: XCTestCase {
         XCTAssertTrue(SessionSeal.verify(digest, manifest: manifest, log: log))
     }
 
-    // MARK: - Feeding a recorded command back in
-
-    /// Recorded slots are text; the simulation wants typed values. Reconstructing `StaticCommandSlots` from
-    /// them is the whole of what replay has to do — which is the point of recording phraseology rather than
-    /// effects, and of the keypad having proved a code plus values is enough.
-    private static func apply(code: String,
-                              callsign: String,
-                              slots: [String: String],
-                              to viewModel: MapViewModel) throws {
-        var integers: [String: [Int]] = [:]
-        var texts: [String: [String]] = [:]
-        for (name, value) in slots {
-            let parts = value.split(separator: ",").map(String.init)
-            let numbers = parts.compactMap(Int.init)
-            if numbers.count == parts.count {
-                integers[name] = numbers
-            } else {
-                texts[name] = parts
-            }
-        }
-
-        // The instruction named an aircraft, so select it — the recording holds the resolved callsign, which
-        // is why replay does not have to guess who was on frequency.
-        if !callsign.isEmpty,
-           let target = viewModel.listAircraft.first(where: {
-               $0.callsign.caseInsensitiveCompare(callsign) == .orderedSame
-           }) {
-            viewModel.selectAircraft(target.id)
-        }
-
-        let result = viewModel.commands.perform(
-            code: code, callsign: callsign.isEmpty ? nil : callsign,
-            slots: StaticCommandSlots(integers: integers, texts: texts),
-            source: .replay, category: "replay")
-
-        if !result.effects.isEmpty {
-            viewModel.apply(result.effects, readback: "REPLAY")
-        }
-    }
 }
 
 // MARK: - The app path is the gate's path
