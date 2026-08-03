@@ -1246,7 +1246,10 @@ and the consequence is stronger than a log line:
 
 Two audiences, different capabilities:
 
-| Capability | Trainee | Instructor |
+Instructor capabilities apply **only to sessions shared with them** (§22) — there is no blanket
+access to a trainee's recordings.
+
+| Capability | Trainee | Instructor (on a shared session) |
 |---|---|---|
 | Replay own session | ✅ | ✅ |
 | Seek / scrub / speed / reverse | ✅ | ✅ |
@@ -1298,6 +1301,177 @@ Phase 1 even though nothing consumes them until Phase 2.
 
 ---
 
+## 22. Sharing: who holds the record, and who may see it
+
+*Added after review. The confirmed model: a trainee sees a list of their own sessions, each with a
+**play** and a **share** action. Sharing sends a session to an instructor, who finds it under
+**"Shared with me"**. The instructor has no blanket access — visibility is granted, not assumed.*
+
+Two consequences follow immediately, and one of them is a problem worth raising before any code is
+written.
+
+### 22.1 This answers the cross-device question — and it is the expensive answer
+
+§21.6 said an assessment replayed on a different architecture than it was recorded on is
+**unscoreable**, and Appendix B asked whether that would happen in practice.
+
+**Sharing to an instructor answers it: yes, routinely.** The instructor opens the session on
+*their* device. A trainee flies on an iPad; an instructor may well review on a Mac or a different
+iPad generation. Once sharing exists, cross-device replay is not an edge case — it is the normal
+path for every assessment.
+
+So **R4 is promoted from a footnote to a Phase 1 concern**, and the options are, in increasing
+cost:
+
+1. **Restrict scoring to matching architectures.** Instructor reviews on an iPad; a Mac review is
+   read-only and labelled. Zero engineering cost, real operational cost, and it will be resented.
+2. **Measure before deciding.** Record a fixture session, replay it on every target architecture,
+   compare the §14.6 hashes. This is a day of work and it converts a theoretical worry into a
+   number. **We should do this in Phase 0** — it is cheap, and every option below depends on the
+   answer. It is entirely possible the divergence is nil in practice, and then this whole item
+   evaporates.
+3. **Quantised comparison.** Compare state hashes at a tolerance (positions to ~0.1 m, angles to
+   0.01°) rather than bit-exactly. Divergence below tolerance is not divergence. Cheap, and
+   probably sufficient — floating-point differences in `sin`/`cos` are at the last-bit level, not
+   the metre level.
+4. **Deterministic geodesy** — a fixed-point or soft-float path through GeoNavKit's great-circle
+   maths. Genuinely bit-portable, and a large, invasive change. Only if (2) shows real divergence
+   and (3) proves insufficient.
+
+My recommendation: **(2) in Phase 0, then (3) as the default policy.** Do not build (4) on
+speculation. But the measurement must happen *before* Phase 1 commits to a scoring policy, because
+that policy is a promise to instructors.
+
+### 22.2 The problem: trainee-gated sharing means trainee-gated assessment
+
+If the trainee decides what to share, then **a trainee can simply not share a bad session.** An
+instructor's "Shared with me" list is a self-selected portfolio, not an assessment record.
+
+For **training** and self-review, this is exactly right and should not change — a trainee's
+practice sessions are theirs, and forcing them into an instructor's queue would make people afraid
+to practise.
+
+For **assessment**, it does not hold. An assessment the subject may withhold is not an assessment.
+
+Three ways out, and this is a product decision I should not make alone:
+
+| Option | How it works | Cost |
+|---|---|---|
+| **A. Instructor-assigned assessments** *(recommended)* | An assessment is *created from an assignment* the instructor issued. Its share is implicit and automatic on completion — the trainee never had a withhold decision to make. Training sessions stay entirely trainee-controlled. | Needs an assignment concept in the backend. Modest. |
+| **B. Auto-share all assessments** | Any `.assessment` session shares on seal. Simple. | Blunt — a trainee who starts an assessment cannot abandon it privately, which will push people to avoid assessment mode. |
+| **C. Accept self-selection** | The current model, honestly labelled: the instructor sees a portfolio, not a record. | Free. But then `.assessment`'s guarantees buy much less, and calling it "assessment" oversells it. |
+
+**A is the right shape**, because it puts the decision where the authority already is: an
+instructor asking for an assessment is what makes it one. It also makes the `SessionClass` in
+§21.1 meaningful — the class comes from the assignment, not from a switch the trainee flips.
+
+Under A, the share model below still exists in full; it just governs *training* sessions and
+*voluntary* sharing, while assessments arrive by assignment.
+
+### 22.3 Self-sufficiency pays for itself
+
+§9.2 chose self-sufficient branches — every session carries its own fork snapshot and never reads
+its parent — for 50 KB. That decision is what makes sharing simple:
+
+> **A session is a closed, movable unit.** Share = transfer one `.vectrasession` bundle. No
+> lineage to resolve, no parent to fetch, no partial state.
+
+Had we chosen lineage-walking, sharing a branch would mean shipping its ancestors too, or an
+instructor opening a session that cannot replay because its parent lives on someone else's iPad.
+Worth noting as a case where the cheaper-looking option would have been far more expensive.
+
+Two consequences for the roadmap:
+
+- **The `.vectrasession` bundle moves from Phase 3 to Phase 1.** It is not an export nicety; it is
+  the sharing transport.
+- **Snapshots should be dropped on export** (§11.3) and rebuilt on the recipient's device. They
+  are a cache, they are the bulk of the bytes, and rebuilding them is a few hundred milliseconds.
+  A 40-minute session then transfers as roughly **100 KB** — small enough that sharing over a poor
+  connection is a non-issue.
+
+### 22.4 The share model
+
+```
+shares
+  sessionID      the shared session
+  ownerID        the trainee — ownership never transfers
+  recipientID    the instructor
+  grantedAt      when
+  revokedAt      nullable — a share may be withdrawn
+  permissions    {replay, annotate, score}
+  origin         .voluntary | .assignment      ← per §22.2
+```
+
+Rules that fall out of it:
+
+- **Ownership never transfers.** The instructor holds a *copy* with a grant, not the record.
+- **Revocation is honest about its limits.** Revoking removes the session from "Shared with me"
+  and blocks future sync. It cannot un-copy bytes already on the instructor's device — and the UI
+  must not imply otherwise. (For assignment-origin shares, revocation should simply not be
+  offered; the trainee did not grant it.)
+- **Re-sharing is not permitted by default.** An instructor may not forward a trainee's session to
+  a third party without a fresh grant from the owner. If institutions need cohort-wide review, that
+  is a `permissions` flag, not a silent capability.
+- **Annotations flow back as a separate layer.** Because §21.7 already put annotations outside the
+  seal, an instructor's comments sync as their own records keyed by `(sessionID, tick)` — the
+  sealed recording is never rewritten, and the trainee's copy can display them subject to
+  `visibility`. This is the second time the seal has forced a cleaner design rather than merely
+  guarding one.
+
+### 22.5 The session list wants metadata, not sessions
+
+Both lists — "My sessions" and "Shared with me" — must render without opening any session. That is
+already served by `catalogue.sqlite` (§11.2), with two additions:
+
+```
+sessions.ownerID          who recorded it
+sessions.origin           .local | .received
+```
+
+The catalogue row carries everything the list needs: label, class, duration, aircraft count,
+score, seal status, share state. Opening a session is a deliberate act, so a trainee with 200
+sessions pays nothing to browse them.
+
+For the instructor's list, one detail matters: a received session must show its **validity state**
+up front — sealed, unsealed, architecture mismatch (§22.1), build mismatch. An instructor should
+know a session is unscoreable *before* spending twenty minutes reviewing it, not after.
+
+### 22.6 The seal has a natural moment now
+
+§21.2 left server-witnessed seals as an open product decision. Sharing supplies the moment: **the
+seal is submitted when the session is shared or uploaded.** No separate mechanism, no extra
+network call in the recording path, and the witness exists exactly when the record starts mattering
+to someone other than its author.
+
+### 22.7 Privacy, stated because it is easy to skip
+
+A shared session contains the trainee's **voice transcripts** (§4.1 records `transcriptReceived`
+for parser regression work). That is personal data — a recording of someone's voice, transcribed,
+including their mistakes and hesitations.
+
+This is not a blocker, but it must be deliberate:
+
+- Transcripts are needed for review (an instructor assessing phraseology must see what was said),
+  so they stay.
+- The trainee must know they are shared. Say so at the share action, not in a policy document.
+- Retention should be finite, and deletion must actually remove the transcript rather than
+  orphaning it. Since transcripts live in the sealed event log, **deleting them breaks the seal** —
+  so a redaction is a *session deletion*, not a field edit. That is a cleaner outcome than partial
+  scrubbing, and it should be the stated policy.
+
+### 22.8 Roadmap effect
+
+- **Phase 0:** measure cross-architecture hash divergence (§22.1, option 2). One day, unblocks a
+  Phase 1 policy decision.
+- **Phase 1:** `.vectrasession` bundle (promoted from Phase 3); `sessions.ownerID` / `origin`;
+  session-list metadata; quantised hash comparison as the divergence policy.
+- **Phase 2:** the `shares` table, grants and revocation; "Shared with me"; validity badges in the
+  list; annotation sync.
+- **Phase 3 / product:** assignment-origin assessments (§22.2 option A); server-witnessed seals;
+  cohort permissions.
+
+---
+
 ## Appendix A — Package placement
 
 The layering the project already follows should be preserved: the timeline layer depends on the
@@ -1322,10 +1496,10 @@ the same treatment `ATCTrafficKit` got. Worth deciding before, not after.
    seals must be server-witnessed (§21.2) and that is an API, not a local change.
 2. **Retention.** How many sessions per device, for how long? Drives eviction and archival
    priority.
-3. **Cross-device replay.** Must a session recorded on an iPad replay on a Mac? **This is now the
-   highest-value open question**, because §21.6 makes an architecture mismatch *unscoreable*: if
-   instructors routinely review on a different device class than trainees fly on, R4 stops being
-   a footnote and becomes a funded Phase 1 item.
+3. ~~**Cross-device replay.**~~ **Answered implicitly by the sharing model:** an instructor opens a
+   shared session on their own device, so cross-device replay is the normal path, not an edge
+   case. §22.1 sets out the options; the action is to **measure the actual divergence in Phase 0**
+   before committing to a scoring policy.
 4. **Instructor live-join.** If an instructor watches a running session remotely, the input stream
    becomes a network stream and multiplayer ordering arrives early rather than in Phase 3.
 5. **How far back is "hundreds of aircraft"?** It decides whether R5 belongs in Phase 2 or
@@ -1333,3 +1507,8 @@ the same treatment `ATCTrafficKit` got. Worth deciding before, not after.
 6. **Annotation visibility.** Should a trainee see instructor annotations on their own
    assessment — always, after release, or never? The schema supports all three (§21.7); the
    default is a pedagogical choice, not a technical one.
+7. **Can a trainee withhold an assessment?** (§22.2) Under the confirmed share model they can,
+   which makes an instructor's list a self-selected portfolio rather than an assessment record.
+   Recommendation: **instructor-assigned assessments**, so the share is implicit and the trainee
+   never has a withhold decision. This is the one open question that changes what `.assessment`
+   actually guarantees.
