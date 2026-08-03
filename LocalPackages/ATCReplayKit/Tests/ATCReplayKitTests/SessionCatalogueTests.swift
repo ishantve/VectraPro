@@ -53,7 +53,7 @@ class SessionCatalogueContractTests: XCTestCase {
                        exerciseName: "Delhi approach",
                        exerciseDigest: "abc123",
                        assignmentID: nil,
-                       schemaVersion: 1,
+                       manifestVersion: 1,
                        buildVersion: "1.0.0",
                        architecture: "arm64",
                        origin: origin)
@@ -115,7 +115,7 @@ class SessionCatalogueContractTests: XCTestCase {
                              parentID: nil, forkTick: nil, seed: row.seed, tickCount: 2_400,
                              createdAt: row.createdAt, exerciseName: row.exerciseName,
                              exerciseDigest: row.exerciseDigest, assignmentID: nil,
-                             schemaVersion: 1, buildVersion: "1.0.0", architecture: "arm64")
+                             manifestVersion: 1, buildVersion: "1.0.0", architecture: "arm64")
         try catalogue.upsert(row)
 
         let stored = try catalogue.summary(id: row.id)
@@ -139,7 +139,7 @@ class SessionCatalogueContractTests: XCTestCase {
                                       createdAt: Date(timeIntervalSince1970: 9_999),
                                       exerciseName: "different",
                                       exerciseDigest: "zzz",
-                                      assignmentID: nil, schemaVersion: 1,
+                                      assignmentID: nil, manifestVersion: 1,
                                       buildVersion: "9.9.9", architecture: "x86_64")
         try catalogue.upsert(tampered)
 
@@ -274,7 +274,7 @@ final class SQLitePersistenceTests: XCTestCase {
                 parentID: nil, forkTick: nil, seed: UInt64.max, tickCount: 2_400,
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000),
                 exerciseName: "Delhi", exerciseDigest: "abc", assignmentID: UUID(),
-                schemaVersion: 1, buildVersion: "1.0.0", architecture: "arm64"))
+                manifestVersion: 1, buildVersion: "1.0.0", architecture: "arm64"))
         }
 
         let reopened = try SQLiteSessionCatalogue(url: url)
@@ -293,7 +293,7 @@ final class SQLitePersistenceTests: XCTestCase {
             id: UUID(), ownerID: .device(UUID()), sessionClass: .training, state: .completed,
             label: "", parentID: nil, forkTick: nil, seed: 1, tickCount: 0, createdAt: Date(),
             exerciseName: nil, exerciseDigest: "d", assignmentID: nil,
-            schemaVersion: 1, buildVersion: "1", architecture: "arm64"))
+            manifestVersion: 1, buildVersion: "1", architecture: "arm64"))
 
         let second = try SQLiteSessionCatalogue(url: url)
         XCTAssertEqual(try second.allSessions().count, 1)

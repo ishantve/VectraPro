@@ -47,7 +47,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public let assignmentID: AssignmentID?
 
     /// Environment facts, for the validity badge.
-    public let schemaVersion: Int
+    public let manifestVersion: Int
     public let buildVersion: String
     public let architecture: String
 
@@ -72,7 +72,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
                 exerciseName: String?,
                 exerciseDigest: String,
                 assignmentID: AssignmentID?,
-                schemaVersion: Int,
+                manifestVersion: Int,
                 buildVersion: String,
                 architecture: String,
                 origin: StorageOrigin = .local) {
@@ -89,7 +89,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         self.exerciseName = exerciseName
         self.exerciseDigest = exerciseDigest
         self.assignmentID = assignmentID
-        self.schemaVersion = schemaVersion
+        self.manifestVersion = manifestVersion
         self.buildVersion = buildVersion
         self.architecture = architecture
         self.origin = origin
@@ -111,7 +111,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
                   exerciseName: manifest.exercise.exerciseName,
                   exerciseDigest: manifest.exercise.digest,
                   assignmentID: manifest.assignmentID,
-                  schemaVersion: manifest.environment.schemaVersion,
+                  manifestVersion: manifest.manifestVersion,
                   buildVersion: manifest.environment.buildVersion,
                   architecture: manifest.environment.architecture,
                   origin: origin)
@@ -140,7 +140,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
                        exerciseName: exerciseName,
                        exerciseDigest: exerciseDigest,
                        assignmentID: assignmentID,
-                       schemaVersion: schemaVersion,
+                       manifestVersion: manifestVersion,
                        buildVersion: buildVersion,
                        architecture: architecture,
                        origin: origin ?? self.origin)
@@ -154,7 +154,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     /// this will normally be true — but it is checked rather than assumed, because that measurement
     /// describes today's toolchain and a recording outlives it.
     public func isReproducible(on environment: RecordingEnvironment) -> Bool {
-        schemaVersion == environment.schemaVersion && architecture == environment.architecture
+        architecture == environment.architecture
     }
 
     /// Whether a result here may be scored, given where it is being reviewed.
@@ -183,9 +183,6 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         case .completed where sessionClass == .assessment:
             return "Not sealed"
         default: break
-        }
-        if schemaVersion != environment.schemaVersion {
-            return "Recorded by a different version of the app"
         }
         if architecture != environment.architecture {
             return "Recorded on \(architecture); this device is \(environment.architecture)"

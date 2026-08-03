@@ -24,7 +24,7 @@
 //      exercise_name    TEXT
 //      exercise_digest  TEXT NOT NULL
 //      assignment_id    TEXT
-//      schema_version   INTEGER NOT NULL
+//      manifest_version   INTEGER NOT NULL
 //      build_version    TEXT NOT NULL
 //      architecture     TEXT NOT NULL
 //      storage_origin   TEXT NOT NULL        "local" | "received"
@@ -59,7 +59,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
 
     /// Bumped only when the table shape changes. Migrations are additive: new columns, never a
     /// changed meaning.
-    static let schemaVersion = 1
+    static let manifestVersion = 1
 
     private var db: OpaquePointer?
 
@@ -117,7 +117,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
                 exercise_name   TEXT,
                 exercise_digest TEXT NOT NULL,
                 assignment_id   TEXT,
-                schema_version  INTEGER NOT NULL,
+                manifest_version  INTEGER NOT NULL,
                 build_version   TEXT NOT NULL,
                 architecture    TEXT NOT NULL,
                 storage_origin  TEXT NOT NULL DEFAULT 'local'
@@ -132,7 +132,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
                 ON sessions (storage_origin, created_at DESC)
             """)
         try execute("CREATE INDEX IF NOT EXISTS sessions_parent ON sessions (parent_id)")
-        try execute("PRAGMA user_version = \(Self.schemaVersion)")
+        try execute("PRAGMA user_version = \(Self.manifestVersion)")
     }
 
     // MARK: - SessionCatalogue
@@ -143,7 +143,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
                 id, owner_key, session_class, state, state_digest, superseded_by, superseded_at,
                 label, parent_id, fork_tick, seed, tick_count, created_at,
                 exercise_name, exercise_digest, assignment_id,
-                schema_version, build_version, architecture, storage_origin
+                manifest_version, build_version, architecture, storage_origin
             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
             ON CONFLICT(id) DO UPDATE SET
                 state          = excluded.state,
@@ -178,7 +178,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
         bind(statement, 14, summary.exerciseName)
         bind(statement, 15, summary.exerciseDigest)
         bind(statement, 16, summary.assignmentID?.uuidString)
-        bind(statement, 17, summary.schemaVersion)
+        bind(statement, 17, summary.manifestVersion)
         bind(statement, 18, summary.buildVersion)
         bind(statement, 19, summary.architecture)
         bind(statement, 20, summary.origin.rawValue)
@@ -327,7 +327,7 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
             exerciseName: text(statement, 13),
             exerciseDigest: digestText,
             assignmentID: text(statement, 15).flatMap(UUID.init(uuidString:)),
-            schemaVersion: Int(sqlite3_column_int64(statement, 16)),
+            manifestVersion: Int(sqlite3_column_int64(statement, 16)),
             buildVersion: buildVersion,
             architecture: architecture,
             origin: origin)

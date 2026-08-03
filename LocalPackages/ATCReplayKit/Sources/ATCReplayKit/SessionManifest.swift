@@ -80,11 +80,6 @@ public enum OwnerID: Equatable, Hashable, Codable, Sendable {
 /// away.
 public struct RecordingEnvironment: Equatable, Codable, Sendable {
 
-    /// Format version of the manifest and event log. A session claiming a version this build does not
-    /// know is refused rather than opened optimistically — half-reading a future format is how you
-    /// corrupt it.
-    public let schemaVersion: Int
-
     /// The app build that recorded it. A replay under a different build is legitimate for review and
     /// suspect for scoring, and the UI should be able to say which.
     public let buildVersion: String
@@ -96,13 +91,9 @@ public struct RecordingEnvironment: Equatable, Codable, Sendable {
     /// "would this compute the same".
     public let platform: String
 
-    public static let currentSchemaVersion = 1
-
-    public init(schemaVersion: Int = RecordingEnvironment.currentSchemaVersion,
-                buildVersion: String,
+    public init(buildVersion: String,
                 architecture: String = RecordingEnvironment.currentArchitecture,
                 platform: String) {
-        self.schemaVersion = schemaVersion
         self.buildVersion = buildVersion
         self.architecture = architecture
         self.platform = platform
@@ -124,7 +115,7 @@ public struct RecordingEnvironment: Equatable, Codable, Sendable {
     /// session outlives the version that recorded it — and the caller decides what a build difference
     /// means for scoring.
     public func canReproduce(_ other: RecordingEnvironment) -> Bool {
-        schemaVersion == other.schemaVersion && architecture == other.architecture
+        architecture == other.architecture
     }
 }
 
@@ -160,6 +151,16 @@ public struct EmbeddedExercise: Equatable, Codable, Sendable {
 /// A session's reconstruction data. Immutable once written.
 public struct SessionManifest: Equatable, Codable, Sendable {
 
+    /// The manifest's own format version.
+    ///
+    /// Independent of `EventEnvelope.schemaVersion` and of any event's `eventVersion`, because the three
+    /// change for unrelated reasons: adding a field to this file has nothing to do with adding one to a
+    /// command event. A single shared number would make every unrelated change look like a
+    /// compatibility break.
+    public static let currentVersion = 1
+
+    public let manifestVersion: Int
+
     public let sessionID: SessionID
     public let sessionClass: SessionClass
 
@@ -192,7 +193,9 @@ public struct SessionManifest: Equatable, Codable, Sendable {
                 environment: RecordingEnvironment,
                 exercise: EmbeddedExercise,
                 createdAt: Date,
-                assignmentID: AssignmentID? = nil) {
+                assignmentID: AssignmentID? = nil,
+                manifestVersion: Int = SessionManifest.currentVersion) {
+        self.manifestVersion = manifestVersion
         self.sessionID = sessionID
         self.origin = origin
         self.sessionClass = origin.sessionClass
@@ -222,8 +225,10 @@ public struct SessionManifest: Equatable, Codable, Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let manifest = try decoder.decode(SessionManifest.self, from: data)
-        guard manifest.environment.schemaVersion <= RecordingEnvironment.currentSchemaVersion else {
-            throw ManifestError.futureSchema(manifest.environment.schemaVersion)
+        // Refused rather than opened optimistically: if the shape changed we do not know what the
+        // fields mean, and a hopeful read produces a plausible wrong session.
+        guard manifest.manifestVersion <= Self.currentVersion else {
+            throw ManifestError.futureSchema(manifest.manifestVersion)
         }
         return manifest
     }

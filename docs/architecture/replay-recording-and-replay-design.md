@@ -174,14 +174,42 @@ Two clocks, and the separation is enforced by naming:
   respond", a genuine assessment question, while being structurally incapable of affecting a replay.
   The rule is greppable: *no code inside the simulation core may read `wallClock`.*
 
-### 2.3 Versioning
+### 2.3 Versioning — implemented
 
+Every stored event carries **three** numbers, because they change at different rates and for
+unrelated reasons:
+
+```json
+{ "schemaVersion": 1,      // the envelope's own structure
+  "eventType": 1,          // which kind
+  "eventVersion": 1,       // which version of *that kind's* payload
+  "tick": 42, "ordinal": 17, "wallClock": 1764792151.4,
+  "payload": { … } }
+```
+
+And the **manifest is versioned separately again** (`SessionManifest.manifestVersion`). Adding a field
+to the manifest has nothing to do with adding one to a command event; a single shared number would
+make every unrelated change look like a compatibility break everywhere.
+
+- `tick` and `ordinal` live in the **envelope**, not the payload, so a log can be ordered and indexed
+  without interpreting — or being able to interpret — a payload a newer build wrote.
 - New payload cases are appended; `EventKind` numbers are never reused.
 - New fields are optional, and absent means "was not recorded" — never a default that looks real.
 - `Codable` is hand-written, because the synthesised form keys on Swift *parameter names* and a
   rename with no intent behind it would silently stop old recordings decoding.
-- A session whose `schemaVersion` exceeds this build's is **refused with a message**, not opened
-  optimistically.
+- A schema, event version or manifest version above this build's is **refused with a specific
+  error**, not opened optimistically.
+
+**Migrations operate on dictionaries, not types.** A migration's job is to adapt a shape the current
+types cannot express; typed migrations would mean keeping `CommandIssuedV1`, `V2`, `V3`… as Swift
+types forever. `EventMigration` steps are single-version (`N → N+1`), so a gap in the chain is a
+loud, specific error rather than a silent partial migration, and `EventMigrator` runs the chain **on
+read**. Nothing rewrites a stored recording — the bytes stay exactly as written, which is what keeps
+a seal over them meaningful.
+
+The registry is empty today. That is the point: the first field ever added is a one-line
+registration, not a redesign. A synthetic migration in `EventSchemaTests` proves the chain works
+before anything needs it.
 
 ### 2.4 What Phase C adds
 

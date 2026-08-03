@@ -121,54 +121,123 @@ extension EventPayload: Codable {
     }
 }
 
-// MARK: - Event
-
-extension Event: Codable {
-
-    private enum CodingKeys: String, CodingKey {
-        case tick, ordinal, payload, wallClock
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(position.tick, forKey: .tick)
-        try container.encode(position.ordinal, forKey: .ordinal)
-        try container.encode(payload, forKey: .payload)
-        // Seconds since the epoch: a fixed number rather than a format that depends on the decoder's
-        // date strategy, since a recording may be read by a build configured differently.
-        try container.encodeIfPresent(wallClock?.timeIntervalSince1970, forKey: .wallClock)
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let seconds = try container.decodeIfPresent(Double.self, forKey: .wallClock)
-        self.init(position: EventPosition(tick: try container.decode(Int.self, forKey: .tick),
-                                         ordinal: try container.decode(UInt32.self, forKey: .ordinal)),
-                  payload: try container.decode(EventPayload.self, forKey: .payload),
-                  wallClock: seconds.map(Date.init(timeIntervalSince1970:)))
-    }
-}
-
 // MARK: - Coder
 
-/// Turns an event into bytes and back.
+/// Turns an event into bytes and back, through a versioned envelope.
 ///
-/// A named seam, so the payload format can change without touching the log's framing — the framing is
-/// what makes a truncated file recoverable, and it should not have to be revisited to make the
-/// payload smaller.
+/// Two stages on read, deliberately: the envelope is read first, then the payload is brought forward
+/// through any migrations, and only then decoded into a typed `EventPayload`. A single-stage typed
+/// decode could not do that — it would need every historical shape to exist as a Swift type.
+///
+/// The wire form:
+///
+///     {
+///       "schemaVersion" : 1,          the envelope's own format
+///       "eventType"     : 1,          which kind
+///       "eventVersion"  : 1,          which version of that kind's payload
+///       "tick"          : 42,
+///       "ordinal"       : 17,
+///       "wallClock"     : 1764792151.4,   optional, audit only
+///       "payload"       : { … }       kind-specific, versioned by eventVersion
+///     }
+///
+/// `tick` and `ordinal` sit in the envelope rather than inside the payload so ordering can be read
+/// without interpreting — or migrating — a payload this build may not understand.
 public struct EventCoder: Sendable {
 
-    public init() {}
+    private let migrator: EventMigrator
+
+    public init(migrator: EventMigrator = .current) {
+        self.migrator = migrator
+    }
+
+    // MARK: Encoding
 
     public func encode(_ event: Event) throws -> Data {
-        let encoder = JSONEncoder()
-        // Sorted, so the same event always produces the same bytes. A seal is computed over these
+        let envelope = EventEnvelope(event)
+        var object: [String: Any] = [
+            "schemaVersion": envelope.schemaVersion,
+            "eventType": envelope.eventType.rawValue,
+            "eventVersion": envelope.eventVersion,
+            "tick": envelope.position.tick,
+            "ordinal": envelope.position.ordinal,
+            "payload": try payloadObject(event.payload),
+        ]
+        if let wallClock = envelope.wallClock {
+            object["wallClock"] = wallClock.timeIntervalSince1970
+        }
+        // Sorted keys, so the same event always produces the same bytes. A seal is computed over these
         // bytes, and a digest that changed with dictionary order would be worthless.
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(event)
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    // MARK: Decoding
+
+    /// Reads the envelope only.
+    ///
+    /// Useful on its own: an index can be built, and a session's ordering checked, without decoding —
+    /// or being able to decode — payloads written by a newer build.
+    public func decodeEnvelope(_ data: Data) throws -> EventEnvelope {
+        let object = try Self.object(data)
+        guard let schemaVersion = object["schemaVersion"] as? Int,
+              let typeRaw = object["eventType"] as? Int,
+              let eventType = EventKind(rawValue: UInt16(truncatingIfNeeded: typeRaw)),
+              let eventVersion = object["eventVersion"] as? Int,
+              let tick = object["tick"] as? Int,
+              let ordinal = object["ordinal"] as? Int
+        else { throw EventSchemaError.malformed("envelope fields missing or wrong type") }
+
+        return EventEnvelope(schemaVersion: schemaVersion,
+                             eventType: eventType,
+                             eventVersion: eventVersion,
+                             position: EventPosition(tick: tick,
+                                                     ordinal: UInt32(truncatingIfNeeded: ordinal)),
+                             wallClock: (object["wallClock"] as? Double)
+                                 .map(Date.init(timeIntervalSince1970:)))
     }
 
     public func decode(_ data: Data) throws -> Event {
-        try JSONDecoder().decode(Event.self, from: data)
+        let object = try Self.object(data)
+        let envelope = try decodeEnvelope(data)
+
+        guard envelope.isReadable else {
+            throw EventSchemaError.unsupportedSchema(found: envelope.schemaVersion,
+                                                    supported: EventEnvelope.currentSchemaVersion)
+        }
+        guard let stored = object["payload"] as? [String: Any] else {
+            throw EventSchemaError.malformed("payload missing")
+        }
+
+        let brought = try migrator.bringForward(stored,
+                                               type: envelope.eventType,
+                                               from: envelope.eventVersion)
+        // The type discriminator lives in the envelope; `EventPayload`'s decoder reads it from the
+        // payload, so it is put back rather than duplicated on the wire.
+        var payloadObject = brought
+        payloadObject["kind"] = envelope.eventType.rawValue
+
+        let payload = try JSONDecoder().decode(
+            EventPayload.self,
+            from: try JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]))
+
+        return Event(position: envelope.position, payload: payload, wallClock: envelope.wallClock)
+    }
+
+    // MARK: Private
+
+    private static func object(_ data: Data) throws -> [String: Any] {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw EventSchemaError.malformed("not a JSON object")
+        }
+        return object
+    }
+
+    /// The payload as a dictionary, without its `kind` — that belongs to the envelope.
+    private func payloadObject(_ payload: EventPayload) throws -> [String: Any] {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var object = try Self.object(try encoder.encode(payload))
+        object["kind"] = nil
+        return object
     }
 }
