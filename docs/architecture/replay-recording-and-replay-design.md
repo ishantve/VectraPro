@@ -328,6 +328,36 @@ Mapping, as recording will use it:
 | weather from the seed / from an instructor | `system` / `instructor` |
 | timeline action | whoever performed it; `system` when the app initiates (auto-pause on backgrounding) |
 
+### 2.7 Correlation and causation — reserved
+
+Two optional envelope fields, **present in the format and unpopulated**:
+
+| Field | Meaning |
+|---|---|
+| `correlationID` | the `eventID` of whatever started the chain this event belongs to |
+| `causationID` | the `eventID` of the event that *directly* caused this one |
+
+One transmission produces several events — a transcript, two or three commands, a readback. They share a
+correlation, so "everything that came of that instruction" becomes one query rather than a reconstruction
+from ticks and guesswork. `causationID` names the immediate parent, so a chain can be walked as a tree
+rather than only as a set; an AI decision chain and a command's consequences are both trees, and
+flattening them loses the part worth debugging.
+
+**`EventID`s, not bare ordinals.** A chain can legitimately cross sessions: a fork continues its parent's
+world, so an event in a branch may name a cause in the session it forked from. An ordinal could not
+express that.
+
+**Never for ordering, never for replay.** A replay consulting these would be deriving causality from a
+hint instead of from the simulation. Ordering stays `(tick, ordinal)`.
+
+**Outside identity.** Two events differing only in their chain are the same event, so an annotation cannot
+move because tracing was added or corrected — the same rule that excluded payload, tick and source.
+
+They are added now rather than deferred for one reason: it makes "optional and additive" a *demonstrated*
+property rather than a claim. `EventTracingTests` proves an event without them still decodes, that absent
+fields cost no bytes, and that a malformed one loses the hint rather than the event. The alternative was
+discovering in Phase C that they could not be added without a migration.
+
 ### 2.4 What Phase C adds
 
 Nothing to the model. Replay reads what recording wrote. If Phase C needs a new payload case, the

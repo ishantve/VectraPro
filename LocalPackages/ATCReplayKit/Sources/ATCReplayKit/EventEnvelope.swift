@@ -11,6 +11,8 @@
 //      eventType       which kind of event this is
 //      eventVersion    which version of *that kind's* payload
 //      source          where it came from (attribution, never ordering)
+//      correlationID   the chain this belongs to        } optional; tracing only,
+//      causationID     the event that caused this one   } never ordering, never replay
 //
 //  Three numbers rather than one, because they change at different rates and for different reasons.
 //  A new field on `commandIssued` bumps only that type's `eventVersion`; a change to the envelope
@@ -69,6 +71,12 @@ public struct EventEnvelope: Equatable, Sendable {
     /// Where the event came from. In the envelope so it can be filtered without decoding the payload.
     public let source: EventSource
 
+    /// Tracing: the chain's root, and this event's direct cause. Optional, and unpopulated for now — see
+    /// `Event`. In the envelope for the same reason as `source`: a chain can then be walked without
+    /// decoding payloads a newer build wrote.
+    public let correlationID: EventID?
+    public let causationID: EventID?
+
     public let wallClock: Date?
 
     public init(schemaVersion: Int = EventEnvelope.currentSchemaVersion,
@@ -76,12 +84,16 @@ public struct EventEnvelope: Equatable, Sendable {
                 eventVersion: Int,
                 position: EventPosition,
                 source: EventSource = .unspecified,
+                correlationID: EventID? = nil,
+                causationID: EventID? = nil,
                 wallClock: Date?) {
         self.schemaVersion = schemaVersion
         self.eventType = eventType
         self.eventVersion = eventVersion
         self.position = position
         self.source = source
+        self.correlationID = correlationID
+        self.causationID = causationID
         self.wallClock = wallClock
     }
 
@@ -90,6 +102,8 @@ public struct EventEnvelope: Equatable, Sendable {
                   eventVersion: event.kind.currentVersion,
                   position: event.position,
                   source: event.source,
+                  correlationID: event.correlationID,
+                  causationID: event.causationID,
                   wallClock: event.wallClock)
     }
 

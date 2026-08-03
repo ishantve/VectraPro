@@ -161,6 +161,28 @@ public struct Event: Equatable, Sendable {
     /// Never used for ordering or for replay. It answers questions asked *about* a session.
     public let source: EventSource
 
+    /// The chain this event belongs to — the `eventID` of whatever started it.
+    ///
+    /// One transmission produces several events: a transcript, two or three commands, a readback. They
+    /// share a correlation, so "everything that came of that instruction" is one query rather than a
+    /// reconstruction from ticks and guesswork.
+    ///
+    /// An `EventID` rather than a new kind of identifier, so the chain's root names itself and no second
+    /// id space has to be kept unique. Optional, and unpopulated for now.
+    ///
+    /// **Not for ordering, and not for replay.** A replay that consulted this would be deriving causality
+    /// from a hint rather than from the simulation.
+    public let correlationID: EventID?
+
+    /// The event that directly caused this one.
+    ///
+    /// `correlationID` names the root of a chain; this names the immediate parent, so a chain can be
+    /// walked as a tree rather than only as a set. An AI decision chain and a command's consequences are
+    /// both trees, and flattening them loses the part worth debugging.
+    ///
+    /// Optional, and unpopulated for now.
+    public let causationID: EventID?
+
     /// Real time, for audit only.
     ///
     /// **Nothing inside the simulation may read this.** It answers "how long did the trainee take to
@@ -172,11 +194,26 @@ public struct Event: Equatable, Sendable {
     public init(position: EventPosition,
                 payload: EventPayload,
                 source: EventSource = .system,
+                correlationID: EventID? = nil,
+                causationID: EventID? = nil,
                 wallClock: Date? = nil) {
         self.position = position
         self.payload = payload
         self.source = source
+        self.correlationID = correlationID
+        self.causationID = causationID
         self.wallClock = wallClock
+    }
+
+    /// A copy attributed to a chain.
+    ///
+    /// Here rather than making the fields mutable: an event is a record of something that happened, and
+    /// the only legitimate reason to change one is that the caller knows the chain the moment after
+    /// constructing it. A copy makes that explicit and keeps the type immutable.
+    public func caused(by parent: EventID, correlation: EventID? = nil) -> Event {
+        Event(position: position, payload: payload, source: source,
+              correlationID: correlation ?? correlationID ?? parent,
+              causationID: parent, wallClock: wallClock)
     }
 
     public var tick: Int { position.tick }

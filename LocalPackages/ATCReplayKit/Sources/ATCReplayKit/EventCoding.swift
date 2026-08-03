@@ -136,6 +136,8 @@ extension EventPayload: Codable {
 ///       "tick"          : 42,
 ///       "ordinal"       : 17,
 ///       "source"        : "voice",     where it came from — attribution, never ordering
+///       "correlationID" : "…",          optional: the chain this belongs to
+///       "causationID"   : "…",          optional: the event that caused this one
 ///       "wallClock"     : 1764792151.4,   optional, audit only
 ///       "payload"       : { … }       kind-specific, versioned by eventVersion
 ///     }
@@ -163,8 +165,16 @@ public struct EventCoder: Sendable {
             "source": envelope.source.rawValue,
             "payload": try payloadObject(event.payload),
         ]
+        // Written only when present. An absent optional means "was not recorded", and emitting null
+        // would make a reader distinguish two spellings of the same absence.
         if let wallClock = envelope.wallClock {
             object["wallClock"] = wallClock.timeIntervalSince1970
+        }
+        if let correlationID = envelope.correlationID {
+            object["correlationID"] = correlationID.value.uuidString
+        }
+        if let causationID = envelope.causationID {
+            object["causationID"] = causationID.value.uuidString
         }
         // Sorted keys, so the same event always produces the same bytes. A seal is computed over these
         // bytes, and a digest that changed with dictionary order would be worthless.
@@ -197,6 +207,8 @@ public struct EventCoder: Sendable {
                              // which is `.unspecified` rather than a guess.
                              source: (object["source"] as? String).map(EventSource.init(rawValue:))
                                  ?? .unspecified,
+                             correlationID: Self.eventID(object["correlationID"]),
+                             causationID: Self.eventID(object["causationID"]),
                              wallClock: (object["wallClock"] as? Double)
                                  .map(Date.init(timeIntervalSince1970:)))
     }
@@ -226,10 +238,20 @@ public struct EventCoder: Sendable {
             from: try JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]))
 
         return Event(position: envelope.position, payload: payload,
-                     source: envelope.source, wallClock: envelope.wallClock)
+                     source: envelope.source,
+                     correlationID: envelope.correlationID,
+                     causationID: envelope.causationID,
+                     wallClock: envelope.wallClock)
     }
 
     // MARK: Private
+
+    /// An id from the wire. A malformed one reads as absent rather than throwing: tracing metadata is
+    /// diagnostic, and losing a whole event because a debugging hint was corrupt would be the wrong
+    /// trade.
+    private static func eventID(_ value: Any?) -> EventID? {
+        (value as? String).flatMap(UUID.init(uuidString:)).map(EventID.init(value:))
+    }
 
     private static func object(_ data: Data) throws -> [String: Any] {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
