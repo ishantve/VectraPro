@@ -61,7 +61,7 @@ final class EventSchemaTests: XCTestCase {
     /// Saying so beats decoding it as though the extra fields were absent.
     func testAPayloadFromTheFutureIsRefused() throws {
         var object = try Self.encodedObject(.commandIssued(code: "101", callsign: "AIC1",
-                                                           slots: [:], source: .voice))
+                                                           slots: [:]))
         object["eventVersion"] = 99
         let data = try JSONSerialization.data(withJSONObject: object)
 
@@ -194,8 +194,7 @@ final class EventSchemaTests: XCTestCase {
         let coder = EventCoder()
         let event = Event(position: EventPosition(tick: 7, ordinal: 3),
                           payload: .commandIssued(code: "101", callsign: "AIC123",
-                                                  slots: ["LEVEL": "260", "SPEED": "300"],
-                                                  source: .keyboard),
+                                                  slots: ["LEVEL": "260", "SPEED": "300"]),
                           wallClock: Date(timeIntervalSince1970: 1_700_000_000))
 
         let first = try coder.encode(event)
@@ -215,7 +214,7 @@ final class EventSchemaTests: XCTestCase {
     // MARK: - Fixtures
 
     private static let oneOfEveryKind: [EventPayload] = [
-        .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], source: .voice),
+        .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
         .commandRejected(code: "304", callsign: "AIC1", reason: "unmapped"),
         .transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb"),
         .readbackSpoken(callsign: "AIC1", spoken: "CLIMBING"),

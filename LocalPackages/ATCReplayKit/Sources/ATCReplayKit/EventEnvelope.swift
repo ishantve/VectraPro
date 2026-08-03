@@ -10,6 +10,7 @@
 //      schemaVersion   the envelope's own format — how to find the rest
 //      eventType       which kind of event this is
 //      eventVersion    which version of *that kind's* payload
+//      source          where it came from (attribution, never ordering)
 //
 //  Three numbers rather than one, because they change at different rates and for different reasons.
 //  A new field on `commandIssued` bumps only that type's `eventVersion`; a change to the envelope
@@ -64,17 +65,23 @@ public struct EventEnvelope: Equatable, Sendable {
     public let eventType: EventKind
     public let eventVersion: Int
     public let position: EventPosition
+
+    /// Where the event came from. In the envelope so it can be filtered without decoding the payload.
+    public let source: EventSource
+
     public let wallClock: Date?
 
     public init(schemaVersion: Int = EventEnvelope.currentSchemaVersion,
                 eventType: EventKind,
                 eventVersion: Int,
                 position: EventPosition,
+                source: EventSource = .unspecified,
                 wallClock: Date?) {
         self.schemaVersion = schemaVersion
         self.eventType = eventType
         self.eventVersion = eventVersion
         self.position = position
+        self.source = source
         self.wallClock = wallClock
     }
 
@@ -82,6 +89,7 @@ public struct EventEnvelope: Equatable, Sendable {
         self.init(eventType: event.kind,
                   eventVersion: event.kind.currentVersion,
                   position: event.position,
+                  source: event.source,
                   wallClock: event.wallClock)
     }
 

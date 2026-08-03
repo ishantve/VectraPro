@@ -28,7 +28,7 @@ extension EventPayload: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case kind
-        case code, callsign, slots, source, reason
+        case code, callsign, slots, reason
         case raw, normalized, spoken
         case windDegrees, windKnots, visibilityMetres, qnh
         case value, rulesVersion
@@ -40,11 +40,10 @@ extension EventPayload: Codable {
         try container.encode(kind, forKey: .kind)
 
         switch self {
-        case .commandIssued(let code, let callsign, let slots, let source):
+        case .commandIssued(let code, let callsign, let slots):
             try container.encode(code, forKey: .code)
             try container.encode(callsign, forKey: .callsign)
             try container.encode(slots, forKey: .slots)
-            try container.encode(source, forKey: .source)
 
         case .commandRejected(let code, let callsign, let reason):
             try container.encodeIfPresent(code, forKey: .code)
@@ -84,8 +83,7 @@ extension EventPayload: Codable {
                 code: try container.decode(String.self, forKey: .code),
                 callsign: try container.decode(String.self, forKey: .callsign),
                 // Absent rather than empty in older recordings; empty is the honest reading.
-                slots: try container.decodeIfPresent([String: String].self, forKey: .slots) ?? [:],
-                source: try container.decodeIfPresent(InputSource.self, forKey: .source) ?? .voice)
+                slots: try container.decodeIfPresent([String: String].self, forKey: .slots) ?? [:])
 
         case .commandRejected:
             self = .commandRejected(
@@ -137,6 +135,7 @@ extension EventPayload: Codable {
 ///       "eventVersion"  : 1,          which version of that kind's payload
 ///       "tick"          : 42,
 ///       "ordinal"       : 17,
+///       "source"        : "voice",     where it came from — attribution, never ordering
 ///       "wallClock"     : 1764792151.4,   optional, audit only
 ///       "payload"       : { … }       kind-specific, versioned by eventVersion
 ///     }
@@ -161,6 +160,7 @@ public struct EventCoder: Sendable {
             "eventVersion": envelope.eventVersion,
             "tick": envelope.position.tick,
             "ordinal": envelope.position.ordinal,
+            "source": envelope.source.rawValue,
             "payload": try payloadObject(event.payload),
         ]
         if let wallClock = envelope.wallClock {
@@ -192,6 +192,11 @@ public struct EventCoder: Sendable {
                              eventVersion: eventVersion,
                              position: EventPosition(tick: tick,
                                                      ordinal: UInt32(truncatingIfNeeded: ordinal)),
+                             // Any string decodes, known or not: a source this build has never heard of
+                             // must not stop the event being read. Absent means it predates the field,
+                             // which is `.unspecified` rather than a guess.
+                             source: (object["source"] as? String).map(EventSource.init(rawValue:))
+                                 ?? .unspecified,
                              wallClock: (object["wallClock"] as? Double)
                                  .map(Date.init(timeIntervalSince1970:)))
     }
@@ -220,7 +225,8 @@ public struct EventCoder: Sendable {
             EventPayload.self,
             from: try JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]))
 
-        return Event(position: envelope.position, payload: payload, wallClock: envelope.wallClock)
+        return Event(position: envelope.position, payload: payload,
+                     source: envelope.source, wallClock: envelope.wallClock)
     }
 
     // MARK: Private

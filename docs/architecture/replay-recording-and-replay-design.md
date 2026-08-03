@@ -282,6 +282,52 @@ but the seeding is a requirement of this scheme, not an incidental detail.
 | **Ordering** | **never** — use `(tick, ordinal)` |
 | Content equality | never — two events with the same id are the same *event*, not necessarily the same *bytes*, since the payload may have been migrated |
 
+### 2.6 Event source attribution — `EventSource`
+
+Every event carries where it came from, in the **envelope** — so it can be filtered without decoding a
+payload a newer build wrote, for the same reason `tick` and `ordinal` live there.
+
+Known values: `voice`, `keypad`, `ai`, `system`, `instructor`, `replay`, `network`, `automation`, and
+`unspecified` for a recording that predates the field.
+
+**A struct with named constants, not an enum.** An enum reads better and is wrong for a stored format:
+decoding one requires every value to be known, so a recording written by a newer build — one that had
+learned a source this build has not — would fail to decode *entirely*, losing events over a field
+nobody was reading. The extensible-constant pattern (as `Notification.Name` uses) decodes anything,
+preserves unknown values through a round trip, and reports `isKnown` so a diagnostic can say "3 events
+from a source this version does not recognise" rather than silently miscategorising them.
+
+**Adding a source never touches a recording, and never stops one being read.** `network` and `replay`
+exist before multiplayer and replay diagnostics do, precisely so that when they arrive nothing written
+earlier needs changing. A test asserts they are already there.
+
+Three groupings, and the third has a consequence rather than an insight:
+
+| | |
+|---|---|
+| `isHuman` | voice, keypad, instructor |
+| `isSynthetic` | ai, system, replay, automation |
+| `isAttributableToTrainee` | **voice, keypad only** — an assessment must not credit or blame a trainee for an instruction an instructor injected |
+
+An unrecognised source is neither human nor synthetic, which is the honest answer for something that
+cannot be classified.
+
+**Attribution is not identity.** `EventSource` is deliberately outside the `eventID` derivation: two
+events differing only in source are the same event, and an annotation must not move because attribution
+was corrected.
+
+Mapping, as recording will use it:
+
+| Event | Source |
+|---|---|
+| spoken command, transcript | `voice` |
+| keypad command | `keypad` |
+| readback spoken, score evaluated | `system` |
+| instructor injection | `instructor` |
+| refusal | whatever the input's source was |
+| weather from the seed / from an instructor | `system` / `instructor` |
+| timeline action | whoever performed it; `system` when the app initiates (auto-pause on backgrounding) |
+
 ### 2.4 What Phase C adds
 
 Nothing to the model. Replay reads what recording wrote. If Phase C needs a new payload case, the

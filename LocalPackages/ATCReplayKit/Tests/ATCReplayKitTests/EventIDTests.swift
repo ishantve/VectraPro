@@ -62,7 +62,7 @@ final class EventIDTests: XCTestCase {
     func testTheIDDoesNotDependOnThePayload() {
         let position = EventPosition(tick: 42, ordinal: 9)
         let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], source: .voice),
+            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
             .timelineAction(.paused),
             .scoreEvaluated(value: 82, rulesVersion: "v3"),
         ]
@@ -96,7 +96,7 @@ final class EventIDTests: XCTestCase {
     func testAnEnvelopeCanNameItsEventWithoutThePayload() throws {
         let event = Event(position: EventPosition(tick: 3, ordinal: 11),
                           payload: .commandIssued(code: "101", callsign: "AIC1",
-                                                  slots: [:], source: .voice))
+                                                  slots: [:]))
         let coder = EventCoder()
         let envelope = try coder.decodeEnvelope(try coder.encode(event))
 

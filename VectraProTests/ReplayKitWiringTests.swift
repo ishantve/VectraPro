@@ -48,7 +48,7 @@ final class ReplayKitWiringTests: XCTestCase {
         try store.openForAppending()
         try store.append(Event(position: EventPosition(tick: 12, ordinal: 1),
                                payload: .commandIssued(code: "101", callsign: "AIC123",
-                                                       slots: ["LEVEL": "260"], source: .voice)))
+                                                       slots: ["LEVEL": "260"])))
         try store.close()
 
         let finished = try manager.end(tickCount: 12)

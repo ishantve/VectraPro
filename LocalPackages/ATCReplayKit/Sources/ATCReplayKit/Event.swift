@@ -62,9 +62,7 @@ public enum EventPayload: Equatable, Sendable {
     ///     as spoken, because resolution depends on who was on frequency then — which a replay
     ///     cannot reconstruct and should not have to guess.
     ///   - slots: the values pulled from the transmission, in template order.
-    ///   - source: whether it was spoken or typed. Not needed to replay; needed to answer "does this
-    ///     trainee rely on the keyboard", which is a real assessment question.
-    case commandIssued(code: String, callsign: String, slots: [String: String], source: InputSource)
+    case commandIssued(code: String, callsign: String, slots: [String: String])
 
     /// A transmission that was understood but refused, and why. Recorded because a refusal is a
     /// thing the trainee experienced, and a replay that silently omits it is not what happened.
@@ -136,14 +134,6 @@ public enum EventKind: UInt16, Codable, Equatable, Sendable, CaseIterable {
     case timelineAction     = 7
 }
 
-/// Where an instruction came from.
-public enum InputSource: String, Codable, Equatable, Sendable {
-    case voice
-    case keyboard
-    /// Injected by an instructor rather than issued by the trainee under assessment.
-    case instructor
-}
-
 /// What the user did to the timeline.
 public enum TimelineAction: Equatable, Sendable, Codable {
     case paused
@@ -162,6 +152,15 @@ public struct Event: Equatable, Sendable {
     public let position: EventPosition
     public let payload: EventPayload
 
+    /// Where this came from — see `EventSource`.
+    ///
+    /// On every event rather than only on the ones that obviously have a human behind them, and in the
+    /// envelope rather than the payload, for the same reason `tick` and `ordinal` are: it can then be
+    /// read and filtered without decoding — or being able to decode — a payload a newer build wrote.
+    ///
+    /// Never used for ordering or for replay. It answers questions asked *about* a session.
+    public let source: EventSource
+
     /// Real time, for audit only.
     ///
     /// **Nothing inside the simulation may read this.** It answers "how long did the trainee take to
@@ -170,9 +169,13 @@ public struct Event: Equatable, Sendable {
     /// and named.
     public let wallClock: Date?
 
-    public init(position: EventPosition, payload: EventPayload, wallClock: Date? = nil) {
+    public init(position: EventPosition,
+                payload: EventPayload,
+                source: EventSource = .system,
+                wallClock: Date? = nil) {
         self.position = position
         self.payload = payload
+        self.source = source
         self.wallClock = wallClock
     }
 

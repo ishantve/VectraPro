@@ -30,7 +30,7 @@ final class EventStoreTests: XCTestCase {
     private func command(_ code: String, tick: Int, ordinal: UInt32) -> Event {
         Event(position: EventPosition(tick: tick, ordinal: ordinal),
               payload: .commandIssued(code: code, callsign: "AIC123",
-                                      slots: ["LEVEL": "260"], source: .voice))
+                                      slots: ["LEVEL": "260"]))
     }
 
     // MARK: - Round trip
@@ -52,7 +52,7 @@ final class EventStoreTests: XCTestCase {
     /// renamed parameter must not silently stop decoding, and this is what would notice.
     func testEveryPayloadKindSurvivesARoundTrip() throws {
         let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], source: .keyboard),
+            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
             .commandRejected(code: "304", callsign: "AIC1", reason: "unmapped"),
             .transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb"),
             .readbackSpoken(callsign: "AIC1", spoken: "CLIMBING TO FLIGHT LEVEL 260"),
@@ -314,7 +314,7 @@ final class EventStoreTests: XCTestCase {
         for i in 0..<1_000 {
             try store.append(Event(position: EventPosition(tick: i, ordinal: UInt32(i)),
                                    payload: .commandIssued(code: "101", callsign: "AIC1234",
-                                                           slots: ["LEVEL": "260"], source: .voice)))
+                                                           slots: ["LEVEL": "260"])))
         }
         try store.close()
 
