@@ -54,10 +54,32 @@ arch() {
   ./scripts/arch-fingerprint.sh | tail -4
 }
 
+metrics() {
+  echo "▸ Recording metrics (exit validation)"
+  xcodebuild test -project VectraPro.xcodeproj -scheme VectraPro \
+    -destination "$DESTINATION" -only-testing:VectraProTests/RecordingMetricsTests \
+    >/tmp/verify-metrics.log 2>&1 || { echo "  FAILED — see /tmp/verify-metrics.log"; return 1; }
+
+  # The figures are XCTAttachments, not console output: a print from a test does not survive into the
+  # result bundle, and a measurement nobody can read is not a measurement.
+  local bundle out
+  bundle=$(ls -td ~/Library/Developer/Xcode/DerivedData/VectraPro-*/Logs/Test/*.xcresult | head -1)
+  out=$(mktemp -d)
+  for name in testCaptureEventCountsAndStorageGrowth testCaptureRecordingOverhead \
+              testCaptureSealPerformance testCaptureMemoryProfile; do
+    xcrun xcresulttool export attachments --path "$bundle" \
+      --test-id "RecordingMetricsTests/$name()" --output-path "$out/$name" >/dev/null 2>&1
+    cat "$out/$name"/*.txt 2>/dev/null
+    echo
+  done
+  rm -rf "$out"
+}
+
 case "$WHAT" in
   packages) packages ;;
+  metrics)  metrics ;;
   app)      app ;;
   arch)     arch ;;
   all)      packages && echo && arch && echo && app ;;
-  *)        echo "usage: scripts/verify.sh [all|packages|app|arch]" >&2; exit 1 ;;
+  *)        echo "usage: scripts/verify.sh [all|packages|app|arch|metrics]" >&2; exit 1 ;;
 esac
