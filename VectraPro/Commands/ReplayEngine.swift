@@ -251,7 +251,7 @@ final class ReplayEngine {
     ///
     /// Only the interval changes. Folding speed into the step size is how a replay stops reaching the same
     /// state as the recording.
-    func setSpeed(_ speed: Int) {
+    func setSpeed(_ speed: Double) {
         clock.setSpeed(speed)
         if clock.isRunning { schedule() }
     }

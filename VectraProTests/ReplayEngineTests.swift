@@ -331,7 +331,7 @@ extension ReplayEngineTests {
             (tick: 60, key: "TRH", value: 250),
         ])
 
-        func run(at speed: Int) throws -> UInt64 {
+        func run(at speed: Double) throws -> UInt64 {
             let radar = simulation()
             let engine = ReplayEngine(radar: radar, recording: coordinator)
             try engine.load(sessionID)
@@ -341,7 +341,7 @@ extension ReplayEngineTests {
             return radar.stateHash.value
         }
 
-        XCTAssertEqual(try run(at: 1), try run(at: 30))
+        XCTAssertEqual(try run(at: 0.25), try run(at: 30), "speed changed where the replay ended up")
     }
 
     /// An unlisted speed is clamped to the nearest offered one rather than refused — a stray slider value is not
@@ -351,6 +351,7 @@ extension ReplayEngineTests {
         engine.setSpeed(7)
         XCTAssertTrue(ReplayClock.speedOptions.contains(engine.clock.speed))
         XCTAssertLessThanOrEqual(engine.clock.speed, 7)
+        XCTAssertEqual(engine.clock.speed, 4, "should clamp down to the nearest offered speed")
     }
 
     // MARK: Seeking

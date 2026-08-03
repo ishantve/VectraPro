@@ -53,13 +53,19 @@ final class ReplayClock: ObservableObject {
     /// Where the replay is, in simulated seconds. Mirrors `SimulationClock.tick`; only the engine writes it.
     @Published private(set) var position: Int = 0
 
-    /// Playback multiplier. The same set the live simulation offers, so the transport reads the same either way.
-    @Published private(set) var speed: Int = 1
+    /// Playback multiplier.
+    ///
+    /// A `Double`, and its own set rather than the live simulation's, because replay wants something live does
+    /// not: **slower than real time**. Watching an approach at a quarter speed is a review tool; a live exercise
+    /// has no use for it, and giving live fractional speeds would mean an exercise that runs slower than the
+    /// clock a trainee is being timed against.
+    @Published private(set) var speed: Double = 1
 
     /// The span the recording covers. `0...0` until something is loaded.
     @Published private(set) var bounds: ClosedRange<Int> = 0...0
 
-    static let speedOptions = MapViewModel.speedOptions
+    /// Offered playback speeds. Sub-1× for study, up to 30× for skimming.
+    static let speedOptions: [Double] = [0.25, 0.5, 1, 2, 4, 10, 30]
 
     /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated, and releasing
     /// one off the main actor aborts the process. The fourth class in this project to need this — the rule is
@@ -91,7 +97,7 @@ final class ReplayClock: ObservableObject {
     /// Speed changes the interval, never the step size — the same rule the live simulation follows, and the
     /// reason a replay at 30× reaches the same state as one at 1×.
     var tickInterval: TimeInterval {
-        SimulationClock.tickInterval / Double(max(1, speed))
+        SimulationClock.tickInterval / max(0.01, speed)
     }
 
     // MARK: - Transitions
@@ -123,6 +129,13 @@ final class ReplayClock: ObservableObject {
         mode = .stopped
     }
 
+    /// Whether a fingerprint taken at this speed may be compared with one at another.
+    ///
+    /// Always true, and it is a method rather than a comment because it is the invariant replay rests on: speed
+    /// changes the interval between steps and never the step, so every speed reaches the same state. If this
+    /// ever needed to return false, replay would be broken rather than merely slow.
+    var speedPreservesCorrectness: Bool { true }
+
     func play() throws {
         guard canPlay else { throw TransitionError.notAllowed(from: name(mode), to: "playing") }
         mode = .playing
@@ -143,7 +156,7 @@ final class ReplayClock: ObservableObject {
     ///
     /// Clamped to the offered set rather than refused: a stray value from a slider is not worth an error, and
     /// silently accepting an unlisted speed would let the transport show something the timer is not doing.
-    func setSpeed(_ requested: Int) {
+    func setSpeed(_ requested: Double) {
         speed = Self.speedOptions.contains(requested)
             ? requested
             : (Self.speedOptions.last { $0 <= requested } ?? Self.speedOptions.first ?? 1)
