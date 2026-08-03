@@ -482,7 +482,8 @@ What Phase 0 established, and what Phases B and C must not break:
 | Guarantee | Enforced by |
 |---|---|
 | One simulated second per step, always | `SimulationClock`; speed changes the timer period only |
-| No real clock in the simulation | no `Date()`/`asyncAfter` in the core; `DeterminismTests` inserts a real pause and asserts no effect |
+| **No real clock in the simulation** | two source scans — `WallClockScanTests` (ATCSimKit) and `DeterministicTimeTests` (app) — plus `DeterminismTests`, which inserts a real pause between steps and asserts the outcome is unchanged |
+| Exactly one timer drives the loop | `testExactlyOneFileDrivesTheSimulationFromATimer` |
 | Randomness reproducible from one seed | `RandomStreams`, one stream per subsystem |
 | Adding a draw in one subsystem cannot disturb another | separate streams; `testDrawingFromOneStreamDoesNotDisturbAnother` |
 | Identity survives a restore | `Aircraft.id` is an init parameter |
