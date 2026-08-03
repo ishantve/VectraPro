@@ -834,163 +834,41 @@ struct MapScreen: View {
         }
     }
 
-    // MARK: - Voice feedback log
+    // MARK: - Overlay controls
+    //
+    // Each of these lives in its own file now; what stays here is the wiring that
+    // says where the values come from.
 
     private var feedbackLogView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(feedbackManager.feedbackLog) { entry in
-                HStack(spacing: 6) {
-                    Image(systemName: entry.isError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(entry.isError
-                            ? Color(red: 1.0, green: 0.35, blue: 0.35)
-                            : Color(red: 0.2, green: 1.0, blue: 0.4))
-                    Text(entry.text)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(
-                            entry.isError
-                                ? Color(red: 1.0, green: 0.35, blue: 0.35).opacity(0.4)
-                                : Color(red: 0.2, green: 1.0, blue: 0.4).opacity(0.3),
-                            lineWidth: 1
-                        )
-                )
-            }
-        }
-        .frame(maxWidth: 280, alignment: .leading)
-        .animation(.easeInOut(duration: 0.25), value: feedbackManager.feedbackLog.map(\.id))
+        FeedbackLogView(feedbackManager: feedbackManager)
     }
 
     private var zoomButtons: some View {
-        HStack(spacing: 1) {
-            zoomButton(systemImage: "minus", delta: -1)
-            Divider().frame(height: 44).background(.white.opacity(0.2))
-            zoomButton(systemImage: "plus", delta: 1)
-        }
-        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 1))
+        RadarZoomControl { viewModel.zoom(by: $0) }
     }
-
-    private func zoomButton(systemImage: String, delta: Double) -> some View {
-        Button {
-            viewModel.zoom(by: delta)
-        } label: {
-            Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-        }
-    }
-
-    // MARK: - Simulation speed (fast-forward)
 
     private var speedButtons: some View {
-        HStack(spacing: 1) {
-            speedButton(systemImage: "backward.fill",
-                        enabled: viewModel.simulationSpeed != MapViewModel.speedOptions.first) {
-                viewModel.decreaseSpeed()
-            }
-            Divider().frame(height: 44).background(.white.opacity(0.2))
-            Text("\(viewModel.simulationSpeed)X")
-                .font(.system(size: 15, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
-                .frame(width: 52, height: 44)
-            Divider().frame(height: 44).background(.white.opacity(0.2))
-            speedButton(systemImage: "forward.fill",
-                        enabled: viewModel.simulationSpeed != MapViewModel.speedOptions.last) {
-                viewModel.increaseSpeed()
-            }
-        }
-        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 1))
-    }
-
-    private func speedButton(systemImage: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(enabled ? .white : .white.opacity(0.3))
-                .frame(width: 44, height: 44)
-        }
-        .disabled(!enabled)
+        SimulationSpeedControl(
+            speed: viewModel.simulationSpeed,
+            canSlowDown: viewModel.simulationSpeed != MapViewModel.speedOptions.first,
+            canSpeedUp: viewModel.simulationSpeed != MapViewModel.speedOptions.last,
+            slowDown: { viewModel.decreaseSpeed() },
+            speedUp: { viewModel.increaseSpeed() })
     }
 
     @ViewBuilder
     private var exerciseSummaryOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.75).ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.4))
-
-                Text("Exercise Complete")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white)
-
-                VStack(spacing: 8) {
-                    Text(viewModel.exerciseName)
-                        .font(.headline)
-                        .foregroundStyle(.white.opacity(0.85))
-
-                    Text("Duration: \(viewModel.exerciseDurationSeconds.asTimerString)")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-
-                Button {
-                    viewModel.clearOnExit()
-                    dismiss()
-                } label: {
-                    Text("Exit")
-                        .font(.headline)
-                        .foregroundStyle(.black)
-                        .frame(width: 160, height: 44)
-                        .background(Color(red: 0.2, green: 1.0, blue: 0.4), in: Capsule())
-                }
-            }
-            .padding(40)
-            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.12), lineWidth: 1))
-            .padding(32)
+        ExerciseSummaryOverlay(exerciseName: viewModel.exerciseName,
+                               durationSeconds: viewModel.exerciseDurationSeconds) {
+            viewModel.clearOnExit()
+            dismiss()
         }
     }
 
     private var approachChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(viewModel.allApproaches) { approach in
-                    let on = viewModel.isEnabled(approach.id)
-                    Button(approach.designator) {
-                        viewModel.toggleApproach(approach.id)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(on ? Color.green : Color.white.opacity(0.15), in: Capsule())
-                    .foregroundStyle(on ? .black : .white)
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-    }
-}
-
-private extension Int {
-    /// Formats seconds as "HH:MM:SS".
-    var asTimerString: String {
-        let h = self / 3600
-        let m = (self % 3600) / 60
-        let s = self % 60
-        return String(format: "%02d:%02d:%02d", h, m, s)
+        ApproachChips(approaches: viewModel.allApproaches,
+                      isEnabled: { viewModel.isEnabled($0) },
+                      toggle: { viewModel.toggleApproach($0) })
     }
 }
 
