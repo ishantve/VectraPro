@@ -161,6 +161,36 @@ final class DeterminismTests: XCTestCase {
         XCTAssertNotEqual(commanded.map(\.value), untouched.map(\.value))
     }
 
+    // MARK: - Across processes
+
+    /// The whole loop, pinned to a constant.
+    ///
+    /// Every test above compares two runs *inside one process*, which cannot catch a whole class of
+    /// fault: Swift seeds `Set` and `Dictionary` hashing per process, so if any decision ever
+    /// depended on their iteration order, two runs in the same process would agree and two runs in
+    /// different processes would not. A compiled-in constant turns every test run — on any machine,
+    /// with any hash seed — into that second process.
+    ///
+    /// The cost is that this is brittle by design: it fails whenever the simulation's behaviour
+    /// legitimately changes. That is the point, but it means the failure has to be read rather than
+    /// silenced, so the message says how.
+    func testTheLoopMatchesItsRecordedFingerprint() {
+        let fingerprints = run(makeSimulation(), seed: 0xF1_5EED, ticks: 600, sampleEvery: 600)
+        let actual = fingerprints.last!.value
+
+        XCTAssertEqual(actual, 0x362D_862F_C06F_EBA4, """
+            600 ticks of seed 0xF15EED produced \(String(format: "0x%016llX", actual)).
+
+            If nothing about the simulation changed, this is the fault this test exists for: a
+            decision somewhere now depends on Set or Dictionary iteration order, which is seeded per
+            process and so agrees with itself inside one run and disagrees between runs. Sort before
+            iterating.
+
+            If the simulation *did* change — spawning, physics, scheduling — then this constant is
+            stale and every existing recording is invalidated. Update it deliberately, as a decision.
+            """)
+    }
+
     // MARK: - No real clock
 
     /// Simulated time must depend only on steps taken, never on how long the run took in reality.

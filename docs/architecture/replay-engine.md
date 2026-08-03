@@ -1086,9 +1086,15 @@ Each phase ends somewhere shippable. No phase requires rewriting an earlier one.
   index belongs in a snapshot (§6.2).
 - The step cost measurement above, which changes the snapshot urgency.
 
-**Still open from Phase 0's original scope:** running the determinism check in *separate processes*
-(catches hash-seed and iteration-order faults that a single process hides), and the
-cross-architecture measurement §22.1 calls for. Both are CI work rather than code.
+**Both remaining Phase 0 items are now done, in CI:**
+
+- **Separate processes** — solved with a compiled-in fingerprint rather than by orchestrating two
+  runs. `DeterminismTests.testTheLoopMatchesItsRecordedFingerprint` pins 600 ticks of a fixed seed to
+  a constant, so *every* test run, on any machine with any hash seed, is the second process. This is
+  brittle by design: it fails whenever behaviour legitimately changes, and the failure message says
+  how to tell that apart from an iteration-order fault.
+- **Cross-architecture** — measured, and the architectures agree (§22.1). `scripts/arch-fingerprint.sh`
+  runs it; `.github/workflows/ci.yml` runs it on every push.
 
 *Value delivered without any replay code: B3 was a real bug at speed — wreckage cleared 45 simulated
 seconds late at 30× and cleared while paused — and the crash above would have hit the first feature
@@ -1347,8 +1353,26 @@ written.
 iPad generation. Once sharing exists, cross-device replay is not an edge case — it is the normal
 path for every assessment.
 
-So **R4 is promoted from a footnote to a Phase 1 concern**, and the options are, in increasing
-cost:
+**Measured, and the answer is good news.** `scripts/arch-fingerprint.sh` builds the simulation's
+physics-and-geodesy self-check for both architectures and compares the result over 600 compounding
+steps:
+
+```
+arm64   0x95A92889F6E79EBC
+x86_64  0x95A92889F6E79EBC
+```
+
+Identical. The same constant also holds on macOS arm64 (`ATCSimKitTests`) and on the iOS simulator
+(`VectraProTests`), so **two architectures and two platforms all agree**.
+
+That retires option 4 below: deterministic geodesy is not needed, and cross-device replay **may be
+scored**. Two honest limits on the claim — it compares at the 0.1 m / 0.01° quantisation rather than
+bit-exactly, and both architectures here use Apple's `libm`, so a different OS or toolchain could
+still differ. Which is why `DeterminismSelfCheck` ships in the app rather than living only in a test:
+a device answers the question for itself at runtime, and §21.6 can gate scoring on the answer instead
+of on an assumption.
+
+The options, kept for the record, in increasing cost:
 
 1. **Restrict scoring to matching architectures.** Instructor reviews on an iPad; a Mac review is
    read-only and labelled. Zero engineering cost, real operational cost, and it will be resented.
@@ -1365,9 +1389,9 @@ cost:
    maths. Genuinely bit-portable, and a large, invasive change. Only if (2) shows real divergence
    and (3) proves insufficient.
 
-My recommendation: **(2) in Phase 0, then (3) as the default policy.** Do not build (4) on
-speculation. But the measurement must happen *before* Phase 1 commits to a scoring policy, because
-that policy is a promise to instructors.
+**Outcome: (2) was done and (3) is the policy.** (1) is unnecessary and (4) is not built. The check
+runs in CI on every push, so if a future toolchain does diverge we learn it then rather than from an
+instructor scoring the wrong thing.
 
 ### 22.2 The problem: trainee-gated sharing means trainee-gated assessment
 
