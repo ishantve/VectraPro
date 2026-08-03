@@ -284,6 +284,10 @@ into the event stream as a non-authoritative annotation. Replay recomputes; if t
 value disagrees with the recorded one, the UI shows the recorded score and flags the mismatch.
 Never silently prefer one.
 
+> **Amended by §21.** For an **assessment** session the recorded score is not an annotation — it
+> is *the* result, and re-derivation may only ever be shown beside it as a review value. See
+> §21.4.
+
 ---
 
 ## 5. Event architecture
@@ -616,20 +620,27 @@ stateDiagram-v2
     Recording --> Recording: live sim + append
     Recording --> Paused: pause()
     Paused --> Recording: resume()
-    Recording --> Completed: exercise ends
+    Recording --> Completed: exercise ends (training)
+    Recording --> Sealed: exercise ends (assessment)
     Paused --> Completed: end()
+    Sealed --> Replaying: openReplay()
     Recording --> Interrupted: crash / kill
     Interrupted --> Completed: recover() — truncate to last valid event
     Completed --> Replaying: openReplay()
     Replaying --> Replaying: seek / play / step / reverse
     Replaying --> Recording: continueSimulation() → fork to a new session
     Completed --> Archived: archive()
+    Sealed --> Archived: archive()
     Archived --> Replaying: restore()
 ```
 
 `Replaying → Recording` is the "Continue Simulation" transition, and it always **forks**. It never
 mutates the session being replayed. That invariant is what makes replay safe to hand to a trainee:
 nothing they do while exploring can damage the record of what they did.
+
+`Sealed` is the terminal state for an assessment (§21.2). It is reachable only from `Recording`,
+never from `Interrupted` — a crashed assessment stays unsealed and therefore incomplete, which is
+the honest outcome rather than a salvaged one.
 
 ---
 
@@ -732,7 +743,9 @@ Recording must not slow the live simulation. Guarantees:
 
 - The step function does **no I/O**. `RecordingManager` copies the input and returns.
 - Appends go to an in-memory buffer, flushed on a serial background queue — batched by count or
-  ~1 s of wall time.
+  ~1 s of wall time **for a training session**. An **assessment** session flushes every event
+  (§21.3): a lost second of input is lost evidence, and the I/O is trivial at ~1,000 events per
+  session.
 - Snapshots serialise a **value-type copy** of `World` handed to a background queue. Because
   `Aircraft` and its friends are structs, this is a cheap copy with no tearing risk. (Swift's CoW
   makes this nearly free until the writer mutates.)
@@ -898,8 +911,11 @@ The event log's design does the work here.
 - Frames are length-prefixed with a CRC32. A crash mid-write leaves a partial final frame,
   detectable and discardable — the log up to that point is fully valid.
 - Flush cadence trades durability against I/O: batching ~1 s of events risks losing ~1 s of input
-  on a hard kill. Acceptable, and tunable per deployment (an assessment session might `fsync`
-  every event).
+  on a hard kill. Acceptable for training; **not** for assessment, which flushes per event
+  (§21.3).
+- A crash during an **assessment** leaves it unsealed. An unsealed assessment is **not a valid
+  assessment** — it is recoverable and replayable, but it must be presented as incomplete rather
+  than scored (§21.2).
 - The manifest is written **at session start**, so a crashed session is always identifiable.
 
 **On next launch:**
@@ -946,6 +962,11 @@ well-tested mechanism instead of two.
 | R13 | Exercise payload changes on the backend between record and replay | **High** — silently different world | Store the resolved payload **in the manifest**, not a reference to it. Never re-fetch on replay. |
 | R14 | Instructor edits during replay | Medium | Any mutation forces a fork. Replay sessions are immutable, full stop. |
 | R15 | Wall-clock leaking back into the core | **High** | Ban by review + a test that the step path is synchronous and clock-free. Grep-able rule. |
+| R16 | An assessment silently re-scored under new rules | **High** — changes a person's result invisibly | Recorded score is authoritative; re-derivation shown beside it; `rulesVersion` recorded and rules immutable once shipped (§21.4). |
+| R17 | Instructor scores against a diverged replay | **High** — assessing something the trainee did not fly | Divergence blocks scoring review, not just logs (§21.6). |
+| R18 | Local seal treated as tamper-proof | Medium — false assurance | Documented as corruption detection only; real tamper evidence needs a server witness (§21.2). |
+| R19 | A training fork mistaken for an assessment | Medium | Forks are always `.training` and carry `derivedFrom`, surfaced in the UI (§21.5). |
+| R20 | Annotations added into the event log | Medium — breaks the seal | Annotations live in SQLite, outside the seal, with visibility flags (§21.7). |
 
 R13 deserves emphasis because it is the kind of bug that destroys trust in a replay system: if the
 fixes, runways or airlines are fetched fresh at replay time and the backend has since changed,
@@ -1012,6 +1033,8 @@ Concretely:
 7. `ReplayEngine` — seek = nearest snapshot + delta re-simulation; reverse = seek + ring buffer.
 8. `BranchManager` — fork = parent id + fork tick + one snapshot.
 9. **Hash verification** — determinism monitored, not assumed.
+10. `SessionClass` + **sealing** — one engine serving two contracts, training and assessment
+    (§21).
 
 **Justification in one line each:** it is the only model where Continue Simulation is a
 non-feature rather than a guess; it is ~200× smaller; seek latency is *bounded* rather than
@@ -1083,6 +1106,198 @@ others.*
 
 ---
 
+## 21. Assessment and training: one engine, two contracts
+
+*Added after review. The product owner confirmed both uses: a trainee replays their own session
+for self-review, and an instructor replays it for assessment.*
+
+This is not a UI difference. A training recording is a **tool**; an assessment recording is
+**evidence about a person**, and evidence has obligations a tool does not: it must be complete, it
+must be sealed, it must not be re-scored behind the subject's back, and a replay of it must be
+demonstrably faithful. Four earlier decisions change.
+
+The wrong way to build this is a scatter of `if isAssessment` checks. Instead:
+
+### 21.1 `SessionClass` is a first-class, immutable property
+
+```
+SessionClass
+  .training      — the trainee's own sandbox. Fork freely, replay freely, nothing is evidence.
+  .assessment    — a record about a person. Sealed on completion, never mutated.
+```
+
+Set at creation, written into the manifest, **never changed afterwards**. A training session
+cannot be promoted to an assessment (its recording never met the durability contract), and an
+assessment cannot be demoted (that would launder a bad result).
+
+Everything below is policy driven off this one value, resolved once at session open — not
+re-decided at each call site.
+
+| Policy | `.training` | `.assessment` |
+|---|---|---|
+| Event flush | batched, ~1 s | **every event** (§21.3) |
+| Snapshots | best-effort, evictable | same — still a cache |
+| On completion | closed | **sealed with a digest** (§21.2) |
+| Mutable after completion | no (already immutable) | no, and *verifiably* so |
+| Score authority | derived | **the recorded value** (§21.4) |
+| Fork | → `.training` | → `.training`, marked `derivedFrom` (§21.5) |
+| Replay on a different architecture | allowed | allowed, but **flagged and unscoreable** (§21.6) |
+| Divergence detected | warning | **blocks scoring review** (§21.6) |
+| Annotations | optional | expected, and stored outside the seal (§21.7) |
+
+### 21.2 Sealing
+
+When an assessment completes, compute a digest over the manifest followed by every event frame,
+in order, and store it in the manifest as `seal`:
+
+```
+seal = SHA256( manifest_without_seal ‖ events.log )
+```
+
+Cost: one hash over ~100 KB. Effectively free, once per session.
+
+What this buys, stated precisely because it is easy to oversell:
+
+- **It detects corruption and accidental modification.** A truncated log, a flipped bit, a
+  half-written frame — all caught on open, before an instructor scores something wrong.
+- **It gives a stable identity** for the recording, which is what cloud sync, export and
+  cross-device comparison need to agree on "the same session".
+- **It does not, on its own, resist a determined user with device access.** An unkeyed local
+  digest can be recomputed after editing. Pretending otherwise would be the dishonest kind of
+  security.
+
+If assessment results carry real consequence — certification, employment, licensing — then
+tamper *evidence* requires a witness outside the device: **submit the seal to the backend at the
+moment of sealing**, and have the server store it. Later verification compares the local digest
+against the server's copy. That is a small API (`POST /sessions/{id}/seal`) and it is the only
+version of this that actually holds up. **This is a product decision, not a technical one** — I
+have designed for it (the seal exists and is submittable) without assuming it.
+
+Full anti-tamper on a jailbroken device is not achievable and should not be promised.
+
+### 21.3 Durability: assessments flush every event
+
+§12.2 batches appends for throughput. For an assessment that trade is wrong: a hard kill losing
+the last second of input loses *evidence*, and the argument that it is "only a second" is exactly
+the argument that fails at a hearing.
+
+At ~1,000 events per session, per-event `fsync` is a rounding error in I/O. There is no
+performance reason to batch, so we do not.
+
+An assessment that crashed is **unsealed**, and an unsealed assessment is **not a valid
+assessment**. It remains fully replayable and recoverable (§15) — the trainee and instructor can
+still learn from it — but it must be presented as *incomplete*, never scored as though it ran to
+completion. Labelling this honestly is more important than salvaging the result.
+
+### 21.4 Scoring: the recorded value wins, and the disagreement is shown
+
+§4.5 treated the recorded score as an audit annotation and preferred the derived value for
+display. For an assessment that is inverted:
+
+- The **recorded** `scoreEvaluated(tick, value, rulesVersion)` **is the result.**
+- Replay recomputes under the current rules and shows it **beside** the recorded value, never
+  instead of it.
+- If they differ, the UI says so explicitly: *"Scored 82 under rules v3. Current rules v4 would
+  score 76."*
+
+This is the only honest behaviour. Silently re-deriving would mean a trainee's result changes
+because the app updated — and it would change *invisibly*, which is worse than changing.
+
+It also means **`rulesVersion` must be recorded, and scoring rules must be versioned and
+immutable.** A rules version, once shipped, is never edited; a change is a new version. Without
+that, the recorded score has no meaning to reproduce against.
+
+### 21.5 Forking an assessment always produces a training session
+
+The trainee can replay their assessment and press *Continue Simulation* — that is a genuinely
+valuable learning tool ("what if I had turned him earlier?"). It must never be able to produce a
+second thing that looks like an assessment.
+
+So a fork of an `.assessment` session is always `.training`, carrying:
+
+```
+parentID     the assessment
+forkTick     where they diverged
+derivedFrom  .assessment(sessionID)     ← surfaced in the UI, not just stored
+```
+
+And, from §9.3: the assessment's original future is **not deleted**. The whole point of letting a
+trainee explore is comparing their exploration against what they actually did. The assessment
+remains sealed and intact; the exploration sits beside it, visibly labelled as an exploration.
+
+### 21.6 A replay used for assessment must be demonstrably faithful
+
+§14.6's hash check was framed as a determinism guard. For assessment it is a **validity** guard,
+and the consequence is stronger than a log line:
+
+- **Divergence detected during an assessment replay → scoring review is blocked**, with a clear
+  message. An instructor must not adjust a score while looking at a replay that is not what the
+  trainee flew. Re-anchoring keeps it visually correct, but "visually correct" is not the standard
+  for evidence.
+- **Architecture mismatch (R4)** — an assessment recorded on an iPad and replayed on a Mac cannot
+  be guaranteed bit-identical. It replays, it is useful for review, and it is **flagged as
+  unscoreable**. If instructors will routinely review on a different device class, this moves R4
+  from "detect and re-anchor" to a funded engineering item, and that should be settled before
+  Phase 1 ships.
+- **Build mismatch** is recorded and shown. A replay under a newer build is legitimate for review
+  and suspect for scoring; the UI should say which.
+
+### 21.7 Roles, and why annotations live outside the event log
+
+Two audiences, different capabilities:
+
+| Capability | Trainee | Instructor |
+|---|---|---|
+| Replay own session | ✅ | ✅ |
+| Seek / scrub / speed / reverse | ✅ | ✅ |
+| Continue Simulation (→ training fork) | ✅ | ✅ |
+| Add bookmarks | ✅ (own, private) | ✅ |
+| Add assessment annotations | ❌ | ✅ |
+| See instructor annotations | configurable | ✅ |
+| Adjust a recorded score | ❌ | ✅, audited |
+| Delete / re-record an assessment | ❌ | ❌ |
+
+Note the last row: **nobody** can delete or re-record a sealed assessment through this system.
+Retention and deletion are an administrative concern with its own audit trail, not a button in
+a replay UI.
+
+The architecturally interesting consequence is about annotations. They are added **after** the
+session is sealed, and instructor annotations may need to be withheld from the trainee. Both facts
+force the same conclusion:
+
+> **Annotations, bookmarks and score adjustments must live outside `events.log`.**
+
+If they were events, adding one would break the seal — and the seal is the thing that makes the
+recording evidence. So they go in the SQLite catalogue, keyed by `(sessionID, tick)`, each with a
+visibility flag and its own author and timestamp:
+
+```
+annotations(sessionID, tick, author, role, visibility, text, createdAt)
+scoreAdjustments(sessionID, tick, fromValue, toValue, author, reason, createdAt)
+```
+
+This is a good example of the seal earning its place: it did not merely add integrity, it
+*forced a cleaner separation* between the immutable record of what happened and the mutable
+commentary about it. Those were always two different things; without the seal we would probably
+have muddled them.
+
+### 21.8 What this changes in the roadmap
+
+Small, and mostly Phase 1 — which is the point of deciding it now rather than retrofitting:
+
+- **Phase 1:** `SessionClass` in the manifest; per-event flush for assessments; sealing on
+  completion; assessment forks marked `derivedFrom`; `rulesVersion` recorded with every score.
+- **Phase 2:** divergence blocks scoring review; architecture/build mismatch flagged; annotation
+  and score-adjustment tables with visibility.
+- **Phase 3 (product decision):** server-witnessed seals, if assessment results carry formal
+  consequence.
+
+Sealing and `SessionClass` are cheap **now** and expensive later, because retrofitting them means
+every session recorded before the change is of an unknown class and unverifiable. They belong in
+Phase 1 even though nothing consumes them until Phase 2.
+
+---
+
 ## Appendix A — Package placement
 
 The layering the project already follows should be preserved: the timeline layer depends on the
@@ -1100,13 +1315,21 @@ the same treatment `ATCTrafficKit` got. Worth deciding before, not after.
 
 ## Appendix B — Open questions for the product owner
 
-1. **Assessment vs training.** If sessions are ever formal assessments, immutability and audit
-   matter far more than storage, and the flush policy should become `fsync`-per-event. Are they?
+1. ~~**Assessment vs training.**~~ **Answered:** both. A trainee replays their own session for
+   self-review; an instructor replays it for assessment. This produced §21 — `SessionClass`,
+   sealing, per-event flush, and recorded-score authority. **The follow-on question is now:** do
+   assessment results carry formal consequence (certification, licensing, employment)? If yes,
+   seals must be server-witnessed (§21.2) and that is an API, not a local change.
 2. **Retention.** How many sessions per device, for how long? Drives eviction and archival
    priority.
-3. **Cross-device replay.** Must a session recorded on an iPad replay on a Mac? If yes, R4 moves
-   from "detect and re-anchor" to a real engineering item.
+3. **Cross-device replay.** Must a session recorded on an iPad replay on a Mac? **This is now the
+   highest-value open question**, because §21.6 makes an architecture mismatch *unscoreable*: if
+   instructors routinely review on a different device class than trainees fly on, R4 stops being
+   a footnote and becomes a funded Phase 1 item.
 4. **Instructor live-join.** If an instructor watches a running session remotely, the input stream
    becomes a network stream and multiplayer ordering arrives early rather than in Phase 3.
 5. **How far back is "hundreds of aircraft"?** It decides whether R5 belongs in Phase 2 or
    Phase 1.
+6. **Annotation visibility.** Should a trainee see instructor annotations on their own
+   assessment — always, after release, or never? The schema supports all three (§21.7); the
+   default is a pedagogical choice, not a technical one.
