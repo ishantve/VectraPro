@@ -79,7 +79,7 @@ final class MapViewModel: ObservableObject {
     /// Owned by ATCTrafficKit, which knows nothing about aircraft or geometry, so
     /// the rules are testable on their own and portable off Apple platforms.
     private var schedule: TrafficSchedule?
-    private var promotion = RadarPromotionSchedule()
+    private var promotion: RadarPromotionSchedule
 
     /// Multi-aircraft spawning (from the exercise).
     private var isMultiMode = false
@@ -270,6 +270,11 @@ final class MapViewModel: ObservableObject {
     private let collision: AircraftCollisionDetector
     private let spawner:   AircraftSpawner
 
+    /// The simulation's random streams. Every random choice the simulation makes is drawn from
+    /// here rather than from the system generator, so the same seed replays the same exercise.
+    /// Seeded per exercise in `reset()`; the seed is what a saved simulation would record.
+    private var streams = RandomStreams(seed: RandomStreams.defaultSeed)
+
     /// Context bundle passed to the simulator for all spawn calls.
     private var spawnContext: SpawnContext {
         SpawnContext(center: center, zoneShapes: zoneShapes(), fixes: fixes,
@@ -392,7 +397,8 @@ final class MapViewModel: ObservableObject {
         self.spawner   = spawner ?? .shared
         self.feedback  = feedback ?? CommandFeedbackManager.shared
         self.reports   = reports ?? DeferredReportCoordinator.shared
-        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
+        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext, rng: &streams.spawner)]
     }
 
     // MARK: - Voice commands
@@ -542,7 +548,7 @@ final class MapViewModel: ObservableObject {
         aircraft = []
         traffic  = []
         schedule = nil
-        promotion = RadarPromotionSchedule()
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
         selectedAircraftID   = nil
         yellowConflictIDs    = []
         redConflictIDs       = []
@@ -592,20 +598,23 @@ final class MapViewModel: ObservableObject {
         // the active categories with the same priority logic as the lists.
         elapsedSeconds      = 0
         isExerciseFinished  = false
-        spawner.resetRadialCycle(fixes: fixes)
+        // A fresh seed per run, so exercises still vary; replay will supply a recorded one.
+        streams = RandomStreams(seed: RandomStreams.freshSeed())
+        spawner.resetRadialCycle(fixes: fixes, rng: &streams.spawner)
         // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
         var spawned: [Aircraft] = []
         for category in initialCategories() {
             let ac = spawner.makeRandomAircraft(context: spawnContext,
                                                 category: category,
-                                                existing: spawned.map(\.position))
+                                                existing: spawned.map(\.position),
+                                                rng: &streams.spawner)
             spawned.append(ac)
         }
         aircraft = spawned
         resetTraffic()
-        promotion = RadarPromotionSchedule()
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
         // Fill toward capacity promptly if the initial spawn fell short of it.
-        if aircraft.count < airspaceCapacity { promotion.hurry() }
+        if aircraft.count < airspaceCapacity { promotion.hurry(using: &streams.traffic) }
         startSimulation()
     }
 
@@ -666,12 +675,15 @@ final class MapViewModel: ObservableObject {
         traffic = []
         schedule = TrafficSchedule(configuration: .init(
             frequencies: configuredFrequencies,
-            airspaceCapacity: airspaceCapacity))
+            airspaceCapacity: airspaceCapacity),
+            using: &streams.traffic)
 
         // Seed one departure aircraft into the hangar immediately so the
         // controller always has something to clear for takeoff at exercise start.
         if schedule?.isActive(.departure) == true {
-            traffic.append(spawner.makeListAircraft(context: spawnContext, category: .departure))
+            traffic.append(spawner.makeListAircraft(context: spawnContext,
+                                                    category: .departure,
+                                                    rng: &streams.spawner))
         }
     }
 
@@ -735,7 +747,7 @@ final class MapViewModel: ObservableObject {
         if !captured.isEmpty {
             if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
             if aircraft.count < airspaceCapacity {
-                promotion.hurry()
+                promotion.hurry(using: &streams.traffic)
             }
         }
 
@@ -759,7 +771,7 @@ final class MapViewModel: ObservableObject {
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.
         if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
-            promotion.hurry()
+            promotion.hurry(using: &streams.traffic)
         }
         let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
         if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
@@ -807,9 +819,11 @@ final class MapViewModel: ObservableObject {
         guard var schedule else { return }
         // The schedule decides what and when; making the aircraft is this layer's
         // job, since that needs a position and the schedule has no geometry.
-        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count) {
+        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count,
+                                        using: &streams.traffic) {
             traffic.append(spawner.makeListAircraft(context: spawnContext,
-                                                    category: category.asFlight))
+                                                    category: category.asFlight,
+                                                    rng: &streams.spawner))
         }
         self.schedule = schedule
     }
@@ -817,7 +831,8 @@ final class MapViewModel: ObservableObject {
     private func advanceRadarPromotion() {
         guard promotion.advance(by: tickInterval,
                                 radarCount: aircraft.count,
-                                capacity: airspaceCapacity) else { return }
+                                capacity: airspaceCapacity,
+                                using: &streams.traffic) else { return }
         promoteFromHangar()
     }
 
@@ -829,14 +844,15 @@ final class MapViewModel: ObservableObject {
             (traffic[$0].category == .arrival || traffic[$0].category == .enroute)
         }
         let category: FlightCategory
-        if let idx = eligibleIndices.randomElement() {
+        if let idx = streams.promotion.pick(eligibleIndices) {
             category = traffic[idx].category
             traffic.remove(at: idx)
         } else {
-            category = Bool.random() ? .arrival : .enroute
+            category = streams.promotion.bool() ? .arrival : .enroute
         }
         aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category,
-                                                   existing: aircraft.map(\.position)))
+                                                   existing: aircraft.map(\.position),
+                                                   rng: &streams.spawner))
         // The schedule restarts its own interval; nothing to reset here.
     }
 

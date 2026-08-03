@@ -89,6 +89,15 @@ final class SpawnFrequencyTests: XCTestCase {
 
 final class TrafficScheduleTests: XCTestCase {
 
+    /// A generator these tests barely use — `.fixed` intervals ignore it — but the schedule now
+    /// takes one, because it must draw from the caller's sequence rather than the system's.
+    private var rng = SeededGenerator(seed: 1)
+
+    override func setUp() {
+        super.setUp()
+        rng = SeededGenerator(seed: 1)
+    }
+
     private func schedule(capacity: Int = 10,
                           frequencies: [TrafficCategory: SpawnFrequency],
                           interval: TimeInterval = 30) -> TrafficSchedule {
@@ -96,7 +105,8 @@ final class TrafficScheduleTests: XCTestCase {
             configuration: .init(frequencies: frequencies,
                                  airspaceCapacity: capacity,
                                  randomIntervals: [interval]),
-            intervals: .fixed(interval))
+            intervals: .fixed(interval),
+            using: &rng)
     }
 
     /// Steps a schedule one second at a time, holding the aircraft count fixed.
@@ -105,7 +115,8 @@ final class TrafficScheduleTests: XCTestCase {
                      currentCount: Int = 0) -> [TrafficCategory] {
         var spawned: [TrafficCategory] = []
         for _ in 0..<seconds {
-            spawned += schedule.advance(by: 1, currentCount: currentCount + spawned.count)
+            spawned += schedule.advance(by: 1, currentCount: currentCount + spawned.count,
+                                        using: &rng)
         }
         return spawned
     }
@@ -177,13 +188,13 @@ final class TrafficScheduleTests: XCTestCase {
 
         // Airspace full: the interval passes several times over and nothing spawns.
         for _ in 0..<50 {
-            XCTAssertTrue(schedule.advance(by: 1, currentCount: 5).isEmpty)
+            XCTAssertTrue(schedule.advance(by: 1, currentCount: 5, using: &rng).isEmpty)
         }
         XCTAssertTrue(schedule.hasTrafficRemaining, "still owed — it was only blocked")
 
         // An aircraft leaves. The previous version had switched the spawner off
         // permanently by now; it must resume on the very next tick.
-        XCTAssertEqual(schedule.advance(by: 1, currentCount: 4), [.arrival])
+        XCTAssertEqual(schedule.advance(by: 1, currentCount: 4, using: &rng), [.arrival])
     }
 
     func testCapacityCountsAircraftSpawnedWithinTheSameTick() {
@@ -193,7 +204,7 @@ final class TrafficScheduleTests: XCTestCase {
                                               .departure: .random,
                                               .enroute: .random],
                                 interval: 10)
-        XCTAssertEqual(schedule.advance(by: 10, currentCount: 9).count, 1)
+        XCTAssertEqual(schedule.advance(by: 10, currentCount: 9, using: &rng).count, 1)
     }
 
     func testCapacityIsNotExceededOverALongRun() {
@@ -202,7 +213,7 @@ final class TrafficScheduleTests: XCTestCase {
                                 interval: 5)
         var count = 0
         for _ in 0..<500 {
-            count += schedule.advance(by: 1, currentCount: count).count
+            count += schedule.advance(by: 1, currentCount: count, using: &rng).count
             XCTAssertLessThanOrEqual(count, 6)
         }
     }
@@ -210,31 +221,38 @@ final class TrafficScheduleTests: XCTestCase {
 
 final class RadarPromotionScheduleTests: XCTestCase {
 
+    private var rng = SeededGenerator(seed: 1)
+
+    override func setUp() {
+        super.setUp()
+        rng = SeededGenerator(seed: 1)
+    }
+
     func testPromotesOnceTheIntervalElapses() {
-        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10))
+        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10), using: &rng)
         for _ in 0..<9 {
-            XCTAssertFalse(promotion.advance(by: 1, radarCount: 0, capacity: 5))
+            XCTAssertFalse(promotion.advance(by: 1, radarCount: 0, capacity: 5, using: &rng))
         }
-        XCTAssertTrue(promotion.advance(by: 1, radarCount: 0, capacity: 5))
+        XCTAssertTrue(promotion.advance(by: 1, radarCount: 0, capacity: 5, using: &rng))
     }
 
     func testAFullRadarPausesPromotionRatherThanEndingIt() {
-        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10))
+        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10), using: &rng)
         for _ in 0..<50 {
-            XCTAssertFalse(promotion.advance(by: 1, radarCount: 5, capacity: 5))
+            XCTAssertFalse(promotion.advance(by: 1, radarCount: 5, capacity: 5, using: &rng))
         }
         // Room appears; promotion must resume rather than having been switched off.
         var promoted = false
         for _ in 0..<11 where !promoted {
-            promoted = promotion.advance(by: 1, radarCount: 4, capacity: 5)
+            promoted = promotion.advance(by: 1, radarCount: 4, capacity: 5, using: &rng)
         }
         XCTAssertTrue(promoted)
     }
 
     func testTheIntervalRestartsAfterEachPromotion() {
-        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10))
-        XCTAssertTrue(promotion.advance(by: 10, radarCount: 0, capacity: 5))
-        XCTAssertFalse(promotion.advance(by: 9, radarCount: 0, capacity: 5))
-        XCTAssertTrue(promotion.advance(by: 1, radarCount: 0, capacity: 5))
+        var promotion = RadarPromotionSchedule(intervals: [10], chooser: .fixed(10), using: &rng)
+        XCTAssertTrue(promotion.advance(by: 10, radarCount: 0, capacity: 5, using: &rng))
+        XCTAssertFalse(promotion.advance(by: 9, radarCount: 0, capacity: 5, using: &rng))
+        XCTAssertTrue(promotion.advance(by: 1, radarCount: 0, capacity: 5, using: &rng))
     }
 }

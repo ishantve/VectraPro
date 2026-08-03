@@ -5,6 +5,11 @@
 //  Aircraft factory: spawns radar targets and hangar-list traffic.
 //  Owns callsign generation and zone-avoidance logic.
 //
+//  Every random choice is drawn from a caller-supplied `SeededGenerator` rather than the system
+//  generator, so the same exercise spawns the same traffic twice. The generator comes in as
+//  `inout` — the draw advances it, and that advance has to be visible to the caller, since the
+//  caller is what holds the simulation's random state.
+//
 
 import CoreLocation
 import ATCSimKit
@@ -42,8 +47,8 @@ final class AircraftSpawner {
 
     /// Build and shuffle the radial list from the exercise fixes.
     /// Call this once at `reset()` so every exercise gets a fresh, consistent order.
-    func resetRadialCycle(fixes: [ExerciseDetail.Fix]) {
-        radialCycle = buildRadialList(fixes: fixes).shuffled()
+    func resetRadialCycle(fixes: [ExerciseDetail.Fix], rng: inout SeededGenerator) {
+        radialCycle = rng.shuffle(buildRadialList(fixes: fixes))
         radialCycleIndex = 0
     }
 
@@ -65,7 +70,8 @@ final class AircraftSpawner {
     /// kept at least 15 NM from all of them (and outside every zone).
     func makeRandomAircraft(context: SpawnContext,
                             category: FlightCategory = .arrival,
-                            existing: [CLLocationCoordinate2D] = []) -> Aircraft {
+                            existing: [CLLocationCoordinate2D] = [],
+                            rng: inout SeededGenerator) -> Aircraft {
         var position = context.center
         var heading  = 0.0
 
@@ -74,20 +80,21 @@ final class AircraftSpawner {
             let candidate: CLLocationCoordinate2D
             let candidateHeading: Double
 
-            if category == .arrival, let radial = nextCycledRadial() ?? randomVORRadial(fixes: context.fixes) {
+            if category == .arrival,
+               let radial = nextCycledRadial() ?? randomVORRadial(fixes: context.fixes, rng: &rng) {
                 let spawnDistance = min(63 * Distance.metersPerNauticalMile, radial.lengthMeters)
                 candidate = Geo.offset(from: radial.origin,
                                        distanceMeters: spawnDistance,
                                        bearingDegrees: radial.angle)
                 candidateHeading = Geo.bearing(from: candidate, to: context.center)
             } else {
-                let spawnBearing = Double.random(in: 0..<360)
-                let rangeNM = Double.random(in: 60..<63)
+                let spawnBearing = rng.double(in: 0..<360)
+                let rangeNM = rng.double(in: 60..<63)
                 candidate = Geo.offset(from: context.center,
                                        distanceMeters: rangeNM * Distance.metersPerNauticalMile,
                                        bearingDegrees: spawnBearing)
                 let inbound = (spawnBearing + 180).truncatingRemainder(dividingBy: 360)
-                candidateHeading = (inbound + Double.random(in: -40...40) + 360)
+                candidateHeading = (inbound + rng.double(in: -40...40) + 360)
                     .truncatingRemainder(dividingBy: 360)
             }
 
@@ -100,12 +107,12 @@ final class AircraftSpawner {
             if clearOfZones && clearOfTraffic { break }
         }
 
-        var ac = Aircraft(callsign: callsign(airlines: context.airlines),
+        var ac = Aircraft(callsign: callsign(airlines: context.airlines, rng: &rng),
                           position: position,
                           headingDegrees: heading)
         ac.category = category
-        ac.aircraftType = context.aircraftTypes.randomElement()?.icaoCode
-        ac.squawk = randomSquawk()
+        ac.aircraftType = rng.pick(context.aircraftTypes)?.icaoCode
+        ac.squawk = randomSquawk(rng: &rng)
 
         // Pre-populate 6 history dots so the trail is visible immediately at spawn.
         // Dot spacing = TAS × sampleInterval (distance between consecutive history samples).
@@ -123,15 +130,17 @@ final class AircraftSpawner {
     }
 
     /// Creates a hangar-list aircraft (not drawn on the map).
-    func makeListAircraft(context: SpawnContext, category: FlightCategory) -> Aircraft {
-        var ac = Aircraft(callsign: Self.randomCallsign(),
+    func makeListAircraft(context: SpawnContext,
+                          category: FlightCategory,
+                          rng: inout SeededGenerator) -> Aircraft {
+        var ac = Aircraft(callsign: Self.randomCallsign(rng: &rng),
                           position: context.center,
                           headingDegrees: 0)
         ac.category = category
-        ac.altitudeFeet = Double(Int.random(in: 80...350)) * 100   // FL080–FL350
-        ac.speedKnots   = Double(Int.random(in: 180...450))
-        if let runway = context.runways.randomElement() {
-            ac.assignedRunway = Bool.random() ? runway.endA.designator : runway.endB.designator
+        ac.altitudeFeet = Double(rng.int(in: 80...350)) * 100   // FL080–FL350
+        ac.speedKnots   = Double(rng.int(in: 180...450))
+        if let runway = rng.pick(context.runways) {
+            ac.assignedRunway = rng.bool() ? runway.endA.designator : runway.endB.designator
         }
         return ac
     }
@@ -139,22 +148,28 @@ final class AircraftSpawner {
     // MARK: - Public: callsigns
 
     /// Callsign from exercise airlines (ICAO + flight number), or built-in fallback.
-    func callsign(airlines: [ExerciseDetail.Airline]) -> String {
-        if let code = airlines.compactMap({ $0.icaoCode }).filter({ !$0.isEmpty }).randomElement() {
-            return code + String(Int.random(in: 100...999))
+    func callsign(airlines: [ExerciseDetail.Airline], rng: inout SeededGenerator) -> String {
+        let codes = airlines.compactMap(\.icaoCode).filter { !$0.isEmpty }
+        if let code = rng.pick(codes) {
+            return code + String(rng.int(in: 100...999))
         }
-        return Self.randomCallsign()
+        return Self.randomCallsign(rng: &rng)
     }
 
-    static func randomCallsign() -> String {
+    static func randomCallsign(rng: inout SeededGenerator) -> String {
         let carriers = ["ACA", "AIC", "IGO", "VTI", "UAE", "SIA"]
-        return (carriers.randomElement() ?? "ACA") + String(Int.random(in: 10...99))
+        return (rng.pick(carriers) ?? "ACA") + String(rng.int(in: 10...99))
     }
 
     // MARK: - Private
 
-    private func randomSquawk() -> String {
-        (0..<4).map { _ in String(Int.random(in: 0...7)) }.joined()
+    private func randomSquawk(rng: inout SeededGenerator) -> String {
+        // Built digit by digit rather than with map, so the draws happen in a defined order —
+        // `map` over a range is sequential today but nothing in its contract promises that, and a
+        // reordering here would silently change every saved simulation.
+        var digits = ""
+        for _ in 0..<4 { digits += String(rng.int(in: 0...7)) }
+        return digits
     }
 
     private func isInsideAnyZone(_ point: CLLocationCoordinate2D, zoneShapes: [ZoneShape]) -> Bool {
@@ -177,8 +192,9 @@ final class AircraftSpawner {
     }
 
     /// Random radial pick — fallback when the cycle is empty (e.g. no fixes loaded yet).
-    private func randomVORRadial(fixes: [ExerciseDetail.Fix]) -> Radial? {
-        buildRadialList(fixes: fixes).randomElement()
+    private func randomVORRadial(fixes: [ExerciseDetail.Fix],
+                                 rng: inout SeededGenerator) -> Radial? {
+        rng.pick(buildRadialList(fixes: fixes))
     }
 
     private func polygonContains(_ polygon: [CLLocationCoordinate2D],
