@@ -231,10 +231,18 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
     private static func encode(_ state: SessionState)
         -> (name: String, digest: String?, supersededBy: String?, supersededAt: Int?) {
         switch state {
+        case .created:     return ("created", nil, nil, nil)
         case .recording:   return ("recording", nil, nil, nil)
+        case .stopping:    return ("stopping", nil, nil, nil)
         case .completed:   return ("completed", nil, nil, nil)
         case .interrupted: return ("interrupted", nil, nil, nil)
-        case .sealed(let digest): return ("sealed", digest, nil, nil)
+        case .archived:    return ("archived", nil, nil, nil)
+        // The reason rides in `state_digest`, which holds whichever string the state carries. One column
+        // rather than one per state: they are mutually exclusive, and a column that is null for eight of
+        // ten states is a column nobody can query usefully.
+        case .sealed(let digest):   return ("sealed", digest, nil, nil)
+        case .degraded(let reason): return ("degraded", reason, nil, nil)
+        case .failed(let reason):   return ("failed", reason, nil, nil)
         case .superseded(let child, let tick):
             return ("superseded", nil, child.uuidString, tick)
         }
@@ -245,9 +253,14 @@ public final class SQLiteSessionCatalogue: SessionCatalogue {
                                    supersededBy: String?,
                                    supersededAt: Int?) -> SessionState {
         switch name {
+        case "created":     return .created
+        case "stopping":    return .stopping
         case "completed":   return .completed
         case "interrupted": return .interrupted
+        case "archived":    return .archived
         case "sealed":      return .sealed(digest: digest ?? "")
+        case "degraded":    return .degraded(reason: digest ?? "unknown")
+        case "failed":      return .failed(reason: digest ?? "unknown")
         case "superseded":
             guard let supersededBy, let child = UUID(uuidString: supersededBy) else {
                 // A superseded row that lost its child is corrupt. Reading it as interrupted is the

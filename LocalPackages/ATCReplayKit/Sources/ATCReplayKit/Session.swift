@@ -99,10 +99,27 @@ public enum SessionOrigin: Equatable, Sendable {
 // MARK: - State
 
 /// Where a session is in its life.
+///
+/// One value rather than a set of booleans — see `SessionLifecycle` for the machine and for why. Every legal
+/// move is enumerated there; an illegal one throws.
 public enum SessionState: Equatable, Sendable {
+
+    /// A manifest exists; no events yet.
+    case created
 
     /// Accepting events.
     case recording
+
+    /// A write failed and the exercise carried on. **Still recording** — the events already on disk are
+    /// valid, and the recording is incomplete from that point. Cannot be sealed, so an incomplete
+    /// assessment cannot pass for a finished one.
+    case degraded(reason: String)
+
+    /// Being torn down: flushing, and sealing if it is an assessment. Events are no longer accepted.
+    ///
+    /// A state rather than a moment, because sealing is real work and something has to describe a session
+    /// that is neither recording nor finished.
+    case stopping
 
     /// Finished, and not sealed. The terminal state for training.
     case completed
@@ -115,18 +132,41 @@ public enum SessionState: Equatable, Sendable {
     /// to the end. Labelling that honestly matters more than salvaging the result.
     case interrupted
 
+    /// Could not proceed at all — a manifest that would not write, storage that is unusable.
+    ///
+    /// Distinct from `degraded`: that has a partial recording worth keeping, this has nothing.
+    case failed(reason: String)
+
     /// Superseded by a fork. The events after the fork point are kept, not deleted: comparing what
     /// the trainee did the first time against what they did the second is the whole value of
     /// branching for training.
     case superseded(by: SessionID, at: Int)
 
-    public var acceptsEvents: Bool { self == .recording }
+    /// Moved out of the way — compressed, or pushed to storage. Restorable.
+    case archived
+
+    /// Whether the log will take more events.
+    ///
+    /// True while degraded, because the exercise is still running: a further event may fail to write, and
+    /// that is different from refusing to try.
+    public var acceptsEvents: Bool {
+        switch self {
+        case .recording, .degraded: return true
+        default:                    return false
+        }
+    }
 
     /// Whether a result from this session may be scored.
+    ///
+    /// `degraded` is excluded deliberately: part of the exercise was not recorded, so a replay cannot show
+    /// what happened, and a grade nobody can check against the record is not a grade.
     public var isScoreable: Bool {
         switch self {
-        case .sealed, .completed:                  return true
-        case .recording, .interrupted, .superseded: return false
+        case .sealed, .completed:
+            return true
+        case .created, .recording, .stopping, .degraded, .interrupted, .failed,
+             .superseded, .archived:
+            return false
         }
     }
 }
@@ -207,39 +247,29 @@ public struct Session: Equatable, Sendable, Identifiable {
 
     // MARK: Transitions
 
-    /// Ends the session. An assessment needs a digest; training does not take one.
+    /// Ends the session, going through `stopping` as the machine requires.
     ///
-    /// Returns nil when the transition is not allowed, rather than trapping: finishing a session that
-    /// is already finished is a plausible thing for a UI to try twice, and it should be a no-op
-    /// rather than a crash.
-    public func finished(digest: String? = nil) -> Session? {
-        guard state == .recording else { return nil }
-        var copy = self
-        switch (sessionClass, digest) {
-        case (.assessment, let digest?): copy.state = .sealed(digest: digest)
-        case (.assessment, nil):         return nil     // an assessment must be sealed
-        case (.training, _):             copy.state = .completed
-        }
-        return copy
+    /// Throws on an illegal move rather than returning nil — see `Session.transitioned(to:)`. Kept as a
+    /// convenience over the machine because ending a session is two moves and every caller wants both.
+    public func finished(tickCount: Int? = nil, digest: String? = nil) throws -> Session {
+        let stopping = try self.stopping(tickCount: tickCount ?? self.tickCount)
+        return try stopping.completed(digest: digest)
     }
 
-    /// Marks a session whose process died. Always allowed from `.recording`, since the whole point
-    /// is to describe an ending nobody chose.
+    /// Marks a session whose process died.
+    ///
+    /// Tolerant of an already-terminal state, and only this one is: the whole point is to describe an ending
+    /// nobody chose, and a recovery sweep should not throw over a session that had already finished.
     public func interrupted() -> Session {
-        guard state == .recording else { return self }
-        var copy = self
-        copy.state = .interrupted
-        return copy
+        (try? transitioned(to: .interrupted)) ?? self
     }
 
     /// Records that a fork now carries this session's future forward.
     ///
     /// The events after `tick` stay where they are. This marks the session as no longer the active
     /// line, not as deleted.
-    public func superseded(by child: SessionID, at tick: Int) -> Session {
-        var copy = self
-        copy.state = .superseded(by: child, at: tick)
-        return copy
+    public func superseded(by child: SessionID, at tick: Int) throws -> Session {
+        try transitioned(to: .superseded(by: child, at: tick))
     }
 
     /// A new session continuing from `tick` of this one.

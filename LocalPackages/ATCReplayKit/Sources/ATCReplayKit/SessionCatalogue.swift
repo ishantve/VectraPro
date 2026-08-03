@@ -165,9 +165,11 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public func isScoreable(on environment: RecordingEnvironment) -> Bool {
         guard isReproducible(on: environment) else { return false }
         switch state {
-        case .sealed:                                return true
-        case .completed:                             return sessionClass == .training
-        case .recording, .interrupted, .superseded:  return false
+        case .sealed:    return true
+        case .completed: return sessionClass == .training
+        case .created, .recording, .stopping, .degraded, .interrupted, .failed,
+             .superseded, .archived:
+            return false
         }
     }
 
@@ -175,11 +177,17 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public func unscoreableReason(on environment: RecordingEnvironment) -> String? {
         if isScoreable(on: environment) { return nil }
         switch state {
+        case .created:     return "Not started"
         case .recording:   return "Still recording"
+        case .stopping:    return "Finishing"
+        case .degraded(let reason):
+            return "Part of this exercise was not recorded — \(reason)"
         case .interrupted: return sessionClass == .assessment
             ? "Interrupted before it was sealed — not a complete assessment"
             : "Interrupted"
+        case .failed(let reason): return "Recording failed — \(reason)"
         case .superseded:  return "Superseded by a branch"
+        case .archived:    return "Archived"
         case .completed where sessionClass == .assessment:
             return "Not sealed"
         default: break

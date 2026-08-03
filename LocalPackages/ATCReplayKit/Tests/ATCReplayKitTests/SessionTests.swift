@@ -102,10 +102,10 @@ final class SessionTests: XCTestCase {
     /// Superseding marks a session as no longer the active line. It does **not** delete the events
     /// after the fork: comparing what the trainee did the first time against the second is the whole
     /// value of branching.
-    func testSupersedingRecordsTheForkWithoutEndingTheSession() {
-        let parent = session(.selfDirected)
+    func testSupersedingRecordsTheForkWithoutEndingTheSession() throws {
+        let parent = try session(.selfDirected).finished()
         let child = parent.forking(at: 600)
-        let superseded = parent.superseded(by: child.id, at: 600)
+        let superseded = try parent.superseded(by: child.id, at: 600)
 
         XCTAssertEqual(superseded.state, .superseded(by: child.id, at: 600))
         XCTAssertEqual(superseded.id, parent.id, "superseding must not change identity")
@@ -113,29 +113,35 @@ final class SessionTests: XCTestCase {
 
     // MARK: - Finishing
 
-    func testTrainingCompletesWithoutASeal() {
-        let finished = session(.selfDirected).finished()
-        XCTAssertEqual(finished?.state, .completed)
+    func testTrainingCompletesWithoutASeal() throws {
+        XCTAssertEqual(try session(.selfDirected).finished().state, .completed)
     }
 
     /// An assessment must be sealed to finish. Refusing the transition is how the type prevents an
     /// unsealed assessment ever looking complete.
-    func testAnAssessmentCannotCompleteWithoutASeal() {
+    func testAnAssessmentCannotCompleteWithoutASeal() throws {
         let assessed = session(.assignment(UUID(), assignedBy: "i1"))
-        XCTAssertNil(assessed.finished(), "an assessment completed without being sealed")
-        XCTAssertEqual(assessed.finished(digest: "abc123")?.state, .sealed(digest: "abc123"))
+        XCTAssertThrowsError(try assessed.finished()) { error in
+            XCTAssertEqual(error as? SessionStateError, .sealRequired)
+        }
+        XCTAssertEqual(try assessed.finished(digest: "abc123").state, .sealed(digest: "abc123"))
     }
 
     /// Finishing twice is a plausible thing for a UI to do, and should be a no-op rather than a crash.
-    func testFinishingAnAlreadyFinishedSessionIsRefusedRatherThanFatal() {
-        let finished = session(.selfDirected).finished()!
-        XCTAssertNil(finished.finished())
+    /// Throws naming both states rather than trapping or silently no-op'ing — a UI can plausibly try twice,
+    /// and a skipped transition is the failure the machine exists to prevent.
+    func testFinishingAnAlreadyFinishedSessionThrowsNamingBothStates() throws {
+        let finished = try session(.selfDirected).finished()
+        XCTAssertThrowsError(try finished.finished()) { error in
+            XCTAssertEqual(error as? SessionStateError,
+                           .illegalTransition(from: "completed", to: "stopping"))
+        }
     }
 
-    func testAnInterruptedSessionCanOnlyComeFromRecording() {
+    func testAnInterruptedSessionCanOnlyComeFromRecording() throws {
         XCTAssertEqual(session(.selfDirected).interrupted().state, .interrupted)
 
-        let completed = session(.selfDirected).finished()!
+        let completed = try session(.selfDirected).finished()
         XCTAssertEqual(completed.interrupted().state, .completed,
                        "a finished session must not be reopened as interrupted")
     }
@@ -150,8 +156,8 @@ final class SessionTests: XCTestCase {
         XCTAssertFalse(crashed.isScoreable)
     }
 
-    func testASealedAssessmentIsScoreable() {
-        let sealed = session(.assignment(UUID(), assignedBy: "i1")).finished(digest: "abc")!
+    func testASealedAssessmentIsScoreable() throws {
+        let sealed = try session(.assignment(UUID(), assignedBy: "i1")).finished(digest: "abc")
         XCTAssertTrue(sealed.isScoreable)
     }
 
@@ -161,11 +167,12 @@ final class SessionTests: XCTestCase {
         XCTAssertFalse(session(.assignment(UUID(), assignedBy: "i1")).isScoreable)
     }
 
-    func testASupersededSessionIsNotScoreable() {
-        XCTAssertFalse(session(.selfDirected).superseded(by: UUID(), at: 10).isScoreable)
+    func testASupersededSessionIsNotScoreable() throws {
+        let finished = try session(.selfDirected).finished()
+        XCTAssertFalse(try finished.superseded(by: UUID(), at: 10).isScoreable)
     }
 
-    func testACompletedTrainingSessionIsScoreable() {
-        XCTAssertTrue(session(.selfDirected).finished()!.isScoreable)
+    func testACompletedTrainingSessionIsScoreable() throws {
+        XCTAssertTrue(try session(.selfDirected).finished().isScoreable)
     }
 }

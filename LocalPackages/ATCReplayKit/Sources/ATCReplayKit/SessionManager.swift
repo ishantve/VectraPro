@@ -211,9 +211,7 @@ public final class SessionManager {
         guard var session = active else { throw SessionManagerError.notRecording }
         session.tickCount = tickCount
 
-        guard let finished = session.finished(digest: digest) else {
-            throw SessionManagerError.notRecording
-        }
+        let finished = try session.finished(tickCount: tickCount, digest: digest)
         try record(finished)
         active = nil
         activeManifest = nil
