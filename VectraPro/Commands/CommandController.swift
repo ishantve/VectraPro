@@ -29,6 +29,7 @@
 
 import Foundation
 import ATCParserKit
+import ATCReplayKit
 import ATCSimKit
 
 final class CommandController {
@@ -85,6 +86,78 @@ final class CommandController {
         report(partiallyUnrecognized: result.unrecognized)
     }
 
+    // MARK: - Performing one instruction
+
+    /// What performing one instruction produced.
+    ///
+    /// A value rather than side effects on the caller, so `perform` can be reused by a path that composes
+    /// several replies (voice) and one that has a single instruction (the keypad) without either learning
+    /// about the other.
+    struct PerformResult: Equatable {
+
+        /// Simulator effects to apply. Empty for a communication-only instruction or a refusal.
+        var effects: [AircraftCommand] = []
+
+        /// Whether the instruction earned a reply. False when it was refused — a refusal is spoken as an
+        /// error, not answered as a readback.
+        var earnedReply = false
+
+        static let refused = PerformResult()
+    }
+
+    /// Validate one understood instruction and turn it into effects.
+    ///
+    /// **The single place a phraseology code becomes simulator behaviour**, and therefore the single place
+    /// recording will hook. Both the microphone and the keypad arrive here, so `CommandMapping.map` has one
+    /// call site and the validation around it cannot drift between the two.
+    ///
+    /// Refusals are reported here rather than returned, because every refusal is spoken the same way
+    /// wherever it came from, and threading them back out would only give each caller a chance to phrase
+    /// them differently.
+    ///
+    /// `source` is not used yet. It is in the signature now because it is what recording needs and adding
+    /// it later would touch every call site again.
+    @discardableResult
+    func perform(code: String,
+                 callsign: String?,
+                 slots: some CommandSlots,
+                 source: EventSource,
+                 category: @autoclosure () -> String,
+                 namedPoints: [String] = []) -> PerformResult {
+
+        let target = callsign.flatMap { mapViewModel?.resolveRadarCallsign(from: $0) }
+
+        // Every point the instruction names is checked before the pilot agrees to it. Accepting "report
+        // passing XYZ" for a point that does not exist means the instruction can never be carried out, and
+        // nothing would ever explain the silence.
+        if !namedPoints.isEmpty, let mapViewModel,
+           case .rejected(let reason) = CommandValidator.validate(fixNames: namedPoints,
+                                                                  context: mapViewModel.validationContext) {
+            feedback.commandError(reason)
+            return .refused
+        }
+
+        // A question about an aircraft nobody found cannot be answered. Falling through would speak the
+        // affirmative branch — telling the controller a level is being maintained without having checked.
+        if CommandMapping.answeredFromAircraft.contains(code), aircraft(for: target) == nil {
+            feedback.aircraftNotFound()
+            return .refused
+        }
+
+        switch CommandMapping.map(code: code, slots: slots) {
+        case .commands(let mapped):
+            return PerformResult(effects: mapped, earnedReply: true)
+        case .communicationOnly:
+            // No effect by design — a report, a standby, an acknowledgement.
+            return PerformResult(effects: [], earnedReply: true)
+        case .unmapped:
+            // Recognised phraseology the simulator has not implemented. Reported rather than ignored, so a
+            // gap in the mapping table cannot pass for a command that worked.
+            feedback.commandError("Unable, \(category()) instruction not implemented")
+            return .refused
+        }
+    }
+
     // MARK: - Routing one aircraft's instructions
 
     private func route(_ commands: [RecognizedCommand], callsign: String?) {
@@ -108,37 +181,14 @@ final class CommandController {
                 continue
 
             case .ok:
-                // Every point the command names is checked before the pilot agrees
-                // to it. Accepting "report passing XYZ" or "level change at XYZ" for
-                // a point that does not exist means the instruction can never be
-                // carried out, and nothing would ever explain the silence.
-                if case .rejected(let reason) = namedPointRejection(for: command) {
-                    feedback.commandError(reason)
-                    continue
-                }
-
-                // A question about an aircraft nobody found cannot be answered.
-                // Falling through would speak the affirmative branch — telling the
-                // controller a level is being maintained without having checked.
-                if CommandMapping.answeredFromAircraft.contains(command.code),
-                   aircraft(for: target) == nil {
-                    feedback.aircraftNotFound()
-                    continue
-                }
-                switch CommandMapping.map(code: command.code, slots: command) {
-                case .commands(let mapped):
-                    effects.append(contentsOf: mapped)
-                    spoken.append(command)
-                case .communicationOnly:
-                    // No effect by design — a report, a standby, an acknowledgement.
-                    spoken.append(command)
-                case .unmapped:
-                    // Recognised phraseology the simulator has not implemented.
-                    // Reported rather than ignored, so a gap in the mapping table
-                    // cannot pass for a command that worked.
-                    feedback.commandError(
-                        "Unable, \(command.category) instruction not implemented")
-                }
+                let result = perform(code: command.code,
+                                     callsign: callsign,
+                                     slots: command,
+                                     source: .voice,
+                                     category: command.category,
+                                     namedPoints: Self.namedPoints(in: command))
+                effects.append(contentsOf: result.effects)
+                if result.earnedReply { spoken.append(command) }
             }
         }
 
@@ -236,15 +286,15 @@ final class CommandController {
     /// Reads the fix-shaped slots rather than the command's effect, so it covers
     /// phraseology that names a point without changing anything — a report, or a
     /// level change coordinated "at" a point — as well as a hold or a direct routing.
-    private func namedPointRejection(for command: RecognizedCommand) -> CommandValidator.Result {
-        guard let mapViewModel else { return .ok }
-        let named = command.slots.compactMap { slot -> String? in
+    /// The places an instruction names.
+    ///
+    /// Pulled out of the recognised command so `perform` can take names rather than a `RecognizedCommand` —
+    /// which is what lets the keypad share it, since a keypress has no recognised command.
+    static func namedPoints(in command: RecognizedCommand) -> [String] {
+        command.slots.compactMap { slot in
             guard slot.kind == .fix, case .fix(let name)? = slot.value else { return nil }
             return name
         }
-        guard !named.isEmpty else { return .ok }
-        return CommandValidator.validate(fixNames: named,
-                                         context: mapViewModel.validationContext)
     }
 
     /// Says so when phraseology was understood but cannot be answered.

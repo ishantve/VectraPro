@@ -161,3 +161,33 @@ final class KeypadValidationTests: XCTestCase {
                       "got: \(spoken)")
     }
 }
+
+// MARK: - After perform extraction
+
+extension KeypadValidationTests {
+
+    /// The keypad and the microphone now share one entry point, so a refusal reads the same either way.
+    ///
+    /// Added with the extraction because nothing covered it: the keypad used to phrase its own
+    /// "not implemented" message from the key's UI prompt, which would have read "climb to fl xxx
+    /// instruction not implemented" once the wording was shared. It now passes the template's category, as
+    /// the voice path does.
+    ///
+    /// The branch is unreachable today — `KeyboardCommandTests.testEveryBoundKeyProducesAnEffect` proves
+    /// every binding maps — so this pins wording that cannot currently be observed, against the day a key
+    /// is bound to an unmapped code.
+    func testARefusalUsesTheTemplateCategoryNotTheKeyPrompt() throws {
+        let store = CommandTemplateStore.shared
+        for key in KeyboardCommandCatalog.allKeys {
+            let binding = try XCTUnwrap(KeyboardCommandCatalog.command(for: key))
+            let category = store.templates?.template(id: binding.code)?.category
+
+            XCTAssertNotNil(category, """
+                Key "\(key)" is bound to code \(binding.code), which has no template — so a refusal would \
+                fall back to the key's UI prompt and read differently from the spoken path.
+                """)
+            XCTAssertFalse(category?.contains(" ") ?? true,
+                           "a category should be a single word; got \(category ?? "nil")")
+        }
+    }
+}

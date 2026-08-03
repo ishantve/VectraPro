@@ -353,7 +353,11 @@ final class MapViewModel: ObservableObject {
 
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
-    private lazy var commandController = CommandController(mapViewModel: self)
+    /// The one path from phraseology to effect.
+    ///
+    /// Not private: the keypad performs through the same controller the microphone does, so
+    /// `CommandMapping.map` has a single call site and the validation around it cannot drift between them.
+    lazy var commands = CommandController(mapViewModel: self)
 
     /// Services 0–360 radials; default set on until the API supplies them.
     let radialManager = RadialManager()
@@ -429,7 +433,7 @@ final class MapViewModel: ObservableObject {
 
     /// Entry point for a transcribed command — parsed & applied centrally.
     func handleVoiceCommand(_ transcript: String) {
-        commandController.process(transcript)
+        commands.process(transcript)
     }
 
     /// Apply parsed commands to the selected aircraft.
