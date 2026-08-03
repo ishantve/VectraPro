@@ -6,6 +6,7 @@
 //
 
 import Combine
+import ATCReplayKit
 import ATCSimKit
 import ATCTrafficKit
 import GeoNavKit
@@ -164,7 +165,11 @@ final class MapViewModel: ObservableObject {
     /// Apply the started exercise: center the radar and derive runways +
     /// enabled approaches from the API. Built once here so UUIDs stay stable
     /// across `reset()`.
-    func applyExercise(_ detail: ExerciseDetail) {
+    func applyExercise(_ detail: ExerciseDetail, payload: Data? = nil) {
+        // Kept so the recording can embed the exercise verbatim. Optional because a test may apply a detail
+        // without one; a session started without it simply records an empty payload rather than refusing.
+        exercisePayload = payload
+        exerciseID = detail.id
         if let lat = detail.mapLatitude, let lon = detail.mapLongitude {
             center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
@@ -353,6 +358,38 @@ final class MapViewModel: ObservableObject {
 
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
+    /// The bytes the backend served for this exercise, embedded in a recording.
+    private var exercisePayload: Data?
+    private var exerciseID: String?
+
+    /// Starts and ends a recording around an exercise. Optional: with none, nothing records and the
+    /// simulation behaves identically — which is the property `InputGatewayTests` pins.
+    var recording: SessionCoordinator?
+
+    /// Who a recording belongs to.
+    ///
+    /// The authenticated backend user when there is one, otherwise a device identity that is stable per
+    /// install — a trainee practising before signing in should not be second-class, and inventing a fake user
+    /// id would be worse than saying "this device".
+    private static func currentOwner() -> OwnerID {
+        if let userId = SessionStore.load()?.userId, !userId.isEmpty {
+            return .user(userId)
+        }
+        return .device(Self.deviceIdentity())
+    }
+
+    private static let deviceIdentityKey = "vectrapro.deviceIdentity"
+
+    private static func deviceIdentity() -> UUID {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: deviceIdentityKey), let uuid = UUID(uuidString: stored) {
+            return uuid
+        }
+        let fresh = UUID()
+        defaults.set(fresh.uuidString, forKey: deviceIdentityKey)
+        return fresh
+    }
+
     /// Where every simulation input is stamped and recorded — see `InputGateway`.
     ///
     /// Owned here because the tick is here. Nothing is recording until a session is started, and with no
@@ -425,7 +462,9 @@ final class MapViewModel: ObservableObject {
          reports: DeferredReportAnnouncing? = nil) {
         self.physics   = physics ?? .shared
         self.collision = collision ?? .shared
-        self.spawner   = spawner ?? .shared
+        // One spawner per simulation, never shared — its shuffled radial cycle is mutable state, and two
+        // simulations sharing it would draw from each other's sequence.
+        self.spawner   = spawner ?? AircraftSpawner()
         self.sideEffects = SideEffectGate(presentation: feedback ?? CommandFeedbackManager.shared)
         self.deferredReports = reports ?? DeferredReportCoordinator.shared
         // The coordinator exists before any view model does, so it cannot be handed the gate at its own
@@ -578,6 +617,9 @@ final class MapViewModel: ObservableObject {
     /// onAppear fires, so exercise config (fixes, zones, etc.) is safe to clear.
     func clearOnExit() {
         stopSimulation()
+        // Left early, so the recording is not a completed exercise. Abandoned rather than completed, and an
+        // assessment abandoned this way is never sealed — which is what stops a partial one being graded.
+        stopRecordingSession()
         clock.reset()
         aircraft = []
         traffic  = []
@@ -641,6 +683,10 @@ final class MapViewModel: ObservableObject {
         wreckageDueTick     = [:]
         streams = RandomStreams(seed: seed)
         spawner.resetRadialCycle(fixes: fixes, rng: &streams.spawner)
+
+        // A new run is a new session. Started here rather than in `applyExercise` because the seed is chosen
+        // here, and the seed is the root of everything a recording reproduces.
+        startRecordingSession(seed: seed)
         // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
         var spawned: [Aircraft] = []
         for category in initialCategories() {
@@ -836,6 +882,8 @@ final class MapViewModel: ObservableObject {
         if exerciseDurationSeconds > 0, elapsedSeconds >= exerciseDurationSeconds {
             isExerciseFinished = true
             stopSimulation()
+            // The exercise ran to its end, so the recording is complete and can be sealed.
+            stopRecordingSession()
         }
     }
 
@@ -881,6 +929,36 @@ final class MapViewModel: ObservableObject {
         traffic.removeAll  { ids.contains($0.id) }
         destroyedAircraftIDs.subtract(ids)
         for id in due { wreckageDueTick[id] = nil }
+    }
+
+    // MARK: - Recording lifecycle
+
+    /// Begins recording this run, if recording is configured.
+    ///
+    /// Silent when it is not, and silent when it fails: the exercise proceeds either way, and nothing in the
+    /// simulation branches on whether a recorder attached.
+    private func startRecordingSession(seed: UInt64) {
+        guard let recording else { return }
+        inputs.recorder = nil
+
+        let recorder = recording.startRecording(
+            exercisePayload: exercisePayload ?? Data(),
+            exerciseID: exerciseID,
+            exerciseName: exerciseName.isEmpty ? nil : exerciseName,
+            seed: seed,
+            owner: Self.currentOwner())
+
+        // The ordinal counter continues from whatever is already in the log, so a resumed session cannot mint
+        // an event id that already exists — ids are derived from `(session, ordinal)`.
+        inputs.resume(after: recorder.flatMap { try? $0.open() })
+        inputs.recorder = recorder
+    }
+
+    /// Ends the recording for this run.
+    private func stopRecordingSession() {
+        guard let recording, inputs.recorder != nil else { return }
+        recording.stopRecording(tickCount: clock.tick)
+        inputs.recorder = nil
     }
 
     /// Fingerprint of the current simulation state.

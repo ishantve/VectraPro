@@ -16,6 +16,7 @@ struct VectraProApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             RootView()
+                .task { Self.prepareRecording() }
         }
         .modelContainer(ConfigStore.shared.container)
 
@@ -26,6 +27,24 @@ struct VectraProApp: App {
             RadarWindowScene()
         }
         .defaultSize(CGSize(width: 800, height: 600))
+    }
+}
+
+extension VectraProApp {
+
+    /// Attaches recording to the radar and sweeps up after a crash.
+    ///
+    /// Once, at launch, and in this order: recovery first, so a session a dead process left open is truncated
+    /// to its last valid frame and marked interrupted **before** a new one starts. Doing it the other way round
+    /// would leave the sweep looking at two open sessions and unable to tell which was this process's.
+    @MainActor
+    static func prepareRecording() {
+        let radar = MapViewModel.shared
+        guard radar.recording == nil else { return }   // idempotent: `.task` can run again
+
+        let coordinator = SessionCoordinator()
+        coordinator.recoverAfterLaunch()
+        radar.recording = coordinator
     }
 }
 

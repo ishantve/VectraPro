@@ -129,8 +129,14 @@ final class CommandController {
 
         // Stamp → Record → Dispatch. Recording happens before the effect so the log explains the session in
         // order; it cannot refuse or alter anything, so an unrecorded run behaves identically.
+        //
+        // When the instruction named no aircraft it goes to the *selected* one, and which aircraft that is
+        // cannot be reconstructed from a seed — selection is something the controller did with their finger.
+        // So it is resolved and recorded here. The replay gate caught this: keypad commands recorded an empty
+        // callsign, and a replay had nothing to aim them at, so it applied none of them.
+        let recordedCallsign = target ?? mapViewModel?.selectedCallsign ?? ""
         mapViewModel?.inputs.submit(SimulationInput(code: code,
-                                                   callsign: target ?? "",
+                                                   callsign: recordedCallsign,
                                                    slots: Self.recordableSlots(slots),
                                                    source: source))
 

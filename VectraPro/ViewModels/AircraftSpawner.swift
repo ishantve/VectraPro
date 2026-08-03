@@ -34,11 +34,11 @@ struct SpawnContext {
 
 final class AircraftSpawner {
 
-    static let shared = AircraftSpawner()
-
-    /// Not private: the spawner carries mutable state — the shuffled radial cycle and its index —
-    /// so two simulations sharing one instance would draw from each other's cycle. A test that
-    /// compares two runs needs a spawner each, and eventually so will two live sessions.
+    /// One per simulation, never shared.
+    ///
+    /// There used to be a `shared` singleton, and it was a determinism hazard: the shuffled radial cycle and
+    /// its index are mutable state, so two simulations sharing one instance drew from each other's cycle and
+    /// neither was reproducible. It was invisible for as long as only one simulation existed at a time.
     init() {}
 
     /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated
@@ -55,11 +55,71 @@ final class AircraftSpawner {
     private var radialCycle: [Radial] = []
     private var radialCycleIndex = 0
 
+    /// The shuffle, as indices into the unshuffled list. Kept alongside the cycle so the state can be
+    /// captured without having to search for each radial's original position.
+    private var radialOrder: [Int] = []
+
     /// Build and shuffle the radial list from the exercise fixes.
     /// Call this once at `reset()` so every exercise gets a fresh, consistent order.
     func resetRadialCycle(fixes: [ExerciseDetail.Fix], rng: inout SeededGenerator) {
-        radialCycle = rng.shuffle(buildRadialList(fixes: fixes))
+        let available = buildRadialList(fixes: fixes)
+        // The permutation is drawn, then applied — so the order can be recorded, which is what makes the
+        // cycle restorable without storing coordinates.
+        let order = rng.shuffle(Array(available.indices))
+        radialCycle = order.map { available[$0] }
+        radialOrder = order
         radialCycleIndex = 0
+    }
+
+    // MARK: - Simulation state
+
+    /// The spawner's share of the simulation's state.
+    ///
+    /// The cycle is stored as **indices into the radial list derived from the exercise fixes**, not as the
+    /// radials themselves. The list is a deterministic function of the fixes, so a permutation of indices is
+    /// compact, and — more importantly — it cannot disagree with the exercise it came from. Storing
+    /// coordinates would let a restored cycle point at radials the current exercise does not have.
+    struct State: Equatable, Codable, Sendable {
+        let cycleOrder: [Int]
+        let cycleIndex: Int
+    }
+
+    /// What this spawner would need to be rebuilt.
+    var state: State {
+        State(cycleOrder: radialOrder, cycleIndex: radialCycleIndex)
+    }
+
+    /// Rebuilds the cycle from `state`, or changes nothing.
+    ///
+    /// **Atomic.** Everything is validated and built before any property is written, so a rejected restore
+    /// leaves the spawner exactly as it was — a half-restored cycle would spawn arrivals from radials the
+    /// exercise does not have, and nothing would report it.
+    ///
+    /// Throws rather than clamping. An out-of-range index means the state and the exercise do not belong
+    /// together, and quietly using whichever radials happen to fit would produce a plausible wrong world.
+    func restore(_ state: State, fixes: [ExerciseDetail.Fix]) throws {
+        let available = buildRadialList(fixes: fixes)
+
+        guard state.cycleOrder.allSatisfy({ available.indices.contains($0) }) else {
+            throw RestoreError.radialIndexOutOfRange(order: state.cycleOrder,
+                                                    available: available.count)
+        }
+        guard Set(state.cycleOrder).count == state.cycleOrder.count else {
+            throw RestoreError.duplicateRadialIndices
+        }
+        guard state.cycleIndex >= 0 else { throw RestoreError.negativeCycleIndex(state.cycleIndex) }
+
+        // Built first, assigned last: nothing above has touched `self`.
+        let rebuilt = state.cycleOrder.map { available[$0] }
+        radialCycle = rebuilt
+        radialOrder = state.cycleOrder
+        radialCycleIndex = state.cycleIndex
+    }
+
+    enum RestoreError: Error, Equatable {
+        case radialIndexOutOfRange(order: [Int], available: Int)
+        case duplicateRadialIndices
+        case negativeCycleIndex(Int)
     }
 
     /// Next radial in round-robin order; nil when the cycle is empty.

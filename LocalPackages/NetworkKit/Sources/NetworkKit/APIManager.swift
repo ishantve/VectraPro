@@ -127,6 +127,20 @@ public final class APIManager {
         return try decode(data)
     }
 
+    /// The decoded value **and** the bytes it came from.
+    ///
+    /// For a caller that has to keep the payload verbatim — a recording embeds the exercise configuration as
+    /// the bytes the backend actually served, because re-encoding a decoded copy could differ and a replay
+    /// against a different configuration is a replay of a different world.
+    public func requestWithPayload<Response: Decodable>(
+        _ path: String, method: HTTPMethod,
+        query: [URLQueryItem]? = nil, headers: [String: String] = [:]
+    ) async throws -> (value: Response, payload: Data) {
+        let data = try await sendData(path, method: method, bodyData: nil,
+                                     query: query, headers: headers)
+        return (try decode(data), data)
+    }
+
     @discardableResult
     public func requestData<Body: Encodable>(
         _ path: String, method: HTTPMethod, body: Body,
@@ -274,6 +288,14 @@ public extension APIManager {
     ) async throws -> Response {
         try await request(endpoint.path, method: endpoint.method,
                           query: endpoint.query, headers: headers)
+    }
+
+    /// Bodyless request → decoded response **and** the bytes it came from.
+    func requestWithPayload<Response: Decodable>(
+        _ endpoint: some APIEndpoint, headers: [String: String] = [:]
+    ) async throws -> (value: Response, payload: Data) {
+        try await requestWithPayload(endpoint.path, method: endpoint.method,
+                                     query: endpoint.query, headers: headers)
     }
 
     /// Request with an Encodable body → decoded response.

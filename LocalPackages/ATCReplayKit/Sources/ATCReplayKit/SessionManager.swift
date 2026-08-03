@@ -200,6 +200,18 @@ public final class SessionManager {
         return session
     }
 
+    /// Replaces the active session with a moved-on version of itself.
+    ///
+    /// For a transition the manager did not drive — a recorder degrading mid-exercise. Checked rather than
+    /// trusted: swapping in a different session would silently detach the recorder from what it is recording.
+    public func replaceActive(with session: Session) throws {
+        guard let active, active.id == session.id else {
+            throw SessionManagerError.notRecording
+        }
+        try record(session)
+        self.active = session
+    }
+
     // MARK: Ending
 
     /// Ends the active session.
