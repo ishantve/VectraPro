@@ -14,9 +14,20 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "ATCReplayKit", targets: ["ATCReplayKit"]),
+        .library(name: "ATCReplayStore", targets: ["ATCReplayStore"]),
     ],
     targets: [
+        // The portable core: sessions, events, manifests, managers. Foundation only.
         .target(name: "ATCReplayKit"),
-        .testTarget(name: "ATCReplayKitTests", dependencies: ["ATCReplayKit"]),
+
+        // The catalogue's SQLite implementation, split out so the core stays free of a platform
+        // library. The catalogue is the one part that genuinely wants a database — it answers queries
+        // and wants transactions — and this is where that dependency is confined.
+        .target(name: "ATCReplayStore",
+                dependencies: ["ATCReplayKit"],
+                linkerSettings: [.linkedLibrary("sqlite3")]),
+
+        .testTarget(name: "ATCReplayKitTests",
+                    dependencies: ["ATCReplayKit", "ATCReplayStore"]),
     ]
 )

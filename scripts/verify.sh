@@ -25,7 +25,15 @@ packages() {
   for package in ATCSimKit ATCTrafficKit ATCReplayKit NetworkKit; do
     printf '  %-16s' "$package"
     if swift test --package-path "LocalPackages/$package" >/tmp/verify-$package.log 2>&1; then
-      grep -Eo 'Executed [0-9]+ tests, with [0-9]+ failures' /tmp/verify-$package.log | tail -1
+      # The largest count, not the last line: `swift test` prints a summary per suite as well as one
+      # overall, and which comes last is not fixed — reading `tail -1` reported a single suite's
+      # total as the whole package's, which looked like tests had vanished.
+      grep -Eo 'Executed [0-9]+ tests' /tmp/verify-$package.log \
+        | awk '{ if ($2 > max) max = $2 } END { print max " tests" }'
+      # Anchored on "failures", because a skipped-test summary also has a number after "with" —
+      # matching that reported failures in a suite that had none.
+      grep -qE 'with [1-9][0-9]* failure' /tmp/verify-$package.log \
+        && { echo "    HAS FAILURES — see /tmp/verify-$package.log"; return 1; } || true
     else
       echo "FAILED — see /tmp/verify-$package.log"; return 1
     fi
