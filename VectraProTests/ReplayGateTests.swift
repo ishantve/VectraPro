@@ -112,7 +112,7 @@ final class ReplayGateTests: XCTestCase {
         // which meant it was validating test code: the engine could have been wrong in exactly the way the
         // driver was right. Now the thing that ships is the thing under test.
         let replayed = makeSimulation()
-        let engine = ReplayEngine(radar: replayed, sessions: coordinator.sessions)
+        let engine = ReplayEngine(radar: replayed, recording: coordinator)
         let loaded = try engine.load(sessionID)
 
         XCTAssertEqual(loaded.manifest.seed, seed, "the seed did not survive the recording")

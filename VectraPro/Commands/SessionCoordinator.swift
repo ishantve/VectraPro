@@ -131,6 +131,51 @@ final class SessionCoordinator {
         }
     }
 
+    // MARK: - Branching
+
+    /// Forks `parent` at `tick` and begins recording the branch.
+    ///
+    /// A branch is a **new** session: new id, new manifest, new log. The parent is marked superseded and
+    /// otherwise untouched — its events after the fork point are kept, because comparing what the trainee did
+    /// the first time against the second is the whole value of branching.
+    ///
+    /// ── The parent's inputs up to the fork are copied in ──────────────────────
+    /// Without this a branch could not be replayed: its own log begins at the fork tick, and reaching that tick
+    /// needs everything that happened before it. The architecture's answer was a state snapshot at the fork
+    /// point; copying the *input prefix* does the same job for a fraction of the bytes — a few hundred events
+    /// rather than a serialised world — and needs no snapshot machinery at all. Which is what recording causes
+    /// rather than state buys: the prefix *is* the state, expressed smaller.
+    ///
+    /// The copies get the branch's own event ids, since an id is `(session, ordinal)`. That is right: they are
+    /// this session's record of those instructions. An annotation on the parent still points at the parent.
+    func branch(from parent: SessionID,
+                at tick: Int,
+                label: String = "") throws -> (session: ATCReplayKit.Session, recorder: SessionRecorder) {
+
+        stopRecording(tickCount: tick)
+
+        let child = try branches.fork(parent, at: tick, label: label)
+        let manifest = try sessions.manifest(for: child.id)
+
+        let store = EventStore(url: sessions.eventLogURL(for: child.id),
+                               sessionClass: child.sessionClass)
+        let recorder = SessionRecorder(sessionID: child.id,
+                                      sessionClass: child.sessionClass,
+                                      manifestBytes: try manifest.encoded(),
+                                      store: store)
+        try recorder.open()
+
+        // The prefix, in order. Positions are preserved so the branch replays the parent's instructions at the
+        // ticks they were issued; only the session they belong to has changed.
+        for event in try sessions.events(for: parent) where event.tick < tick {
+            recorder.record(event)
+        }
+        recorder.flush()
+
+        self.recorder = recorder
+        return (session: child, recorder: recorder)
+    }
+
     // MARK: - Launch recovery
 
     /// Sweeps up sessions a dead process left open.

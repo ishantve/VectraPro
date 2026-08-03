@@ -74,7 +74,8 @@ final class ReplayEngine {
     }
 
     private let radar: MapViewModel
-    private let sessions: SessionManager
+    private let coordinator: SessionCoordinator
+    private var sessions: SessionManager { coordinator.sessions }
 
     /// The single authority on replay state — see `ReplayClock`. The engine writes `position` and reads
     /// everything else; it keeps no playback state of its own.
@@ -90,9 +91,9 @@ final class ReplayEngine {
     /// `clock` is optional rather than defaulted, because a main-actor default argument is evaluated in a
     /// nonisolated context and will not compile — the same pattern every injected dependency in this project
     /// uses for the same reason.
-    init(radar: MapViewModel, sessions: SessionManager, clock: ReplayClock? = nil) {
+    init(radar: MapViewModel, recording: SessionCoordinator, clock: ReplayClock? = nil) {
         self.radar = radar
-        self.sessions = sessions
+        self.coordinator = recording
         self.clock = clock ?? ReplayClock()
     }
 
@@ -312,6 +313,45 @@ final class ReplayEngine {
     /// Back to the first tick.
     func restart() throws {
         try seek(to: 0)
+    }
+
+    // MARK: - 8 · Continue Simulation
+
+    /// Continues live from where the replay is.
+    ///
+    /// **Not a mode change.** A new session with a new id, a new manifest and a new log; the replayed session is
+    /// not modified, only marked superseded. Think of it as starting a recording whose opening world happens to
+    /// equal the replay position — there is no conversion of a replay into a live run, because there is nothing
+    /// to convert.
+    ///
+    /// And no restoration step, which is the payoff of the whole architecture: the World here was reached by
+    /// simulating from the seed, so it *is* a live World. Nothing is loaded, rebuilt or validated — the
+    /// simulation simply carries on, and the only thing that changes is which log new inputs go to.
+    @discardableResult
+    func continueLive(label: String = "") throws -> ATCReplayKit.Session {
+        guard let loaded else { throw LoadError.exerciseUnreadable(UUID()) }
+
+        let forkTick = currentTick
+        tearDown()
+        radar.sideEffects.mode = .live
+
+        let (child, recorder) = try coordinator.branch(from: loaded.sessionID,
+                                                       at: forkTick,
+                                                       label: label)
+
+        // New inputs go to the branch. The counter continues from the prefix that was just copied in, so no
+        // event id is minted twice — ids are `(session, ordinal)`, and the branch's ordinals must stay unique
+        // within it.
+        radar.inputs.resume(after: try recorder.open())
+        radar.inputs.recorder = recorder
+        radar.recording = coordinator
+
+        // The engine is done: this is a live exercise now, not a replay.
+        self.loaded = nil
+        clock.unload()
+
+        radar.startSimulation()
+        return child
     }
 
     /// Feeds one recorded instruction back into the simulation.
