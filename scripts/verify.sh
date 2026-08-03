@@ -22,7 +22,7 @@ WHAT="${1:-all}"
 
 packages() {
   echo "▸ Packages"
-  for package in ATCSimKit ATCTrafficKit NetworkKit; do
+  for package in ATCSimKit ATCTrafficKit ATCReplayKit NetworkKit; do
     printf '  %-16s' "$package"
     if swift test --package-path "LocalPackages/$package" >/tmp/verify-$package.log 2>&1; then
       grep -Eo 'Executed [0-9]+ tests, with [0-9]+ failures' /tmp/verify-$package.log | tail -1

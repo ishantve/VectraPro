@@ -20,6 +20,8 @@ jobs:
         run: swift test --package-path LocalPackages/ATCSimKit
       - name: ATCTrafficKit
         run: swift test --package-path LocalPackages/ATCTrafficKit
+      - name: ATCReplayKit
+        run: swift test --package-path LocalPackages/ATCReplayKit
       - name: NetworkKit
         run: swift test --package-path LocalPackages/NetworkKit
 
