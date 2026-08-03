@@ -663,7 +663,7 @@
 			repositoryURL = "https://github.com/ishantve/ATCParserKit.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.2.0;
+				minimumVersion = 1.3.0;
 			};
 		};
 		A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */ = {
