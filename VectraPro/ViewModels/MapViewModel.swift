@@ -232,44 +232,17 @@ final class MapViewModel: ObservableObject {
         """)
         #endif
 
-        var built: [Runway] = []
-        var enabled: Set<ApproachID> = []
-        var activeLocs: Set<String> = []
-        for rw in detail.runways {
-            let strips = rw.runwayStrips ?? []
-            guard strips.count >= 2,
-                  let aLat = strips[0].stripLatitude, let aLon = strips[0].stripLongitude,
-                  let bLat = strips[1].stripLatitude, let bLon = strips[1].stripLongitude else { continue }
+        let layout = ExerciseRunwayLayout(from: detail.runways)
+        activeLocalizerRunways = layout.activeLocalizerRunways
 
-            let runway = Runway(
-                endA: RunwayThreshold(designator: strips[0].stripName ?? "",
-                                      coordinate: CLLocationCoordinate2D(latitude: aLat, longitude: aLon)),
-                endB: RunwayThreshold(designator: strips[1].stripName ?? "",
-                                      coordinate: CLLocationCoordinate2D(latitude: bLat, longitude: bLon)),
-                lengthMeters: nil
-            )
-            built.append(runway)
-            // Show a localizer only when it's set to display AND is active.
-            if strips[0].displayLocalizer == true && strips[0].activeLocalizer == true {
-                enabled.insert(ApproachID(runwayID: runway.id, side: .a))
-            }
-            if strips[1].displayLocalizer == true && strips[1].activeLocalizer == true {
-                enabled.insert(ApproachID(runwayID: runway.id, side: .b))
-            }
-            // Track which runway ends have an active localizer (intercept-eligible).
-            if strips[0].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[0].stripName ?? "")) }
-            if strips[1].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[1].stripName ?? "")) }
-        }
-        activeLocalizerRunways = activeLocs
-
-        if built.isEmpty {
+        if layout.isEmpty {
             exerciseRunways = nil
             exerciseApproaches = nil
         } else {
-            exerciseRunways = built
-            exerciseApproaches = enabled
-            runways = built
-            enabledApproaches = enabled
+            exerciseRunways = layout.runways
+            exerciseApproaches = layout.enabledApproaches
+            runways = layout.runways
+            enabledApproaches = layout.enabledApproaches
         }
     }
 
@@ -816,19 +789,7 @@ final class MapViewModel: ObservableObject {
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
-        if !acResult.destroyed.isEmpty {
-            let fresh = acResult.destroyed.subtracting(destroyedAircraftIDs)
-            if !fresh.isEmpty {
-                destroyedAircraftIDs.formUnion(fresh)
-                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self else { return }
-                    self.aircraft.removeAll { fresh.contains($0.id) }
-                    self.traffic.removeAll  { fresh.contains($0.id) }
-                    self.destroyedAircraftIDs.subtract(fresh)
-                }
-            }
-        }
+        destroy(acResult.destroyed)
         let yellows = acResult.yellows.subtracting(acResult.destroyed)
         let reds    = acResult.reds.subtracting(acResult.destroyed)
         if yellows != yellowConflictIDs { yellowConflictIDs = yellows }
@@ -836,19 +797,7 @@ final class MapViewModel: ObservableObject {
 
         // Zone boundary collisions.
         let zoneResult = collision.detectZoneConflicts(aircraft: aircraft, zoneShapes: zoneShapes())
-        if !zoneResult.destroyed.isEmpty {
-            let fresh = zoneResult.destroyed.subtracting(destroyedAircraftIDs)
-            if !fresh.isEmpty {
-                destroyedAircraftIDs.formUnion(fresh)
-                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self else { return }
-                    self.aircraft.removeAll { fresh.contains($0.id) }
-                    self.traffic.removeAll  { fresh.contains($0.id) }
-                    self.destroyedAircraftIDs.subtract(fresh)
-                }
-            }
-        }
+        destroy(zoneResult.destroyed)
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.
         if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
@@ -871,6 +820,27 @@ final class MapViewModel: ObservableObject {
         if exerciseDurationSeconds > 0, elapsedSeconds >= exerciseDurationSeconds {
             isExerciseFinished = true
             stopSimulation()
+        }
+    }
+
+    /// How long the wreck stays on the radar before the aircraft leaves the scene.
+    private static let wreckageDisplaySeconds = 1.5
+
+    /// Marks aircraft destroyed, and removes them once the wreck has been shown.
+    ///
+    /// Both collision detectors end the same way and used to say so in two copies. Only
+    /// IDs that were not already destroyed count, so an aircraft caught by both detectors
+    /// on the same tick is scheduled for removal once rather than twice.
+    private func destroy(_ ids: Set<UUID>) {
+        let fresh = ids.subtracting(destroyedAircraftIDs)
+        guard !fresh.isEmpty else { return }
+        destroyedAircraftIDs.formUnion(fresh)
+        if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.wreckageDisplaySeconds) { [weak self] in
+            guard let self else { return }
+            self.aircraft.removeAll { fresh.contains($0.id) }
+            self.traffic.removeAll  { fresh.contains($0.id) }
+            self.destroyedAircraftIDs.subtract(fresh)
         }
     }
 
