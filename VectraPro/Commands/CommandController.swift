@@ -127,6 +127,13 @@ final class CommandController {
 
         let target = callsign.flatMap { mapViewModel?.resolveRadarCallsign(from: $0) }
 
+        // Stamp → Record → Dispatch. Recording happens before the effect so the log explains the session in
+        // order; it cannot refuse or alter anything, so an unrecorded run behaves identically.
+        mapViewModel?.inputs.submit(SimulationInput(code: code,
+                                                   callsign: target ?? "",
+                                                   slots: Self.recordableSlots(slots),
+                                                   source: source))
+
         // Every point the instruction names is checked before the pilot agrees to it. Accepting "report
         // passing XYZ" for a point that does not exist means the instruction can never be carried out, and
         // nothing would ever explain the silence.
@@ -286,6 +293,34 @@ final class CommandController {
     /// Reads the fix-shaped slots rather than the command's effect, so it covers
     /// phraseology that names a point without changing anything — a report, or a
     /// level change coordinated "at" a point — as well as a hold or a direct routing.
+    /// Slot values as text, for the record.
+    ///
+    /// Text rather than typed values because the recording holds phraseology, not simulator types — the same
+    /// reason it holds a code rather than an `AircraftCommand`. A replay re-derives the types by mapping the
+    /// code again, so a fix to that mapping reaches old recordings.
+    static func recordableSlots(_ slots: some CommandSlots) -> [String: String] {
+        var recorded: [String: String] = [:]
+        for name in slots.slotNames {
+            // Occurrences walked rather than asked for as a list, because that is all `CommandSlots`
+            // offers — and a block altitude names `LEVEL` twice, so one value per name would lose half of
+            // it. Joined with a comma, which keeps the wire shape flat for the consumers that will read it.
+            var values: [String] = []
+            var occurrence = 0
+            while true {
+                if let integer = slots.integer(name, occurrence: occurrence) {
+                    values.append(String(integer))
+                } else if let text = slots.text(name, occurrence: occurrence) {
+                    values.append(text)
+                } else {
+                    break
+                }
+                occurrence += 1
+            }
+            if !values.isEmpty { recorded[name] = values.joined(separator: ",") }
+        }
+        return recorded
+    }
+
     /// The places an instruction names.
     ///
     /// Pulled out of the recognised command so `perform` can take names rather than a `RecognizedCommand` —

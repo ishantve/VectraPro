@@ -100,22 +100,29 @@ public final class EventStore {
         self.handle = handle
     }
 
-    /// Appends one event.
+    /// Appends one event and returns the bytes written.
     ///
     /// Refuses an event that would go backwards. The log's order *is* its meaning — a replay walks it
     /// forward — so an out-of-order append is a programming error to surface now, not a mess to sort
     /// out at read time.
-    public func append(_ event: Event) throws {
+    ///
+    /// The frame is returned because the session seal is a digest over exactly these bytes, in this order.
+    /// Handing them back keeps the seal from having to re-encode the event — a re-encoding could differ,
+    /// and a seal only its writer can reproduce is worthless.
+    @discardableResult
+    public func append(_ event: Event) throws -> Data {
         if let last = lastPosition, event.position <= last {
             throw EventStoreError.outOfOrder(attempted: event.position, last: last)
         }
         guard handle != nil else { throw EventStoreError.notWritable(url.path) }
 
-        pending.append(Self.frame(try coder.encode(event)))
+        let frame = Self.frame(try coder.encode(event))
+        pending.append(frame)
         lastPosition = event.position
         count += 1
 
         if sessionClass.flushesEveryEvent { try flush() }
+        return frame
     }
 
     /// Writes anything buffered to the file.

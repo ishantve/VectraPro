@@ -353,6 +353,12 @@ final class MapViewModel: ObservableObject {
 
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
+    /// Where every simulation input is stamped and recorded — see `InputGateway`.
+    ///
+    /// Owned here because the tick is here. Nothing is recording until a session is started, and with no
+    /// recorder attached the gateway only advances a counter, so the simulation behaves identically.
+    lazy var inputs = InputGateway(currentTick: { [weak self] in self?.clock.tick ?? 0 })
+
     /// The one path from phraseology to effect.
     ///
     /// Not private: the keypad performs through the same controller the microphone does, so
