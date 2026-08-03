@@ -174,31 +174,6 @@ final class MapViewModel: ObservableObject {
         obstructions = detail.obstructions
         _zoneShapesDirty = true
 
-        #if DEBUG
-        let holdings = detail.fixes.filter { $0.type?.uppercased() == "HOLDING" }
-        print("📡 HOLDING FIXES FROM API — \(holdings.count) found")
-        for f in holdings {
-            print("""
-              • fixId : \(f.fixId ?? "-")
-                name  : \(f.fixName ?? "-")
-                type  : \(f.type ?? "-")   fixType: \(f.fixType ?? "-")
-                lat   : \(f.latitude.map { String($0) } ?? "-")
-                lon   : \(f.longitude.map { String($0) } ?? "-")
-                radials: \(f.radials?.count ?? 0)
-            """)
-        }
-        #endif
-
-        #if DEBUG
-        print("========== ZONES (\(zones.count)) ==========")
-        for z in zones {
-            print("  zone: id=\(z.zoneId ?? "—")  name=\(z.zoneName ?? "—")  type=\(z.zoneType ?? "—")  isActive=\(String(describing: z.isActive))  color=\(z.color ?? "—")  colliders=\(z.colliders?.count ?? 0)")
-            for (i, c) in (z.colliders ?? []).enumerated() {
-                print("    [\(i)] lat=\(String(describing: c.latitude))  lon=\(String(describing: c.longitude))")
-            }
-        }
-        print("==========================================")
-        #endif
         freqDeparture = detail.frequencyOfDeparture
         freqArrival = detail.frequencyOfArrival
         freqEnroute = detail.frequencyOfEnroute
@@ -213,25 +188,6 @@ final class MapViewModel: ObservableObject {
         // gameEndTime arrives in minutes from the API.
         exerciseDurationSeconds = (detail.gameEndTime ?? 0) * 60
 
-        #if DEBUG
-        print("""
-        ========== EXERCISE DETAIL ==========
-        name: \(detail.exerciseName)   icao: \(detail.icaoCode ?? "—")   airport: \(detail.airportName ?? "—")
-        map: \(detail.mapLatitude ?? 0), \(detail.mapLongitude ?? 0)
-        isMultiMode: \(String(describing: detail.isMultiMode))
-        airspaceCapacity: \(String(describing: detail.airspaceCapacity))
-        aircraftSpawningCount: \(String(describing: detail.aircraftSpawningCount))
-        → initialSpawnCount: \(initialSpawnCount())
-        runways: \(detail.runways.count)   fixes: \(fixes.count)   zones: \(zones.count)   obstructions: \(obstructions.count)
-        airlines (\(airlines.count)): \(airlines.map { "\($0.icaoCode ?? "?")/\($0.callSign ?? "?")" })
-        aircrafts (\(aircraftTypes.count)): \(aircraftTypes.map { "\($0.icaoCode ?? "?")=\($0.model ?? "?") [\($0.icaoWTC ?? "?")]" })
-        freqDeparture: type=\(detail.frequencyOfDeparture?.type ?? "—") flights=\(String(describing: detail.frequencyOfDeparture?.departureFlights)) time=\(String(describing: detail.frequencyOfDeparture?.departureFlightsTimeValue))
-        freqArrival:   type=\(detail.frequencyOfArrival?.type ?? "—") flights=\(String(describing: detail.frequencyOfArrival?.arrivalFlights)) time=\(String(describing: detail.frequencyOfArrival?.arrivalFlightsTimeValue))
-        freqEnroute:   type=\(detail.frequencyOfEnroute?.type ?? "—") flights=\(String(describing: detail.frequencyOfEnroute?.enrouteFlights)) time=\(String(describing: detail.frequencyOfEnroute?.enrouteFlightsTimeValue))
-        =====================================
-        """)
-        #endif
-
         let layout = ExerciseRunwayLayout(from: detail.runways)
         activeLocalizerRunways = layout.activeLocalizerRunways
 
@@ -244,6 +200,8 @@ final class MapViewModel: ObservableObject {
             runways = layout.runways
             enabledApproaches = layout.enabledApproaches
         }
+
+        detail.dumpToConsole(initialSpawnCount: initialSpawnCount())
     }
 
     // MARK: - Runways & approaches
