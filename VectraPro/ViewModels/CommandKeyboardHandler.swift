@@ -30,7 +30,15 @@ final class CommandKeyboardHandler {
     private let store: CommandTemplateStore
     private let renderer = ReadbackRenderer()
 
-    private init(radar: MapViewModel? = nil, store: CommandTemplateStore? = nil) {
+    /// Not private: a test needs a handler pointed at its own view model rather than the shared one, and
+    /// so will a second live session. The defaults keep every existing call site unchanged.
+    /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated, and
+    /// releasing one off the main actor aborts the process. Invisible while this was only ever the shared
+    /// singleton — never released, so the deinit never ran. The third class in this project to need this;
+    /// `IsolatedDeinitScanTests` now covers it.
+    nonisolated deinit { }
+
+    init(radar: MapViewModel? = nil, store: CommandTemplateStore? = nil) {
         self.radar = radar ?? .shared
         self.store = store ?? .shared
     }

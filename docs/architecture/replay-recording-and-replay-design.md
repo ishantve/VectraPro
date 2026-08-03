@@ -141,9 +141,22 @@ value-based implementation and `RecognizedCommand` conforming retroactively. So 
 recognised command, the keyboard passes `StaticCommandSlots`, and **replay passes
 `StaticCommandSlots` built from recorded slots** — no new abstraction, no third code path.
 
-Net effect on existing behaviour: the keypad gains the named-point and `answeredFromAircraft`
-validation it currently lacks. That is a bug fix falling out of the unification, and it needs its own
-tests because it changes what the keypad does.
+**Correction (found while implementing step 1).** I claimed here that the keypad was missing validation
+the voice path performs, and that unifying would fix a live bug. Checked against the actual bindings,
+**that is not reachable today**:
+
+- All fourteen bound keys carry integer slots only — speeds, levels, headings, turns — so there is no
+  `.fix` slot for named-point validation to look at. The check would be a no-op.
+- None of the bound codes is in `CommandMapping.answeredFromAircraft` (216, 258, 409, 430, 443), so no
+  key asks the simulator to answer a question about an aircraft.
+- Every bound key maps to real effects and so goes through `MapViewModel.apply(_:readback:)`, which
+  already refuses when nothing is selected.
+
+So step 1 has no bug to fix, and inventing one would be worse than saying so. What it does instead is
+**pin the current behaviour**, so unification is either provably neutral or shows up as a failure — which
+is the protection that was actually wanted. Plus one test that fails the day a key *is* bound to a code
+needing either check, so the gap becomes real the moment it becomes reachable rather than shipping
+unnoticed.
 
 ---
 

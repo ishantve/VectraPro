@@ -52,6 +52,13 @@ final class IsolatedDeinitScanTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    /// The third singleton to be constructed per-session by tests, and the third to need a nonisolated
+    /// deinit. The pattern is now clear enough to state: **any `final class` in this target that was a
+    /// singleton has an untested deinit**, because a singleton is never released.
+    func testCommandKeyboardHandlerSurvivesRelease() {
+        for _ in 0..<3 { _ = CommandKeyboardHandler() }
+    }
+
     /// Added after a determinism test crashed the process here. The spawner had always been a
     /// singleton, so it was never released and its isolated deinit never ran — the first code to
     /// create one per simulation found it immediately.
