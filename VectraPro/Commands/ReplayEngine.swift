@@ -76,14 +76,33 @@ final class ReplayEngine {
     private let radar: MapViewModel
     private let sessions: SessionManager
 
+    /// The single authority on replay state — see `ReplayClock`. The engine writes `position` and reads
+    /// everything else; it keeps no playback state of its own.
+    let clock: ReplayClock
+
     private(set) var loaded: Loaded?
 
-    init(radar: MapViewModel, sessions: SessionManager) {
+    /// Paces playback. The one wall-clock dependency replay has, and it decides *when* to step, never how
+    /// much — each fire advances exactly one simulated second, so a replay at 30× reaches the same state as one
+    /// at 1×. The same separation the live simulation relies on.
+    private var timer: Timer?
+
+    /// `clock` is optional rather than defaulted, because a main-actor default argument is evaluated in a
+    /// nonisolated context and will not compile — the same pattern every injected dependency in this project
+    /// uses for the same reason.
+    init(radar: MapViewModel, sessions: SessionManager, clock: ReplayClock? = nil) {
         self.radar = radar
         self.sessions = sessions
+        self.clock = clock ?? ReplayClock()
     }
 
     nonisolated deinit { }
+
+    /// Stops the timer. Not in `deinit`, which is nonisolated and cannot touch it.
+    func tearDown() {
+        timer?.invalidate()
+        timer = nil
+    }
 
     // MARK: - 1 · Loading
 
@@ -99,11 +118,7 @@ final class ReplayEngine {
         guard manifest.payloadIsIntact else {
             throw LoadError.payloadCorrupt(sessionID)
         }
-        guard let detail = try? JSONDecoder().decode(ExerciseDetailResponse.self,
-                                                    from: manifest.exercise.payload).record
-                ?? JSONDecoder().decode(ExerciseDetail.self, from: manifest.exercise.payload) else {
-            throw LoadError.exerciseUnreadable(sessionID)
-        }
+        let detail = try Self.exercise(from: manifest, sessionID: sessionID)
 
         let events = try sessions.events(for: sessionID)
         var inputs: [Int: [Event]] = [:]
@@ -141,24 +156,46 @@ final class ReplayEngine {
         radar.stopSimulation()
 
         self.loaded = loaded
+        clock.load(bounds: 0...loaded.lastTick)
         return loaded
     }
 
-    // MARK: - 2 · Clock
+    /// Releases the recording and returns the transport to nothing.
+    func unload() {
+        tearDown()
+        loaded = nil
+        clock.unload()
+    }
 
-    /// Where the replay is, in simulated seconds. The simulation's own clock — replay does not keep a second
-    /// one, because two clocks are two things that have to agree.
+    /// The exercise a recording embedded.
+    ///
+    /// Tries the wrapped response shape first, then the bare detail, because a payload may have been served
+    /// either way and a recording should not become unreadable over an envelope.
+    static func exercise(from manifest: SessionManifest,
+                        sessionID: SessionID? = nil) throws -> ExerciseDetail {
+        if let wrapped = try? JSONDecoder().decode(ExerciseDetailResponse.self,
+                                                  from: manifest.exercise.payload).record {
+            return wrapped
+        }
+        if let bare = try? JSONDecoder().decode(ExerciseDetail.self, from: manifest.exercise.payload) {
+            return bare
+        }
+        throw LoadError.exerciseUnreadable(sessionID ?? manifest.sessionID)
+    }
+
+    // MARK: - 2 · Clock
+    //
+    // Read through, not duplicated. `ReplayClock` is the authority and these are conveniences so callers need
+    // not reach past the engine; `progress`, `isAtEnd` and the transport predicates live there and are not
+    // recomputed here.
+
+    /// Where the simulation actually is. The clock mirrors this, and `testTheClockNeverDisagreesWithTheSimulation`
+    /// pins that they do not drift.
     var currentTick: Int { radar.elapsedSeconds }
 
     var lastTick: Int { loaded?.lastTick ?? 0 }
-
-    /// How far through, 0…1. For a scrubber.
-    var progress: Double {
-        guard lastTick > 0 else { return 0 }
-        return min(1, Double(currentTick) / Double(lastTick))
-    }
-
-    var isAtEnd: Bool { currentTick >= lastTick }
+    var progress: Double { clock.progress }
+    var isAtEnd: Bool { clock.isAtEnd }
 
     // MARK: - 3 · Scheduler · 4 · Injection
 
@@ -176,6 +213,7 @@ final class ReplayEngine {
             inject(event)
         }
         radar.advanceStep()
+        clock.advanced(to: radar.elapsedSeconds)
         return true
     }
 
@@ -187,6 +225,93 @@ final class ReplayEngine {
         radar.sideEffects.suppressing {
             while currentTick < tick, stepForward() {}
         }
+    }
+
+    // MARK: - 5 · Timeline controls
+
+    /// Starts advancing on a timer.
+    ///
+    /// A watched replay speaks: the mode is `.replaying`, so readbacks play but nothing reports outward — a
+    /// replay is not a second exercise, and counting it as one would inflate every statistic each time a
+    /// session is reviewed.
+    func play() throws {
+        try clock.play()
+        radar.sideEffects.mode = .replaying
+        schedule()
+    }
+
+    func pause() throws {
+        try clock.pause()
+        tearDown()
+        radar.sideEffects.mode = .live
+    }
+
+    /// Changes speed, restarting the timer at the new interval if it is running.
+    ///
+    /// Only the interval changes. Folding speed into the step size is how a replay stops reaching the same
+    /// state as the recording.
+    func setSpeed(_ speed: Int) {
+        clock.setSpeed(speed)
+        if clock.isRunning { schedule() }
+    }
+
+    private func schedule() {
+        tearDown()
+        let timer = Timer(timeInterval: clock.tickInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onTimerFire() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func onTimerFire() {
+        guard clock.isRunning else { return tearDown() }
+        if !stepForward() {
+            // Reached the end. The clock moves itself to `.paused`; the timer has nothing left to do.
+            tearDown()
+            radar.sideEffects.mode = .live
+        }
+    }
+
+    // MARK: - 6 · Seeking
+
+    /// Moves the replay to `tick`.
+    ///
+    /// Forward from here is stepping. Backward means starting again and re-simulating, because this simulation
+    /// is not invertible — collision destruction, spawning and hold capture destroy information, and an
+    /// `unstep` would be a second physics implementation obliged to agree with the first.
+    ///
+    /// No snapshots, deliberately. Phase 0 measured ~16 µs a tick, so re-running a whole forty-minute session
+    /// is tens of milliseconds; a keyframe cache would be machinery earning nothing.
+    /// `ReplayEngineTests.testMeasureSeekLatency` is what would say otherwise.
+    @discardableResult
+    func seek(to tick: Int) throws -> Int {
+        guard let loaded else { return 0 }
+        let target = min(max(tick, 0), loaded.lastTick)
+
+        let previous = try clock.beginSeeking()
+        defer { clock.endSeeking(restoring: previous) }
+
+        tearDown()
+        radar.sideEffects.mode = .live   // `run(to:)` suppresses; this is what it restores to
+
+        if target < currentTick {
+            // Backwards: back to the start of the recording, then forward. Reloading rather than resetting by
+            // hand, so a seek lands in exactly the state a fresh load would — one path to a position, not two.
+            radar.applyExercise(try Self.exercise(from: loaded.manifest), payload: loaded.manifest.exercise.payload)
+            radar.reset(seed: loaded.manifest.seed)
+            radar.stopSimulation()
+            clock.advanced(to: radar.elapsedSeconds)
+        }
+
+        run(to: target)
+        clock.advanced(to: radar.elapsedSeconds)
+        return currentTick
+    }
+
+    /// Back to the first tick.
+    func restart() throws {
+        try seek(to: 0)
     }
 
     /// Feeds one recorded instruction back into the simulation.

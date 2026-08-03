@@ -264,3 +264,253 @@ final class ReplayEngineTests: XCTestCase {
                       "a seek spoke \(feedback.readbacks.count) readbacks")
     }
 }
+
+// MARK: - Items 5 and 6: timeline controls and seeking
+
+extension ReplayEngineTests {
+
+    /// **The property the ReplayClock exists for.** Its position must never disagree with the simulation's own
+    /// clock. Two clocks that have to agree eventually do not, so this one mirrors rather than counts.
+    func testTheClockNeverDisagreesWithTheSimulation() throws {
+        let sessionID = try recordASession(instructions: [(tick: 30, key: "C/M*", value: 260)])
+        let radar = simulation()
+        let engine = ReplayEngine(radar: radar, sessions: coordinator.sessions)
+        try engine.load(sessionID)
+
+        for _ in 1...50 {
+            _ = engine.stepForward()
+            XCTAssertEqual(engine.clock.position, radar.elapsedSeconds,
+                           "the replay clock drifted from the simulation")
+        }
+        try engine.seek(to: 200)
+        XCTAssertEqual(engine.clock.position, radar.elapsedSeconds)
+        try engine.seek(to: 10)
+        XCTAssertEqual(engine.clock.position, radar.elapsedSeconds)
+    }
+
+    /// Nothing else keeps playback state — the transport predicates all come from the clock.
+    func testTheClockIsTheOnlyPlaybackState() throws {
+        let sessionID = try recordASession(instructions: [])
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+
+        XCTAssertFalse(engine.clock.isLoaded)
+        XCTAssertFalse(engine.clock.canPlay, "an unloaded replay offered play")
+
+        try engine.load(sessionID)
+        XCTAssertTrue(engine.clock.canPlay)
+        XCTAssertFalse(engine.clock.canPause)
+
+        try engine.play()
+        XCTAssertTrue(engine.clock.isRunning)
+        XCTAssertTrue(engine.clock.canPause)
+        XCTAssertFalse(engine.clock.canPlay, "play was offered while already playing")
+
+        try engine.pause()
+        XCTAssertFalse(engine.clock.isRunning)
+        XCTAssertTrue(engine.clock.canPlay)
+    }
+
+    /// Illegal transport moves are refused naming both states, rather than quietly applied.
+    func testIllegalTransportMovesAreRefused() throws {
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+
+        XCTAssertThrowsError(try engine.play(), "playing an unloaded replay")
+        XCTAssertThrowsError(try engine.pause(), "pausing a replay that is not playing")
+
+        let sessionID = try recordASession(instructions: [])
+        try engine.load(sessionID)
+        try engine.play()
+        XCTAssertThrowsError(try engine.play(), "playing twice")
+    }
+
+    /// Speed changes the interval, never the step size — which is why a replay at 30× reaches the same state as
+    /// one at 1×. Asserted by driving the same span at both and comparing fingerprints.
+    func testSpeedDoesNotChangeWhereAReplayEndsUp() throws {
+        let sessionID = try recordASession(instructions: [
+            (tick: 20, key: "C/M*", value: 260),
+            (tick: 60, key: "TRH", value: 250),
+        ])
+
+        func run(at speed: Int) throws -> UInt64 {
+            let radar = simulation()
+            let engine = ReplayEngine(radar: radar, sessions: coordinator.sessions)
+            try engine.load(sessionID)
+            engine.setSpeed(speed)
+            XCTAssertEqual(engine.clock.speed, speed)
+            engine.run(to: 150)
+            return radar.stateHash.value
+        }
+
+        XCTAssertEqual(try run(at: 1), try run(at: 30))
+    }
+
+    /// An unlisted speed is clamped to the nearest offered one rather than refused — a stray slider value is not
+    /// worth an error — but the transport must never show a speed the timer is not using.
+    func testAnUnlistedSpeedIsClampedNotShownFalsely() throws {
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+        engine.setSpeed(7)
+        XCTAssertTrue(ReplayClock.speedOptions.contains(engine.clock.speed))
+        XCTAssertLessThanOrEqual(engine.clock.speed, 7)
+    }
+
+    // MARK: Seeking
+
+    /// Seeking lands where it was asked to, forwards and backwards, and the state matches stepping there.
+    ///
+    /// The comparison is the point: a seek must produce the *same* world as walking to it, or a reviewer who
+    /// scrubbed and a reviewer who watched would be looking at different exercises.
+    func testSeekingLandsInTheSameStateAsStepping() throws {
+        let sessionID = try recordASession(instructions: [
+            (tick: 20, key: "C/M*", value: 260),
+            (tick: 80, key: "TRH", value: 250),
+            (tick: 140, key: "SPD*", value: 300),
+        ])
+
+        // Stepped.
+        let stepped = simulation()
+        let stepper = ReplayEngine(radar: stepped, sessions: coordinator.sessions)
+        try stepper.load(sessionID)
+        stepper.run(to: 200)
+        let steppedHash = stepped.stateHash.value
+
+        // Sought forward in one move.
+        let sought = simulation()
+        let seeker = ReplayEngine(radar: sought, sessions: coordinator.sessions)
+        try seeker.load(sessionID)
+        try seeker.seek(to: 200)
+
+        XCTAssertEqual(seeker.clock.position, 200)
+        XCTAssertEqual(sought.stateHash.value, steppedHash, "a forward seek and stepping disagreed")
+    }
+
+    /// **Reverse seeking through reconstruction.** There is no inverse step — collision destruction, spawning and
+    /// hold capture destroy information — so going back means starting again and re-simulating. The result must be
+    /// identical to having gone there directly.
+    func testSeekingBackwardsReconstructsTheSameState() throws {
+        let sessionID = try recordASession(instructions: [
+            (tick: 20, key: "C/M*", value: 260),
+            (tick: 80, key: "TRH", value: 250),
+        ])
+
+        let direct = simulation()
+        let directEngine = ReplayEngine(radar: direct, sessions: coordinator.sessions)
+        try directEngine.load(sessionID)
+        try directEngine.seek(to: 100)
+        let expected = direct.stateHash.value
+
+        let wandering = simulation()
+        let engine = ReplayEngine(radar: wandering, sessions: coordinator.sessions)
+        try engine.load(sessionID)
+        try engine.seek(to: 250)
+        try engine.seek(to: 100)      // backwards, by reconstruction
+
+        XCTAssertEqual(engine.clock.position, 100)
+        XCTAssertEqual(wandering.stateHash.value, expected,
+                       "seeking backwards did not reconstruct the same state")
+    }
+
+    /// Seeking past either end clamps rather than running off.
+    func testSeekingClampsToTheRecording() throws {
+        let sessionID = try recordASession(instructions: [], ticks: 100)
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+        let loaded = try engine.load(sessionID)
+
+        try engine.seek(to: 10_000)
+        XCTAssertEqual(engine.clock.position, loaded.lastTick)
+
+        try engine.seek(to: -50)
+        XCTAssertEqual(engine.clock.position, 0)
+    }
+
+    /// A seek does not start playing on its own. Landing somewhere and immediately running on is not what
+    /// dragging a scrubber asks for.
+    func testASeekDoesNotResumePlayback() throws {
+        let sessionID = try recordASession(instructions: [])
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+        try engine.load(sessionID)
+        try engine.play()
+
+        try engine.seek(to: 50)
+        XCTAssertFalse(engine.clock.isRunning, "a seek left the replay playing")
+        XCTAssertEqual(engine.clock.mode, .paused)
+    }
+
+    /// Seeking is silent, however far it moves.
+    func testSeekingIsSilent() throws {
+        let sessionID = try recordASession(instructions: [
+            (tick: 20, key: "C/M*", value: 260),
+            (tick: 100, key: "TRH", value: 250),
+            (tick: 180, key: "SPD*", value: 300),
+        ])
+        let feedback = SilentFeedback()
+        let engine = ReplayEngine(radar: simulation(feedback), sessions: coordinator.sessions)
+        try engine.load(sessionID)
+
+        try engine.seek(to: 250)
+        try engine.seek(to: 40)
+        try engine.seek(to: 200)
+
+        XCTAssertTrue(feedback.readbacks.isEmpty, "seeking spoke \(feedback.readbacks.count) readbacks")
+    }
+
+    /// Restart returns to the first tick and to the state a fresh load produces.
+    func testRestartReturnsToTheStart() throws {
+        let sessionID = try recordASession(instructions: [(tick: 20, key: "C/M*", value: 260)])
+        let radar = simulation()
+        let engine = ReplayEngine(radar: radar, sessions: coordinator.sessions)
+        try engine.load(sessionID)
+        let atLoad = radar.stateHash.value
+
+        try engine.seek(to: 200)
+        try engine.restart()
+
+        XCTAssertEqual(engine.clock.position, 0)
+        XCTAssertEqual(radar.stateHash.value, atLoad, "restart did not return to the loaded state")
+    }
+
+    // MARK: Measurement
+
+    /// Seek latency, measured rather than assumed — this is what would justify snapshots, and currently does not.
+    func testMeasureSeekLatency() throws {
+        let sessionID = try recordASession(instructions: (1...30).map {
+            (tick: $0 * 60, key: "C/M*", value: 200 + $0)
+        }, ticks: 2_400)
+
+        let engine = ReplayEngine(radar: simulation(), sessions: coordinator.sessions)
+        try engine.load(sessionID)
+
+        var rows: [(String, Int, TimeInterval)] = []
+        for (label, target) in [("forward to 600", 600), ("forward to 2400", 2_400),
+                                ("backward to 1200", 1_200), ("backward to 0", 0)] {
+            let started = Date()
+            try engine.seek(to: target)
+            rows.append((label, target, Date().timeIntervalSince(started)))
+        }
+
+        var report = """
+        SEEK LATENCY · 40-minute recording, 30 instructions
+        Backward seeks reconstruct from the start; forward seeks step on from where they are.
+
+        seek                target   seconds     ms
+        """
+        for (label, target, seconds) in rows {
+            report += String(format: "\n%-18s  %6d   %7.4f  %5.1f",
+                             (label as NSString).utf8String!, target, seconds, seconds * 1_000)
+        }
+        report += """
+
+
+        A snapshot cache would only be justified if the worst of these stopped meeting the product's
+        responsiveness bar. Phase 0 measured ~16 µs a tick, so a full 2,400-tick reconstruction is tens of
+        milliseconds — see the numbers above rather than that estimate.
+        """
+
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "seek-latency"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        let worst = rows.map(\.2).max() ?? 0
+        XCTAssertLessThan(worst, 2.0, "the worst seek took \(worst)s — snapshots may now be justified")
+    }
+}

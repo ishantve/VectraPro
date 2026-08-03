@@ -52,6 +52,13 @@ final class IsolatedDeinitScanTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    /// Phase C's two. `ReplayClock` was the fourth class to abort on release, and it had never been a singleton
+    /// — which retires the "singletons have untested deinits" framing for the plainer rule: in this target, every
+    /// `final class` needs a `nonisolated deinit`, and this is where that is checked rather than remembered.
+    func testReplayClockSurvivesRelease() {
+        for _ in 0..<3 { _ = ReplayClock() }
+    }
+
     /// The third singleton to be constructed per-session by tests, and the third to need a nonisolated
     /// deinit. The pattern is now clear enough to state: **any `final class` in this target that was a
     /// singleton has an untested deinit**, because a singleton is never released.

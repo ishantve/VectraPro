@@ -86,14 +86,14 @@ final class DeterministicTimeTests: XCTestCase {
             """)
     }
 
-    /// **The one wall-clock dependency the simulation is allowed**, and it is allowed because it decides
+    /// **The only wall-clock dependencies the simulation is allowed**, and they are allowed because they decide
     /// *when* to step, never *how much*.
     ///
     /// Each fire advances exactly one simulated second, so fast-forward changes the timer's period and
     /// nothing else. Folding speed into the step size instead would make the step variable, which is how a
     /// simulation stops being reproducible — so the separation is load-bearing, and this asserts there is
     /// exactly one place it could be undone.
-    func testExactlyOneFileDrivesTheSimulationFromATimer() throws {
+    func testOnlyTheNamedFilesDriveTheSimulationFromATimer() throws {
         let drivers = try Self.simulationSources()
             .filter { url in
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
@@ -101,11 +101,18 @@ final class DeterministicTimeTests: XCTestCase {
             }
             .map { $0.lastPathComponent }
 
-        XCTAssertEqual(drivers, ["MapViewModel.swift"], """
-            Expected exactly one timer, in MapViewModel. Found: \(drivers).
+        // Two now, and they are mutually exclusive: MapViewModel paces a live exercise, ReplayEngine paces a
+        // replay, and a replay detaches recording and drives the simulation itself. Both decide *when* to step
+        // and neither decides how much — each fire advances exactly one simulated second, which is why a replay
+        // at 30× reaches the same state as one at 1×.
+        //
+        // Listed by name rather than counted, so a *third* driver has to be argued for here before it ships.
+        XCTAssertEqual(drivers, ["MapViewModel.swift", "ReplayEngine.swift"], """
+            Expected timers only in MapViewModel (live) and ReplayEngine (replay). Found: \(drivers).
 
-            A second timer means a second thing deciding when the simulation advances, and two of those \
-            cannot stay in step — least of all across a speed change or a pause.
+            Another timer means another thing deciding when the simulation advances, and they cannot stay in \
+            step — least of all across a speed change or a pause. If this one is justified, add it here with \
+            the reason; if it is not, drive the simulation through an existing one.
             """)
     }
 
