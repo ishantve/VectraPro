@@ -374,16 +374,27 @@ ordering guarantees will have to be at least this strong anyway.
 
 ### 6.1 Interval — derived from a latency budget, not guessed
 
-The brief asks for the right interval. The honest answer: **it falls out of one measurement we
-have not taken yet**, so the design makes it a tunable with a defensible starting value.
+The brief asks for the right interval. It falls out of the cost of one step, and **that is now
+measured rather than estimated** (Phase 0 built the harness to measure it).
 
 Let `C` = cost of one `advanceStep()`. Worst-case seek cost ≈ snapshot load + `K × C` where `K` is
 the interval in ticks.
 
-From the shape of `advanceStep()` — one pass of guidance + physics per aircraft, plus O(n²)
-pairwise collision — with 50 aircraft I estimate `C` in the tens of microseconds. Even at a
-pessimistic **1 ms**, `K = 300` gives a 300 ms worst-case seek. That is at the edge of feeling
-instant.
+**Measured:** `DeterminismTests.testTheSameSeedProducesTheSameFortyMinutes` runs **two** full
+40-minute simulations — 4,800 steps — in **78 ms**, i.e. **≈ 16 µs per tick** at the aircraft
+counts an exercise currently reaches. At that cost:
+
+| `K` | Worst-case re-simulation |
+|---|---|
+| 60 | **~1 ms** |
+| 300 | ~5 ms |
+| 2,400 (no snapshots at all) | ~38 ms |
+
+The striking result is the last row: at today's aircraft counts a **full replay from tick 0 takes
+about 38 ms**, so snapshots are not yet needed for seek latency at all. They stay in the design for
+two reasons that the measurement does not touch — they keep seek cost *bounded* as aircraft counts
+grow into the O(n²) collision regime (§12.3), and they are what makes a branch self-sufficient
+(§9.2) — but the urgency is gone, and Phase 1 could ship correct seeking before snapshots exist.
 
 **Recommendation: `K = 60` ticks (one snapshot per simulated minute).**
 
@@ -1052,20 +1063,36 @@ the hash check in CI.
 
 Each phase ends somewhere shippable. No phase requires rewriting an earlier one.
 
-### Phase 0 — Determinism groundwork *(no replay yet; all four are current bugs)*
+### Phase 0 — Determinism groundwork ✅ **DONE**
 
 **Deliverable:** the live simulator is deterministic and provably so.
 
-1. **B1** — `Aircraft.id` becomes an init parameter.
-2. **B2** — seeded, per-subsystem RNG streams; remove all direct `.random` calls;
-   `IntervalChooser` takes a generator.
-3. **B3** — wreckage removal becomes tick-scheduled; ban wall-clock from the core.
-4. Extract `SimulationClock`; make `tick` the sole time source.
-5. **Test:** same seed + same inputs ⇒ identical state hash after 2,400 ticks. Run twice in the
-   same process and in separate processes (catches hash-seed and iteration-order faults).
+1. ✅ **B1** — `Aircraft.id` is an init parameter, defaulting to a fresh UUID.
+2. ✅ **B2** — `RandomStreams`, one seeded SplitMix64 stream per subsystem; all 13 direct `.random`
+   calls gone; `IntervalChooser` is an enum taking `some RandomNumberGenerator`.
+3. ✅ **B3** — wreckage removal is tick-scheduled; **no wall clock remains in the simulation**.
+4. ✅ `SimulationClock` owns simulated time; `tickCount` and `elapsedSeconds` were two counters
+   incremented in two places and are now one, with the published value derived.
+5. ✅ `StateHash` — the quantised fingerprint §14.6 and §22.1 both call for, and
+   `DeterminismTests` (8 tests) over the whole loop.
 
-*Value even without replay: B3 is a real bug at high speed, and the determinism test will find
-others.*
+**What it found, beyond the four known blockers:**
+
+- `AircraftSpawner` had an **isolated deinit that aborts the process** when an instance is
+  released. Invisible for as long as it was only ever a singleton — the first code to create one
+  per simulation crashed immediately. `IsolatedDeinitScanTests` now covers it.
+- `AircraftSpawner`'s shuffled radial cycle is **mutable state on a shared singleton**, so two
+  simulations sharing it draw from each other's sequence. It must be per-session, and its cycle
+  index belongs in a snapshot (§6.2).
+- The step cost measurement above, which changes the snapshot urgency.
+
+**Still open from Phase 0's original scope:** running the determinism check in *separate processes*
+(catches hash-seed and iteration-order faults that a single process hides), and the
+cross-architecture measurement §22.1 calls for. Both are CI work rather than code.
+
+*Value delivered without any replay code: B3 was a real bug at speed — wreckage cleared 45 simulated
+seconds late at 30× and cleared while paused — and the crash above would have hit the first feature
+to construct a second simulation.*
 
 ### Phase 1 — MVP: record, replay, seek, continue
 

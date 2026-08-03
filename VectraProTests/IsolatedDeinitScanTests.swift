@@ -52,6 +52,13 @@ final class IsolatedDeinitScanTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    /// Added after a determinism test crashed the process here. The spawner had always been a
+    /// singleton, so it was never released and its isolated deinit never ran — the first code to
+    /// create one per simulation found it immediately.
+    func testAircraftSpawnerSurvivesRelease() {
+        for _ in 0..<3 { _ = AircraftSpawner() }
+    }
+
     func testRadialManagerSurvivesRelease() {
         // The one that actually aborted, kept as a regression guard.
         for _ in 0..<3 { _ = RadialManager() }

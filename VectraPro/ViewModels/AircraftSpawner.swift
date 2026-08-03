@@ -35,7 +35,17 @@ struct SpawnContext {
 final class AircraftSpawner {
 
     static let shared = AircraftSpawner()
-    private init() {}
+
+    /// Not private: the spawner carries mutable state — the shuffled radial cycle and its index —
+    /// so two simulations sharing one instance would draw from each other's cycle. A test that
+    /// compares two runs needs a spawner each, and eventually so will two live sessions.
+    init() {}
+
+    /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated
+    /// too, and releasing an isolated deinit off the main actor aborts the process. It never showed
+    /// before because this was only ever the shared singleton, which is never released. See
+    /// `IsolatedDeinitScanTests`.
+    nonisolated deinit { }
 
     // MARK: - Radial cycle (round-robin for arrival spawns)
 

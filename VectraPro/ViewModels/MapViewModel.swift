@@ -220,6 +220,9 @@ final class MapViewModel: ObservableObject {
     /// Display name of the active exercise (set by applyExercise).
     @Published private(set) var exerciseName: String = ""
     /// Seconds elapsed since the exercise started (counts up from 0).
+    /// Exercise clock, for the UI. A published mirror of `clock`, not a second counter: it used to
+    /// be incremented separately from the tick count, which meant two numbers that had to agree and
+    /// nothing making them.
     @Published private(set) var elapsedSeconds: Int = 0
     /// Total exercise duration in seconds (0 = unlimited).
     @Published private(set) var exerciseDurationSeconds: Int = 0
@@ -232,7 +235,9 @@ final class MapViewModel: ObservableObject {
 
     private var simulationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
-    private let tickInterval = 1.0          // seconds
+    /// Simulated seconds per step. Owned by `SimulationClock`; mirrored here because the physics
+    /// and schedule calls take it as a delta.
+    private var tickInterval: Double { SimulationClock.tickInterval }
 
     // MARK: - Simulation speed (fast-forward)
 
@@ -259,7 +264,9 @@ final class MapViewModel: ObservableObject {
 
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
-    private var tickCount = 0
+    /// Simulated time. The only clock the simulation reads — see `SimulationClock` for why
+    /// nothing here may reach for a real one.
+    private var clock = SimulationClock()
     private let historySampleTicks = 3      // sample a trail point every N ticks
     private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
 
@@ -544,7 +551,7 @@ final class MapViewModel: ObservableObject {
     /// onAppear fires, so exercise config (fixes, zones, etc.) is safe to clear.
     func clearOnExit() {
         stopSimulation()
-        tickCount = 0
+        clock.reset()
         aircraft = []
         traffic  = []
         schedule = nil
@@ -578,7 +585,7 @@ final class MapViewModel: ObservableObject {
         airspaceCapacity     = 1
         aircraftSpawningCount = 1
         exerciseName             = ""
-        elapsedSeconds           = 0
+        elapsedSeconds           = clock.elapsedSeconds
         exerciseDurationSeconds  = 0
         isExerciseFinished       = false
         simulationSpeed          = 1
@@ -586,9 +593,14 @@ final class MapViewModel: ObservableObject {
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
     /// screen opens so reopening renders new.
-    func reset() {
+    /// Restarts the exercise.
+    ///
+    /// `seed` decides every random choice the run will make. It defaults to a fresh one so live
+    /// exercises still vary; a test — and, later, a replay — passes a known seed to get the same
+    /// exercise back. Recording this one value is what makes a whole run reproducible.
+    func reset(seed: UInt64 = RandomStreams.freshSeed()) {
         stopSimulation()
-        tickCount = 0
+        clock.reset()
         // Runways come only from the started exercise; none otherwise.
         runways = exerciseRunways ?? []
         enabledApproaches = exerciseApproaches ?? []
@@ -596,10 +608,11 @@ final class MapViewModel: ObservableObject {
         pendingStart = nil
         // Initial aircraft count toward the capacity and are distributed across
         // the active categories with the same priority logic as the lists.
-        elapsedSeconds      = 0
+        elapsedSeconds      = clock.elapsedSeconds
         isExerciseFinished  = false
-        // A fresh seed per run, so exercises still vary; replay will supply a recorded one.
-        streams = RandomStreams(seed: RandomStreams.freshSeed())
+        destroyedAircraftIDs = []
+        wreckageDueTick     = [:]
+        streams = RandomStreams(seed: seed)
         spawner.resetRadialCycle(fixes: fixes, rng: &streams.spawner)
         // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
         var spawned: [Aircraft] = []
@@ -693,11 +706,18 @@ final class MapViewModel: ObservableObject {
     private func tick() {
         guard !isExerciseFinished else { return }
         advanceStep()
-        if tickCount % max(1, simulationSpeed) == 0 { blinkState.toggle() }
+        if clock.isDue(every: max(1, simulationSpeed)) { blinkState.toggle() }
     }
 
-    private func advanceStep() {
-        tickCount += 1
+    /// Advances the simulation exactly one tick.
+    ///
+    /// Not private: a test has to be able to step the simulation without a timer, since the whole
+    /// point of the determinism check is to compare two runs step for step rather than watch one
+    /// in real time.
+    func advanceStep() {
+        clock.advance()
+        elapsedSeconds = clock.elapsedSeconds
+        clearElapsedWreckage()
         advanceSpawners()
         advanceRadarPromotion()
         rollClearedDepartures()
@@ -718,7 +738,7 @@ final class MapViewModel: ObservableObject {
                LocalizerGuidanceService.reachedRunway(aircraft[index], runways: runways) {
                 landedIDs.insert(aircraft[index].id)
             }
-            if tickCount % historySampleTicks == 0 {
+            if clock.isDue(every: historySampleTicks) {
                 aircraft[index].history.append(aircraft[index].position)
                 if aircraft[index].history.count > maxHistoryPoints {
                     aircraft[index].history.removeFirst()
@@ -755,7 +775,7 @@ final class MapViewModel: ObservableObject {
         // by the layer toggle).
         HoldingController.flyRacetracks(
             traffic: &traffic, fixes: holdingFixesDomain, physics: physics, dt: tickInterval,
-            sampleHistory: tickCount % historySampleTicks == 0, maxHistory: maxHistoryPoints)
+            sampleHistory: clock.isDue(every: historySampleTicks), maxHistory: maxHistoryPoints)
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
@@ -786,15 +806,26 @@ final class MapViewModel: ObservableObject {
         if sequencingConflictIDs != seqConflicts { sequencingConflictIDs = seqConflicts }
 
         // Advance the exercise clock; finish when we reach the target duration.
-        elapsedSeconds += 1
         if exerciseDurationSeconds > 0, elapsedSeconds >= exerciseDurationSeconds {
             isExerciseFinished = true
             stopSimulation()
         }
     }
 
-    /// How long the wreck stays on the radar before the aircraft leaves the scene.
-    private static let wreckageDisplaySeconds = 1.5
+    /// How long the wreck stays on the radar before the aircraft leaves the scene, in ticks.
+    ///
+    /// Counted in simulated time rather than real seconds. It used to be a 1.5 s wall-clock timer,
+    /// which meant the wreck cleared 1.5 *real* seconds later however fast the simulation was
+    /// running — at 30× that is 45 simulated seconds, and while paused it cleared anyway. Two ticks
+    /// is the same delay at 1× and stays correct at every speed.
+    private static let wreckageDisplayTicks = 2
+
+    /// Aircraft due to be removed, and the tick they are due at.
+    ///
+    /// Held here rather than scheduled on a queue so that removal is part of stepping the
+    /// simulation: it happens when simulated time says so, and it can be saved and restored with
+    /// the rest of the state.
+    private var wreckageDueTick: [UUID: Int] = [:]
 
     /// Marks aircraft destroyed, and removes them once the wreck has been shown.
     ///
@@ -806,12 +837,31 @@ final class MapViewModel: ObservableObject {
         guard !fresh.isEmpty else { return }
         destroyedAircraftIDs.formUnion(fresh)
         if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.wreckageDisplaySeconds) { [weak self] in
-            guard let self else { return }
-            self.aircraft.removeAll { fresh.contains($0.id) }
-            self.traffic.removeAll  { fresh.contains($0.id) }
-            self.destroyedAircraftIDs.subtract(fresh)
-        }
+        for id in fresh { wreckageDueTick[id] = clock.tick + Self.wreckageDisplayTicks }
+    }
+
+    /// Removes wrecks whose display time has elapsed in simulated time.
+    ///
+    /// Sorted before use: the due set is a dictionary, and dictionary iteration order is not stable
+    /// in Swift, so iterating it directly would let the same simulation take a different path on a
+    /// second run. Nothing here depends on order today, but a rule kept only where it currently
+    /// matters is a rule that will be broken later.
+    private func clearElapsedWreckage() {
+        let due = wreckageDueTick.filter { $0.value <= clock.tick }.keys.sorted()
+        guard !due.isEmpty else { return }
+        let ids = Set(due)
+        aircraft.removeAll { ids.contains($0.id) }
+        traffic.removeAll  { ids.contains($0.id) }
+        destroyedAircraftIDs.subtract(ids)
+        for id in due { wreckageDueTick[id] = nil }
+    }
+
+    /// Fingerprint of the current simulation state.
+    ///
+    /// Two runs that agree here have not diverged; two that do not have. See `StateHash` for why
+    /// the values are quantised rather than compared bit for bit.
+    var stateHash: StateHash {
+        StateHash(clock: clock, radar: aircraft, hangar: traffic)
     }
 
     /// Advance every spawner; add a list aircraft when its countdown elapses.
