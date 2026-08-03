@@ -1,6 +1,8 @@
 # Simulation Recording, Replay & Timeline Engine — Architecture
 
-**Status:** proposal, for review. No code written.
+**Status:** approved in outline; Phase 0 implemented. This document is the *why*.
+The *what and where* — types, call sites, sequence diagrams, migration order — is in
+[`replay-recording-and-replay-design.md`](replay-recording-and-replay-design.md).
 **Author:** architect
 **Date:** 2026-08-03
 
