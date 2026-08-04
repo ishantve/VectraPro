@@ -24,6 +24,11 @@ let package = Package(
         // The reference adapter: ATC vocabulary and the canonical way to construct ATC events.
         .library(name: "ATCReplayAdapter", targets: ["ATCReplayAdapter"]),
         .library(name: "ATCReplayStore", targets: ["ATCReplayStore"]),
+
+        // A second, deliberately unrelated adapter (a grid robot), built only against ReplayCore's public
+        // API. It exists to prove the ReplayCore ⇄ Adapter boundary is genuinely reusable — the §8
+        // Reference Adapter Test — not to ship in any product.
+        .library(name: "GridBotAdapter", targets: ["GridBotAdapter"]),
     ],
     targets: [
         // Replay infrastructure: sessions, lifecycle, events, manifests, recorder, branching, managers.
@@ -49,7 +54,15 @@ let package = Package(
         .target(name: "ATCReplayAdapter", dependencies: ["ReplayCore"]),
         .target(name: "ATCReplayStore", dependencies: ["ReplayPersistence"]),
 
+        // Reference adapter — depends on ReplayCore ONLY. It must not see ATCReplayAdapter or any core
+        // internal; that constraint is the test. If it needed either, ReplayCore would not yet be generic.
+        .target(name: "GridBotAdapter", dependencies: ["ReplayCore"]),
+
         .testTarget(name: "ATCReplayKitTests",
                     dependencies: ["ReplayCore", "ReplayPersistence", "ATCReplayAdapter"]),
+
+        // Drives GridBot end to end through ReplayCore's public API (no @testable). The Reference Adapter Test.
+        .testTarget(name: "GridBotAdapterTests",
+                    dependencies: ["GridBotAdapter", "ReplayCore"]),
     ]
 )
