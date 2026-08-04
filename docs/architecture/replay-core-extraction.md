@@ -3,6 +3,13 @@
 **Status:** architecture proposal. No code written. **Date:** 4 August 2026.
 **Baseline:** branch `ReplayLogic` at `f028152`, replay system engineering-complete.
 
+> **⤷ Historical record — the plan, not the final state.** This proposal has since been executed (R0–R2b).
+> The canonical current architecture is [`replay-adapter-boundary.md`](replay-adapter-boundary.md) and
+> [`building-an-adapter.md`](building-an-adapter.md); the release package is
+> [`../release/replaycore-extraction.md`](../release/replaycore-extraction.md). Where this document says
+> `EventPayload` / `EventKind`, the final code uses `EventBody` / `EventTypeTag`, with the ATC vocabulary now
+> in `ATCReplayAdapter` (`ATCPayload` / `ATCEventCodec`).
+
 ---
 
 ## 0 · The finding that shapes everything

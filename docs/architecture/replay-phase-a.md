@@ -5,6 +5,12 @@
 **Behaviour change to the simulation: none.** Nothing in the app calls any of this yet.
 **Tests:** ATCReplayKit 37 → **113**; app suite +2. All suites green.
 
+> **⤷ Historical record.** A phase report from before the ReplayCore extraction (test counts and package
+> shape have since moved on — the suite is now 175). The canonical current architecture is
+> [`replay-adapter-boundary.md`](replay-adapter-boundary.md) +
+> [`building-an-adapter.md`](building-an-adapter.md); the release overview is
+> [`../release/replaycore-extraction.md`](../release/replaycore-extraction.md).
+
 ---
 
 ## 1. What changed and why

@@ -2,6 +2,12 @@
 
 **Status:** engineering complete. **Branch:** `ReplayLogic`. **Date:** 4 August 2026.
 
+> **⤷ Historical record.** This closed the replay *feature*; the ReplayCore *extraction* (R0–R2b + the GridBot
+> reference adapter) came after. The canonical current architecture is
+> [`replay-adapter-boundary.md`](replay-adapter-boundary.md) +
+> [`building-an-adapter.md`](building-an-adapter.md); the release overview is
+> [`../release/replaycore-extraction.md`](../release/replaycore-extraction.md).
+
 This closes the project that began as an architecture task and ran through Phase 0 (determinism), Phase A
 (foundations), Phase B (recording) and Phase C (replay, branching, UI). It records what was built, what it
 costs, what is owed, and what should not be changed.

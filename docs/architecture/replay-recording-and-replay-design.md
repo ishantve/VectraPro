@@ -5,6 +5,13 @@
 and where*, at the level of types and call sites.
 **Date:** 2026-08-03
 
+> **⤷ Historical record — a pre-extraction design.** The types sketched below predate the R2b-atomic
+> vocabulary move: `EventPayload` / `EventKind` were replaced by `EventBody` / `EventTypeTag`, and the ATC
+> vocabulary now lives in `ATCReplayAdapter`. For the final architecture see
+> [`replay-adapter-boundary.md`](replay-adapter-boundary.md) and
+> [`building-an-adapter.md`](building-an-adapter.md); for the release overview,
+> [`../release/replaycore-extraction.md`](../release/replaycore-extraction.md).
+
 ---
 
 ## 0. The finding that shapes this design

@@ -4,6 +4,11 @@
 The *what and where* — types, call sites, sequence diagrams, migration order — is in
 [`replay-recording-and-replay-design.md`](replay-recording-and-replay-design.md).
 **Author:** architect
+
+> **⤷ Historical record.** A phase document from before the ReplayCore extraction. The canonical current
+> architecture is [`replay-adapter-boundary.md`](replay-adapter-boundary.md) +
+> [`building-an-adapter.md`](building-an-adapter.md); the release overview is
+> [`../release/replaycore-extraction.md`](../release/replaycore-extraction.md).
 **Date:** 2026-08-03
 
 ---
