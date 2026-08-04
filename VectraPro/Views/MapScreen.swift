@@ -161,7 +161,9 @@ struct MapScreen: View {
                 speedButtons
             }
             .padding(.leading, 24)
-            .padding(.bottom, 12)
+            // Lifts above the transport while replaying. Zoom stays reachable — looking closer at what happened
+            // is most of what a review is — but it cannot sit under the bar.
+            .padding(.bottom, replay == nil ? 12 : 96)
         }
         .sheet(isPresented: $showsRecordings) {
             ReplayBrowserView(coordinator: .shared) { sessionID in
@@ -174,23 +176,30 @@ struct MapScreen: View {
                     continueFromReplay(replay)
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 100)
+                .padding(.bottom, 12)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: replay == nil)
         .overlay(alignment: .bottomLeading) {
-            feedbackLogView
-                .padding(.leading, 24)
-                .padding(.bottom, 90)
+            if replay == nil {
+                feedbackLogView
+                    .padding(.leading, 24)
+                    .padding(.bottom, 90)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
-                PushToTalkMicButton(viewModel: speechViewModel)
+                // Hidden while replaying, and not merely to clear the transport: a replay is driven by the
+                // instructions that were recorded, so a live transmission has nowhere to go. Leaving the mic and
+                // the keypad up would invite a reviewer to issue a command that silently does nothing. Continue
+                // is how you take control, and hiding these is what makes that legible.
+                if replay == nil {
+                    PushToTalkMicButton(viewModel: speechViewModel)
                 // Command keyboard only on the main (attached) view. While
                 // detached, the big Macro Keyboard fills the main screen instead.
                 if !presentation.isMapDetached {
-                    CommandKeyboard(
+                        CommandKeyboard(
                         onCommand: { CommandKeyboardHandler.shared.perform($0) },
                         requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
                         promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
@@ -203,7 +212,8 @@ struct MapScreen: View {
                         valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
                         onPreview: { text in speechViewModel.previewCommand(text) },
                         onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
-                    )
+                        )
+                    }
                 }
             }
             .padding(.trailing, 16)
@@ -462,7 +472,11 @@ struct MapScreen: View {
     /// Dismissing the bar is all the screen has to do — the world is already live, because it was reached by
     /// simulating rather than by being restored.
     private func continueFromReplay(_ transport: ReplayTransport) {
-        guard transport.perform(.continueLive(label: "Continued")) else {
+        // Named for the point it left, because "Continued" on its own makes every branch of a session an
+        // identical row in the browser — which is exactly what the snapshot pass showed.
+        let from = replayClock.position
+        let label = String(format: "Continued from %02d:%02d", from / 60, from % 60)
+        guard transport.perform(.continueLive(label: label)) else {
             feedbackManager.commandError("Unable to continue from here")
             return
         }

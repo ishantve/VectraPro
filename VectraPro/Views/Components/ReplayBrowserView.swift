@@ -69,7 +69,9 @@ struct ReplayBrowserView: View {
 }
 
 /// One recording, as a list row.
-private struct SessionRow: View {
+///
+/// Not private so a snapshot harness can render it at several widths without standing up a catalogue.
+struct SessionRow: View {
 
     let summary: SessionSummary
     let depth: Int
@@ -78,10 +80,20 @@ private struct SessionRow: View {
     var body: some View {
         HStack(spacing: 10) {
             if depth > 0 {
-                // A branch. The indent and the glyph together, so the relationship survives a screenshot.
+                // A branch. Rail, then glyph: at 16pt a step was almost invisible on a 1194pt-wide row, so depth
+                // two read the same as depth one. The rails make the level countable instead of estimated.
+                HStack(spacing: 0) {
+                    ForEach(0..<depth, id: \.self) { _ in
+                        Rectangle()
+                            .fill(.quaternary)
+                            .frame(width: 1)
+                            .frame(width: 26, alignment: .leading)
+                    }
+                }
+                .frame(height: 34)
+
                 Image(systemName: "arrow.turn.down.right")
                     .foregroundStyle(.secondary)
-                    .padding(.leading, CGFloat(depth - 1) * 16)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -104,7 +116,9 @@ private struct SessionRow: View {
                 // Why it cannot be scored, said up front — an instructor should not spend twenty minutes on a
                 // review before finding out.
                 if let reason = summary.unscoreableReason(on: environment) {
-                    Label(reason, systemImage: "exclamationmark.circle")
+                    // The consequence, then the reason. "Not sealed" on its own tells a trainee nothing about
+                    // what it means for them.
+                    Label("Cannot be scored — \(reason.lowercased())", systemImage: "exclamationmark.circle")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
