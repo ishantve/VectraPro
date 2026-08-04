@@ -70,30 +70,23 @@ final class MapViewModel: ObservableObject {
         return aircraft + traffic.filter { $0.holdingName != nil }
     }
 
-    /// Spawn-frequency config per category (from the exercise).
-    private var freqDeparture: ExerciseDetail.FrequencyOfDeparture?
-    private var freqArrival: ExerciseDetail.FrequencyOfArrival?
-    private var freqEnroute: ExerciseDetail.FrequencyOfEnroute?
+    /// Spawn policy + schedules — decides *when* and *what* to spawn. This view
+    /// model still owns the published collections and makes the aircraft; the
+    /// orchestrator only computes decisions (see SpawnOrchestrator).
+    private let spawn = SpawnOrchestrator()
 
-    /// Traffic scheduling — when the next aircraft appears and of which kind.
-    /// Owned by ATCTrafficKit, which knows nothing about aircraft or geometry, so
-    /// the rules are testable on their own and portable off Apple platforms.
-    private var schedule: TrafficSchedule?
-    private var promotion = RadarPromotionSchedule()
-
-    /// Multi-aircraft spawning (from the exercise).
-    private var isMultiMode = false
-    private var airspaceCapacity = 1
-    private var aircraftSpawningCount = 1
+    /// Aircraft identities from the exercise (airlines / types). Used across the
+    /// command, sequencing and rendering paths, so they stay here rather than in
+    /// the spawn policy.
     private var airlines: [ExerciseDetail.Airline] = []
     private var aircraftTypes: [ExerciseDetail.AircraftType] = []
 
 
     /// Whether a category is active (Custom or Random). "None" or missing → inactive.
     /// Used by the UI to hide hangar-list sections for disabled categories.
-    var isArrivalActive:   Bool { frequency(for: .arrival).isActive   }
-    var isDepartureActive: Bool { frequency(for: .departure).isActive }
-    var isEnrouteActive:   Bool { frequency(for: .enroute).isActive   }
+    var isArrivalActive:   Bool { spawn.isArrivalActive   }
+    var isDepartureActive: Bool { spawn.isDepartureActive }
+    var isEnrouteActive:   Bool { spawn.isEnrouteActive   }
 
     /// Radial lines for the exercise's VOR fixes (empty when none).
     func fixRadialLines() -> [MapLine] {
@@ -174,14 +167,9 @@ final class MapViewModel: ObservableObject {
         obstructions = detail.obstructions
         _zoneShapesDirty = true
 
-        freqDeparture = detail.frequencyOfDeparture
-        freqArrival = detail.frequencyOfArrival
-        freqEnroute = detail.frequencyOfEnroute
+        spawn.configure(from: detail)
 
-        // Multi-aircraft spawning config + identities (airlines / aircraft types).
-        isMultiMode = detail.isMultiMode ?? false
-        airspaceCapacity = detail.airspaceCapacity ?? 1
-        aircraftSpawningCount = detail.aircraftSpawningCount ?? 1
+        // Aircraft identities (airlines / aircraft types) — used well beyond spawning.
         airlines = detail.airlines
         aircraftTypes = detail.aircrafts
         exerciseName = detail.exerciseName
@@ -201,7 +189,7 @@ final class MapViewModel: ObservableObject {
             enabledApproaches = layout.enabledApproaches
         }
 
-        detail.dumpToConsole(initialSpawnCount: initialSpawnCount())
+        detail.dumpToConsole(initialSpawnCount: spawn.initialSpawnCount())
     }
 
     // MARK: - Runways & approaches
@@ -541,8 +529,7 @@ final class MapViewModel: ObservableObject {
         tickCount = 0
         aircraft = []
         traffic  = []
-        schedule = nil
-        promotion = RadarPromotionSchedule()
+        spawn.clear()
         selectedAircraftID   = nil
         yellowConflictIDs    = []
         redConflictIDs       = []
@@ -565,12 +552,6 @@ final class MapViewModel: ObservableObject {
         _zoneShapesDirty     = true
         airlines             = []
         aircraftTypes        = []
-        freqDeparture        = nil
-        freqArrival          = nil
-        freqEnroute          = nil
-        isMultiMode          = false
-        airspaceCapacity     = 1
-        aircraftSpawningCount = 1
         exerciseName             = ""
         elapsedSeconds           = 0
         exerciseDurationSeconds  = 0
@@ -595,84 +576,21 @@ final class MapViewModel: ObservableObject {
         spawner.resetRadialCycle(fixes: fixes)
         // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
         var spawned: [Aircraft] = []
-        for category in initialCategories() {
+        for category in spawn.initialRadarCategories() {
             let ac = spawner.makeRandomAircraft(context: spawnContext,
                                                 category: category,
                                                 existing: spawned.map(\.position))
             spawned.append(ac)
         }
         aircraft = spawned
-        resetTraffic()
-        promotion = RadarPromotionSchedule()
+        // Rebuild the hangar schedule and seed it: the orchestrator decides the
+        // categories, this makes the aircraft.
+        traffic = spawn.beginTraffic().map {
+            spawner.makeListAircraft(context: spawnContext, category: $0)
+        }
         // Fill toward capacity promptly if the initial spawn fell short of it.
-        if aircraft.count < airspaceCapacity { promotion.hurry() }
+        spawn.maintainCapacity(radarCount: aircraft.count)
         startSimulation()
-    }
-
-    /// How many aircraft to spawn on the radar at start.
-    ///  • single mode → 1
-    ///  • multi mode  → aircraftSpawningCount, capped at airspaceCapacity
-    private func initialSpawnCount() -> Int {
-        guard isMultiMode else { return 1 }
-        let capacity = max(airspaceCapacity, 0)
-        let requested = max(aircraftSpawningCount, 0)
-        return max(1, min(requested, capacity))
-    }
-
-    /// The exercise's spawn configuration for a category. The only place the
-    /// backend's frequency payload is read; what its type strings mean is
-    /// ATCTrafficKit's business, not this layer's.
-    private func frequency(for category: TrafficCategory) -> SpawnFrequency {
-        switch category {
-        case .arrival:
-            return SpawnFrequency(type: freqArrival?.type,
-                                  flights: freqArrival?.arrivalFlights,
-                                  minutes: freqArrival?.arrivalFlightsTimeValue)
-        case .departure:
-            return SpawnFrequency(type: freqDeparture?.type,
-                                  flights: freqDeparture?.departureFlights,
-                                  minutes: freqDeparture?.departureFlightsTimeValue)
-        case .enroute:
-            return SpawnFrequency(type: freqEnroute?.type,
-                                  flights: freqEnroute?.enrouteFlights,
-                                  minutes: freqEnroute?.enrouteFlightsTimeValue)
-        }
-    }
-
-    private var configuredFrequencies: [TrafficCategory: SpawnFrequency] {
-        Dictionary(uniqueKeysWithValues: TrafficCategory.allCases.map {
-            ($0, frequency(for: $0))
-        })
-    }
-
-    /// Active categories in priority order (arrival → departure → enroute).
-    private func activeCategories() -> [TrafficCategory] {
-        TrafficCategory.inPriorityOrder.filter { frequency(for: $0).isActive }
-    }
-
-    /// Categories for the initially-spawned (on-map) aircraft. Only Arrival &
-    /// Enroute spawn on the radar — Departures leave from the runway, so they
-    /// live only in the hangar list (via the frequency spawner).
-    private func initialCategories() -> [FlightCategory] {
-        CapacityPlan.initialRadarCategories(count: initialSpawnCount(),
-                                            active: activeCategories())
-            .map(\.asFlight)
-    }
-
-    /// Clear the hangar lists and rebuild the traffic schedule from the exercise.
-    /// Quotas are divided 40% Arrival / 30% Departure / 30% Enroute among the
-    /// active categories; "none" (or missing) categories get none.
-    private func resetTraffic() {
-        traffic = []
-        schedule = TrafficSchedule(configuration: .init(
-            frequencies: configuredFrequencies,
-            airspaceCapacity: airspaceCapacity))
-
-        // Seed one departure aircraft into the hangar immediately so the
-        // controller always has something to clear for takeoff at exercise start.
-        if schedule?.isActive(.departure) == true {
-            traffic.append(spawner.makeListAircraft(context: spawnContext, category: .departure))
-        }
     }
 
     /// Timer callback. Fires every `tickInterval / speed` real seconds and
@@ -686,8 +604,24 @@ final class MapViewModel: ObservableObject {
 
     private func advanceStep() {
         tickCount += 1
-        advanceSpawners()
-        advanceRadarPromotion()
+
+        // Hangar spawns: the orchestrator says which categories are due; this makes
+        // and files them. `listAircraft.count` is read once, as before.
+        for category in spawn.dueHangarSpawns(by: tickInterval, listCount: listAircraft.count) {
+            traffic.append(spawner.makeListAircraft(context: spawnContext, category: category))
+        }
+
+        // Radar promotion: the orchestrator decides whether to promote and which
+        // hangar aircraft it consumes; this owns the collections and the spawn.
+        if let promotion = spawn.radarPromotion(by: tickInterval,
+                                                radarCount: aircraft.count,
+                                                hangar: traffic) {
+            if let id = promotion.vacatedHangarID { traffic.removeAll { $0.id == id } }
+            aircraft.append(spawner.makeRandomAircraft(context: spawnContext,
+                                                       category: promotion.category,
+                                                       existing: aircraft.map(\.position)))
+        }
+
         rollClearedDepartures()
 
         var landedIDs = Set<UUID>()
@@ -734,9 +668,7 @@ final class MapViewModel: ObservableObject {
         let captured = HoldingController.capture(aircraft: &aircraft, traffic: &traffic, fixes: holdingFixesDomain)
         if !captured.isEmpty {
             if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
-            if aircraft.count < airspaceCapacity {
-                promotion.hurry()
-            }
+            spawn.maintainCapacity(radarCount: aircraft.count)
         }
 
         // Fly the holding racetracks (runs every tick; only the drawing is gated
@@ -758,8 +690,8 @@ final class MapViewModel: ObservableObject {
         destroy(zoneResult.destroyed)
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.
-        if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
-            promotion.hurry()
+        if !acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty {
+            spawn.maintainCapacity(radarCount: aircraft.count)
         }
         let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
         if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
@@ -800,44 +732,6 @@ final class MapViewModel: ObservableObject {
             self.traffic.removeAll  { fresh.contains($0.id) }
             self.destroyedAircraftIDs.subtract(fresh)
         }
-    }
-
-    /// Advance every spawner; add a list aircraft when its countdown elapses.
-    private func advanceSpawners() {
-        guard var schedule else { return }
-        // The schedule decides what and when; making the aircraft is this layer's
-        // job, since that needs a position and the schedule has no geometry.
-        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count) {
-            traffic.append(spawner.makeListAircraft(context: spawnContext,
-                                                    category: category.asFlight))
-        }
-        self.schedule = schedule
-    }
-
-    private func advanceRadarPromotion() {
-        guard promotion.advance(by: tickInterval,
-                                radarCount: aircraft.count,
-                                capacity: airspaceCapacity) else { return }
-        promoteFromHangar()
-    }
-
-    /// Moves one arrival or enroute aircraft from the hangar onto the radar.
-    /// Falls back to a fresh spawn when the hangar has no eligible aircraft.
-    private func promoteFromHangar() {
-        let eligibleIndices = traffic.indices.filter {
-            traffic[$0].holdingName == nil &&
-            (traffic[$0].category == .arrival || traffic[$0].category == .enroute)
-        }
-        let category: FlightCategory
-        if let idx = eligibleIndices.randomElement() {
-            category = traffic[idx].category
-            traffic.remove(at: idx)
-        } else {
-            category = Bool.random() ? .arrival : .enroute
-        }
-        aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category,
-                                                   existing: aircraft.map(\.position)))
-        // The schedule restarts its own interval; nothing to reset here.
     }
 
     // MARK: - Departure clearance
