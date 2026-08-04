@@ -208,6 +208,33 @@ adapter function.
 
 ---
 
+## 6c · Boundary classification: what crosses, and why
+
+Every ReplayCore type visible from `ATCReplayAdapter` today, classified. The goal is not to share less — it is that
+everything shared is shared **on purpose**.
+
+| ReplayCore type | Visible as | Classification | Reasoning |
+|---|---|---|---|
+| `Event` | return type of every `ATCEvent` function | **Core Concept** | The adapter's job is to produce recordable facts, and a recordable fact is an `Event`. Hiding it would mean inventing a parallel type the core would then have to convert — two representations of one thing. |
+| `EventPosition` | `at position:` on every function | **Core Concept** | I flagged this as a possible leak; on inspection it is not. `(tick, ordinal)` is not an implementation detail of ReplayCore's storage — it is *the ordering contract itself*, and §4 makes ordering permanently the core's. Any deterministic simulation must be able to say "this happened at this step, in this order within the step", and a domain that could not express that could not be replayed at all. Hiding it would force the adapter to invent an equivalent, which is the same concept with a different name. |
+| `EventSource` | `source:` parameter | **Boundary Contract** | Neither side owns the meaning alone. The core routes, filters and reports by source without interpreting it; the adapter supplies which source applies. It is an extensible constant precisely so a domain can add `.simulatedPilot` without a core release — that extensibility is what makes it a contract rather than a core concept. |
+| `EventID` | `correlationID:` / `causationID:` | **Core Concept** | Identity is derived from `(session, ordinal)` — a core rule — and the core guarantees uniqueness. The adapter only ever passes one back that the core produced. |
+| `TimelineAction` | `ATCEvent.timeline(_:)` | **Core Concept** | Pause, resume, speed, seek are platform actions. A racing or medical replay performs them identically, and recording them is how "this trainee paused fourteen times" stays answerable. It reads as ATC vocabulary only because ATC is currently the sole adapter. |
+| `EventPayload` | inside every function body | **Leak** | The ATC vocabulary still lives in ReplayCore. **Recommendation: removed by R2b-atomic** — this is that phase's substance, not debt to carry. |
+| `EventPayloadCoding`, `DefaultEventPayloadCoding` | public in ReplayCore | **Leak** | The protocol is a legitimate boundary contract; the *default implementation* is ATC coding sitting in the core, parked there by R2a so the seam could be proved byte-neutral before the vocabulary moved. **Recommendation: `DefaultEventPayloadCoding` moves to the adapter in R2b-atomic; the protocol stays and is reclassified Boundary Contract.** |
+| `EventSchemaError` | thrown by coding functions | **Boundary Contract** | The adapter throws it when a payload will not decode, and the core throws it for envelope problems. Shared deliberately so a caller has one error domain for "this event could not be read", rather than two that mean the same thing. |
+
+**Answer to the question that prompted this.** `EventPosition` is a Core Concept, not a leak. The test that settles
+it: would another deterministic simulation need this concept even if ReplayCore did not exist? For `(tick, ordinal)`
+the answer is yes — it is what deterministic ordering *is*. For `EventPayload` the answer is no, and that is exactly
+why one stays and the other moves.
+
+**Two leaks, both known, both scheduled.** Neither is being carried as debt; both are R2b-atomic's work. After that
+phase this table should contain no Leak rows, and the Architecture Stability Review will re-run this classification
+rather than assume it.
+
+---
+
 ## 7 · Dependency diagram
 
 ```
