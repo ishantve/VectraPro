@@ -147,13 +147,30 @@ that, and it is now documented rather than surprising.
 
 ## 6 · UI workflow
 
-A single entry point on the radar (`clock.arrow.circlepath`) opens **`ReplayBrowserView`** — a catalogue-driven
-list, so two hundred sessions list without opening one. Rows carry label, duration, fork point, date, an
-assessment badge, and, when applicable, why the session cannot be scored. Branches are shown with rails and a
-glyph, indented by depth.
+Replay is launched from the **exercise card** on the home screen, through the replay button that already sat in
+each card's top-right corner. That button opens **`ReplayBrowserView`** filtered to that exercise's recordings — a
+catalogue-driven list, so two hundred sessions list without opening one.
 
-Selecting a row builds a `ReplayEngine` over `MapViewModel`, loads it, and shows **`ReplayTransportBar`** over the
-radar already on screen. Continue forks, dismisses the bar, and the radar is live.
+Rows carry label, duration, fork point, date, an assessment badge, and, when applicable, why the session cannot be
+scored. Branches are shown with rails and a glyph, indented by depth. Each row exposes **two independent 44pt
+actions**:
+
+- **Play** — pushes the radar with the session as a parameter; `MapScreen` builds a `ReplayEngine` over
+  `MapViewModel`, loads it, and shows **`ReplayTransportBar`** over the radar. Continue forks, dismisses the bar,
+  and the radar is live.
+- **Share** — exports the **sealed** event log through `ShareLink`. The seal is what makes a shared session
+  verifiable by whoever receives it. Share-to-instructor over the backend remains owed (§9).
+
+Filtering is a parameter, not a rule: `exerciseName` is optional, and **nil lists everything**, which is what a
+future "all my sessions" screen reuses without changing this view. Within a filtered list, a branch whose parent
+falls outside the filter **appears as a root** — deliberately, because a session present in the list must be
+reachable, and hiding it because its parent belongs to another exercise would strand it.
+
+**Launching from the exercise workflow removes a hazard rather than merely relocating a button.** The earlier
+radar-side entry point could open a replay in the middle of a live exercise, and loading detaches the recorder — so
+the run in progress was left open and lost. With the choice made before the screen opens, that cannot happen.
+`MapScreen` takes the session as a parameter and skips `reset()` when replaying, because loading restores the world
+from the recording's own manifest and resetting would open a live session the load then orphans.
 
 The presentation boundary is two Codable types: `ReplayTransportState` (what to draw) and `ReplayCommand` (what
 was asked). Both cross a React Native bridge or a C interface as JSON with nothing added. SwiftUI happens to be
@@ -166,6 +183,11 @@ rewritten in UIKit against the same two types — a source-scan test asserts it 
 
 | Decision | Why |
 |---|---|
+| Replay opens from the **exercise card**, not from the radar | The recordings of an exercise belong beside that exercise. It also makes interrupting a live recording impossible, which the radar entry point allowed. |
+| The list is **filtered to that exercise** | The question asked from an exercise card is "what have I flown of *this*". Nil-means-all keeps the view reusable for an all-sessions screen. |
+| **Play and Share are separate 44pt buttons** | Sharing someone's assessment by mis-tapping a row is not a mistake worth allowing. |
+| Share exports the **sealed** log | The seal is what lets a recipient verify the session rather than take it on trust. |
+| Orphaned branches show as **roots** when filtered | A session in the list must be reachable; stranding it to preserve a tree shape would be the wrong trade. |
 | Replay drives the **existing radar**, not a second screen | A reviewer wants the picture the trainee flew. Fewer moving parts, and no second radar to keep in step. |
 | Replaying is **the presence of a transport**, not a flag | A flag beside a transport is two things that must agree. |
 | Mic and keypad **hidden while replaying** | A replay is driven by recorded instructions; a live transmission has nowhere to go. Leaving them up invited a command that silently did nothing. Hiding them is what makes Continue legible as the way to take control. |
@@ -311,6 +333,13 @@ recorded one cannot.
   time. It got its own `Double` set.
 - **"A UI that passes its tests looks fine."** The snapshot pass found four real problems in a suite that was
   entirely green.
+- **"The radar is the natural home for the replay entry point."** Wrong, and wrong in a way no test would have
+  reported. Recordings belong beside the exercise that produced them, and the existing replay button on each
+  exercise card had been waiting for exactly this. Moving it there also removed a hazard the radar placement had
+  created: opening a replay mid-exercise detached the recorder and orphaned the live session, losing the run in
+  progress. A convenient entry point had quietly become a way to destroy the thing being recorded. This surfaced
+  because the product owner asked where a trainee would actually look for their sessions — not from a gate, not
+  from a test, and worth recording as such.
 
 ### Bugs the acceptance gates prevented
 
@@ -342,5 +371,5 @@ recorded one cannot.
 
 ---
 
-*Reviewed against branch `ReplayLogic` at commit `60ba101`. All package and app suites green; the four
+*Reviewed against branch `ReplayLogic`; UI workflow and retrospective updated at commit `db048cb`. All package and app suites green; the four
 device-verification items above are the only open validation work.*
