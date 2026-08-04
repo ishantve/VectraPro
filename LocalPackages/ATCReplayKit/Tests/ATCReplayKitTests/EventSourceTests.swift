@@ -19,7 +19,7 @@ final class EventSourceTests: XCTestCase {
     /// must still read the event. An enum would have failed to decode the whole thing, losing events over
     /// a field nobody was reading.
     func testAnUnknownSourceStillDecodes() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
             with: try coder.encode(ATCEvent.timeline(.paused,
                                                      at: EventPosition(tick: 1, ordinal: 1),
@@ -28,13 +28,14 @@ final class EventSourceTests: XCTestCase {
 
         let decoded = try coder.decode(try JSONSerialization.data(withJSONObject: object))
         XCTAssertEqual(decoded.source.rawValue, "quantum-telepathy")
-        XCTAssertEqual(decoded.payload, .timelineAction(.paused), "the event survived intact")
+        XCTAssertEqual(ATCEvent.payload(of: decoded), .timelineAction(.paused),
+                       "the event survived intact")
     }
 
     /// And it survives being written back out, so a round trip through an older build does not silently
     /// destroy attribution it did not understand.
     func testAnUnknownSourceRoundTrips() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let exotic = EventSource(rawValue: "network-relay-v2")
         let event = ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1), source: exotic)
 
@@ -51,7 +52,7 @@ final class EventSourceTests: XCTestCase {
 
     /// A recording that predates the field is `.unspecified` — "we do not know" rather than a guess.
     func testAnAbsentSourceIsUnspecifiedRatherThanAssumed() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
             with: try coder.encode(ATCEvent.timeline(.paused,
                                                      at: EventPosition(tick: 1, ordinal: 1),
@@ -68,7 +69,7 @@ final class EventSourceTests: XCTestCase {
 
     /// Not only the ones with an obvious human behind them.
     func testEveryPayloadKindCanCarryASource() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         func p(_ i: Int) -> EventPosition { EventPosition(tick: i, ordinal: UInt32(i)) }
         let events: [Event] = [
             ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
@@ -81,7 +82,7 @@ final class EventSourceTests: XCTestCase {
             ATCEvent.scoreEvaluated(value: 1, rulesVersion: "v1", at: p(5), source: .instructor),
             ATCEvent.timeline(.paused, at: p(6), source: .instructor),
         ]
-        XCTAssertEqual(Set(events.map(\.payload.kind)).count, EventKind.allCases.count)
+        XCTAssertEqual(Set(events.map(\.tag)).count, ATCEventCodec.allTags.count)
 
         for event in events {
             XCTAssertEqual(try coder.decode(try coder.encode(event)).source, .instructor)
@@ -91,7 +92,7 @@ final class EventSourceTests: XCTestCase {
     /// Readable from the envelope, so a log can be filtered by source without decoding — or being able
     /// to decode — payloads a newer build wrote.
     func testSourceIsReadableWithoutDecodingThePayload() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let data = try coder.encode(ATCEvent.commandIssued(code: "101", callsign: "A", slots: [:],
                                                            at: EventPosition(tick: 5, ordinal: 5),
                                                            source: .keypad))

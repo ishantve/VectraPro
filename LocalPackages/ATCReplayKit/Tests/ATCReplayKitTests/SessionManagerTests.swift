@@ -27,7 +27,8 @@ final class SessionManagerTests: XCTestCase {
         root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("Sessions-\(UUID().uuidString)")
         catalogue = InMemorySessionCatalogue()
-        manager = SessionManager(root: root, catalogue: catalogue, environment: environment)
+        manager = SessionManager(root: root, catalogue: catalogue, environment: environment,
+                                 coding: ATCEventCodec())
     }
 
     override func tearDownWithError() throws {
@@ -159,7 +160,8 @@ final class SessionManagerTests: XCTestCase {
     func testRecoveryTruncatesAndMarksAnInterruptedSession() throws {
         let session = try start()
 
-        let store = EventStore(url: manager.eventLogURL(for: session.id), sessionClass: .training)
+        let store = EventStore(url: manager.eventLogURL(for: session.id), sessionClass: .training,
+                               coding: ATCEventCodec())
         try store.openForAppending()
         for tick in 1...5 {
             try store.append(ATCEvent.timeline(.paused,
@@ -173,7 +175,8 @@ final class SessionManagerTests: XCTestCase {
         try data.prefix(data.count - 15).write(to: url)
 
         // A fresh manager, as at the next launch.
-        let next = SessionManager(root: root, catalogue: catalogue, environment: environment)
+        let next = SessionManager(root: root, catalogue: catalogue, environment: environment,
+                                 coding: ATCEventCodec())
         let reports = try next.recoverInterrupted()
 
         XCTAssertEqual(reports.count, 1)
@@ -188,7 +191,8 @@ final class SessionManagerTests: XCTestCase {
     func testAnInterruptedAssessmentIsReportedAsIncomplete() throws {
         let session = try start(.assignment(UUID(), assignedBy: "i1"))
 
-        let next = SessionManager(root: root, catalogue: catalogue, environment: environment)
+        let next = SessionManager(root: root, catalogue: catalogue, environment: environment,
+                                 coding: ATCEventCodec())
         let reports = try next.recoverInterrupted()
 
         XCTAssertEqual(reports.first?.sessionClass, .assessment)
@@ -311,7 +315,8 @@ final class BranchManagerTests: XCTestCase {
         catalogue = InMemorySessionCatalogue()
         sessions = SessionManager(root: root, catalogue: catalogue,
                                  environment: RecordingEnvironment(buildVersion: "1",
-                                                                   platform: "iOS 26.3"))
+                                                                   platform: "iOS 26.3"),
+                                 coding: ATCEventCodec())
         branches = BranchManager(sessions: sessions)
     }
 
@@ -363,7 +368,8 @@ final class BranchManagerTests: XCTestCase {
     func testTheParentIsSupersededButItsEventsAreKept() throws {
         let parent = try recordedSession(ticks: 2_400)
 
-        let store = EventStore(url: sessions.eventLogURL(for: parent.id), sessionClass: .training)
+        let store = EventStore(url: sessions.eventLogURL(for: parent.id), sessionClass: .training,
+                               coding: ATCEventCodec())
         try store.openForAppending()
         for tick in [100, 900, 1_500] {
             try store.append(ATCEvent.timeline(.paused,

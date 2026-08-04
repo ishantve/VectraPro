@@ -25,7 +25,9 @@ final class EventStoreTests: XCTestCase {
     }
 
     private func makeStore(_ sessionClass: SessionClass = .training) -> EventStore {
-        EventStore(url: directory.appendingPathComponent("events.log"), sessionClass: sessionClass)
+        EventStore(url: directory.appendingPathComponent("events.log"),
+                   sessionClass: sessionClass,
+                   coding: ATCEventCodec())
     }
 
     private func command(_ code: String, tick: Int, ordinal: UInt32) -> Event {
@@ -65,7 +67,7 @@ final class EventStoreTests: XCTestCase {
             ATCEvent.timeline(.speedChanged(to: 10), at: p(6)),
         ]
 
-        XCTAssertEqual(Set(events.map(\.payload.kind)).count, EventKind.allCases.count,
+        XCTAssertEqual(Set(events.map(\.tag)).count, ATCEventCodec.allTags.count,
                        "a payload kind is missing from this test")
 
         let store = makeStore()

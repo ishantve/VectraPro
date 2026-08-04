@@ -2,93 +2,79 @@
 //  EventPayloadCoding.swift
 //  ReplayCore
 //
-//  The seam between the core and a domain's event vocabulary.
+//  The routing contract: everything the core must be told about payloads it cannot read.
 //
-//  ── Why a seam before a move ───────────────────────────────────────────────
-//  R2's goal is that the core holds bytes and a tag while the domain owns meaning. Doing that in one step means
-//  making `Event` generic, which ripples through `SessionManager`, `SessionRecorder`, `EventStore`, `BranchManager`
-//  and every test — a large edit whose riskiest part is the one that must not go wrong: the wire format.
+//  ── One protocol, two halves, and only one of them lives here ───────────────
+//  R2a put the seam here with an ATC implementation beside it, so the move could be proved byte-neutral
+//  before the vocabulary travelled. R2b-atomic finishes the job and the file splits along the boundary:
 //
-//  So the seam comes first. Payload encoding, payload decoding and the affects-simulation decision move behind one
-//  injected object, with the golden corpus proving no byte moved. The vocabulary itself moves out afterwards,
-//  against a seam that is already covered. Compatibility before cleanliness: the format is a public protocol now,
-//  and a protocol is not the thing to change while also restructuring the code that produces it.
+//    · **the core routing contract** — this file. Expressed entirely in `EventBody`, `EventTypeTag`,
+//      `[String: Any]` and `Int`. Not one signature here names a domain noun, which is the property that
+//      makes it a contract rather than a leak.
+//    · **the adapter's typed coding** — `ATCEventCodec`, in `ATCReplayAdapter`. It works in `ATCPayload`,
+//      knows what a callsign is, owns tags 1…7, and satisfies this contract by boxing at the boundary.
 //
-//  ── The wire format is unchanged by this file ──────────────────────────────
-//  · An old recording still reads — nothing about parsing changed, only who performs it.
-//  · A new recording still verifies — the same bytes are produced, so the same seal is computed.
-//  · The corpus stays byte-for-byte valid — asserted, not assumed.
-//  · The envelope is still independently understandable — `decodeEnvelope` never consults this object.
+//  Nothing in ReplayCore implements this protocol. There is no default, deliberately: a core-supplied
+//  implementation would be some domain's vocabulary wearing a neutral name, which is exactly what was
+//  removed. A consumer that has not written a codec has not finished writing an adapter.
+//
+//  ── The wire format is not this file's business ─────────────────────────────
+//  Dictionaries rather than `Data`, so the core keeps what is genuinely its own: the outer object, the
+//  sorted-key ordering the seal depends on, and the framing. Handing an adapter raw bytes would let it decide
+//  format questions the compatibility contract says have exactly one owner.
 //
 //  ── Deciding by tag, not by value ──────────────────────────────────────────
-//  `affectsSimulation(kind:)` takes the wire tag rather than a decoded payload. That is deliberate and it is the
-//  property the current design paid for: a build must be able to decide whether an event feeds the simulation
-//  *without* being able to decode it, or a recording written by a newer build could not be replayed by an older
-//  one. Requiring a decoded value here would quietly throw that away.
+//  `affectsSimulation(tag:)` and `currentVersion(for:)` both take a tag rather than a payload, and that is
+//  the most consequential shape in the platform. A build must be able to decide whether an event feeds the
+//  simulation, and how far to migrate it, *without* being able to decode it — or a recording written by a
+//  newer build could not be replayed by an older one at all.
 //
 
 import Foundation
 
-/// How a domain's payloads become JSON objects, and back.
+/// What the core needs from a domain in order to route its payloads.
 ///
-/// Deliberately expressed in dictionaries rather than `Data`: the envelope owns the outer object, the seal is
-/// computed over the whole thing with sorted keys, and handing the domain raw bytes would let it decide framing
-/// that belongs to the core.
+/// Four requirements and one optional, and deliberately no more. Everything else about an event — framing,
+/// ordering, timing, sealing, storage, lifecycle — is the core's and is not negotiable through this protocol.
 public protocol EventPayloadCoding: Sendable {
+
+    /// The payload version this build writes for this tag.
+    ///
+    /// Per tag, so bumping one kind cannot silently bump the rest, and asked of the adapter because payload
+    /// versioning is the adapter's half of the migration split: the core owns `schemaVersion`, the adapter owns
+    /// `eventVersion`, and neither has to release for the other to evolve.
+    ///
+    /// It is also the migration target. The core migrates *up to* this number and no further, which is why an
+    /// adapter can add a version without the core knowing it happened.
+    func currentVersion(for tag: EventTypeTag) -> Int
 
     /// The payload as a JSON object, **without** its type discriminator — that lives in the envelope, and
     /// duplicating it on the wire would create two spellings that could disagree.
-    func object(for payload: EventPayload) throws -> [String: Any]
+    func object(for payload: EventBody) throws -> [String: Any]
 
     /// The payload from a JSON object already brought forward by any applicable migration.
-    func payload(from object: [String: Any], kind: EventKind, version: Int) throws -> EventPayload
+    ///
+    /// The core hands over an object, a tag and the version it was stored at; the adapter returns a body, or
+    /// throws. The core never inspects the object.
+    func payload(from object: [String: Any], tag: EventTypeTag, version: Int) throws -> EventBody
 
     /// Whether replaying the simulation needs this kind of event.
     ///
-    /// By tag, never by decoded value. See the file header.
-    func affectsSimulation(kind: EventKind) -> Bool
+    /// By tag, never by decoded value. See the file header — this is the single most consequential signature
+    /// in the platform, and requiring a payload here would quietly make every recording unreadable by every
+    /// older build.
+    func affectsSimulation(tag: EventTypeTag) -> Bool
+
+    /// Steps that bring an older payload forward, keyed by tag and then by the version each step reads.
+    ///
+    /// Optional. Absent means "no payload has ever changed shape", which is the common case and the honest
+    /// default. The core applies the chain before calling `payload(from:tag:version:)`, so an adapter's
+    /// decoder only ever sees the current shape.
+    var migrations: [EventTypeTag: [Int: any EventMigration]] { get }
 }
 
-// MARK: - The current behaviour, unchanged
+public extension EventPayloadCoding {
 
-/// The ATC vocabulary's coding, exactly as `EventCoder` performed it before the seam existed.
-///
-/// Still in ReplayCore for now. Moving it to an adapter is the second half of R2, and it is a separate step so
-/// that this one can be proved byte-neutral on its own.
-public struct DefaultEventPayloadCoding: EventPayloadCoding {
-
-    public init() {}
-
-    public func object(for payload: EventPayload) throws -> [String: Any] {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(payload)
-        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw EventSchemaError.malformed("payload did not encode to a JSON object")
-        }
-        object["kind"] = nil
-        return object
-    }
-
-    public func payload(from object: [String: Any], kind: EventKind, version: Int) throws -> EventPayload {
-        // The discriminator lives in the envelope; `EventPayload`'s decoder expects it inside the payload, so it
-        // is put back here rather than being written twice on the wire.
-        var object = object
-        object["kind"] = kind.rawValue
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return try JSONDecoder().decode(EventPayload.self, from: data)
-    }
-
-    /// The frozen table. `GoldenCorpusTests.testWhichKindsAffectTheSimulationIsFrozen` is what holds it in place,
-    /// and it is the single most dangerous value in the extraction: wrong here and a replay silently skips a real
-    /// input or applies an annotation.
-    public func affectsSimulation(kind: EventKind) -> Bool {
-        switch kind {
-        case .commandIssued, .weatherChanged:
-            return true
-        case .commandRejected, .transcriptReceived, .readbackSpoken,
-             .scoreEvaluated, .timelineAction:
-            return false
-        }
-    }
+    /// No migrations. Overridden by an adapter the first time it changes a payload's shape.
+    var migrations: [EventTypeTag: [Int: any EventMigration]] { [:] }
 }

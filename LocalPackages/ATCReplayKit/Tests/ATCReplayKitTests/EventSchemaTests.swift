@@ -21,22 +21,23 @@ final class EventSchemaTests: XCTestCase {
 
     /// Every stored event carries all three numbers.
     func testEveryEventCarriesTheThreeVersions() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         for event in Self.oneOfEveryKind {
             let data = try coder.encode(event)
             let object = try XCTUnwrap(
                 try JSONSerialization.jsonObject(with: data) as? [String: Any])
 
             XCTAssertEqual(object["schemaVersion"] as? Int, EventEnvelope.currentSchemaVersion)
-            XCTAssertEqual(object["eventType"] as? Int, Int(event.payload.kind.rawValue))
-            XCTAssertEqual(object["eventVersion"] as? Int, event.payload.kind.currentVersion)
+            XCTAssertEqual(object["eventType"] as? Int, Int(event.tag.rawValue))
+            XCTAssertEqual(object["eventVersion"] as? Int,
+                           ATCEventCodec().currentVersion(for: event.tag))
         }
     }
 
     /// Ordering lives in the envelope, not the payload, so a log can be indexed and ordered without
     /// interpreting — or being able to interpret — payloads a newer build wrote.
     func testOrderingCanBeReadWithoutTouchingThePayload() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let data = try coder.encode(ATCEvent.timeline(.paused,
                                                      at: EventPosition(tick: 1_234, ordinal: 99)))
 
@@ -45,12 +46,39 @@ final class EventSchemaTests: XCTestCase {
         XCTAssertEqual(envelope.eventType, .timelineAction)
     }
 
+    /// A wire tag this build has never heard of costs its payload and nothing else.
+    ///
+    /// The property R2b-atomic made possible and the reason `EventTypeTag` is a struct: when the tag was an
+    /// enum, an unrecognised number failed the *envelope* decode, so one event of a kind added by a newer
+    /// release made the surrounding ordering, attribution and tracing unreadable too. Now the envelope decodes,
+    /// the event can still be indexed and counted, and only the payload is beyond this build.
+    func testAnUnknownTagStillLeavesTheEnvelopeReadable() throws {
+        let coder = EventCoder(coding: ATCEventCodec())
+        var object = try Self.encodedObject(
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
+                                   at: EventPosition(tick: 77, ordinal: 9),
+                                   source: .keypad))
+        // A kind from a release that does not exist yet.
+        object["eventType"] = 9_999
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let envelope = try coder.decodeEnvelope(data)
+        XCTAssertEqual(envelope.position, EventPosition(tick: 77, ordinal: 9))
+        XCTAssertEqual(envelope.source, .keypad)
+        XCTAssertEqual(envelope.eventType, EventTypeTag(9_999),
+                       "an unknown tag must survive intact rather than being mapped onto a known one")
+
+        XCTAssertThrowsError(try coder.decode(data),
+                             "the payload is not readable and saying so beats guessing at it")
+    }
+
     func testAnEnvelopeFromTheFutureIsRefusedRatherThanGuessedAt() throws {
-        var object = try Self.encodedObject(.timelineAction(.paused))
+        var object = try Self.encodedObject(
+            ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1)))
         object["schemaVersion"] = EventEnvelope.currentSchemaVersion + 1
         let data = try JSONSerialization.data(withJSONObject: object)
 
-        XCTAssertThrowsError(try EventCoder().decode(data)) { error in
+        XCTAssertThrowsError(try EventCoder(coding: ATCEventCodec()).decode(data)) { error in
             XCTAssertEqual(error as? EventSchemaError,
                            .unsupportedSchema(found: EventEnvelope.currentSchemaVersion + 1,
                                               supported: EventEnvelope.currentSchemaVersion))
@@ -60,12 +88,13 @@ final class EventSchemaTests: XCTestCase {
     /// A payload version this build has never seen cannot be read, because migrations only go forward.
     /// Saying so beats decoding it as though the extra fields were absent.
     func testAPayloadFromTheFutureIsRefused() throws {
-        var object = try Self.encodedObject(.commandIssued(code: "101", callsign: "AIC1",
-                                                           slots: [:]))
+        var object = try Self.encodedObject(
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
+                                   at: EventPosition(tick: 1, ordinal: 1)))
         object["eventVersion"] = 99
         let data = try JSONSerialization.data(withJSONObject: object)
 
-        XCTAssertThrowsError(try EventCoder().decode(data)) { error in
+        XCTAssertThrowsError(try EventCoder(coding: ATCEventCodec()).decode(data)) { error in
             guard case EventSchemaError.unsupportedEventVersion(let kind, 99, 1)? =
                     error as? EventSchemaError else {
                 return XCTFail("expected unsupportedEventVersion, got \(error)")
@@ -75,9 +104,13 @@ final class EventSchemaTests: XCTestCase {
     }
 
     /// Every kind is versioned separately, so bumping one cannot quietly bump the rest.
+    ///
+    /// Asked of the **codec**, not of the core: the roster of a domain's event kinds and the version each is
+    /// written at are the adapter's, and the core migrates to the number it is handed.
     func testEachKindHasItsOwnVersion() {
-        for kind in EventKind.allCases {
-            XCTAssertGreaterThanOrEqual(kind.currentVersion, 1, "\(kind) has no version")
+        let codec = ATCEventCodec()
+        for tag in ATCEventCodec.allTags {
+            XCTAssertGreaterThanOrEqual(codec.currentVersion(for: tag), 1, "\(tag) has no version")
         }
     }
 
@@ -128,7 +161,7 @@ final class EventSchemaTests: XCTestCase {
     /// A rename is the harshest realistic case: nothing in the old payload can be reused as-is, and a
     /// build without the migration would fail to decode entirely.
     private struct RenameCodeMigration: EventMigration {
-        let eventType = EventKind.commandIssued
+        let tag = EventTypeTag.commandIssued
         // Reads version 0 and produces version 1 — the current one. Anchored at 0 rather than 1 because
         // `commandIssued` is only at version 1 today, so a step *into* the current version is the only
         // one that can actually run. When a real version 2 arrives this becomes `fromVersion = 1`.
@@ -151,7 +184,7 @@ final class EventSchemaTests: XCTestCase {
         let stored: [String: Any] = ["phraseologyCode": "101", "callsign": "AIC123",
                                      "slots": ["LEVEL": "260"], "source": "voice"]
 
-        let brought = try migrator.bringForward(stored, type: .commandIssued, from: 0)
+        let brought = try migrator.bringForward(stored, tag: .commandIssued, from: 0, to: 1)
         XCTAssertEqual(brought["code"] as? String, "101")
         XCTAssertNil(brought["phraseologyCode"], "the migration left the old field behind")
     }
@@ -162,7 +195,7 @@ final class EventSchemaTests: XCTestCase {
         // `currentVersion` was bumped without a migration being written.
         let migrator = EventMigrator()
         XCTAssertThrowsError(
-            try migrator.bringForward([:], type: .commandIssued, from: 0)
+            try migrator.bringForward([:], tag: .commandIssued, from: 0, to: 1)
         ) { error in
             XCTAssertEqual(error as? EventSchemaError, .missingMigration(.commandIssued, from: 0))
         }
@@ -171,7 +204,7 @@ final class EventSchemaTests: XCTestCase {
     /// The common case costs nothing: a payload already current is returned untouched.
     func testACurrentPayloadIsNotTouched() throws {
         let payload: [String: Any] = ["code": "101", "callsign": "AIC1"]
-        let brought = try EventMigrator().bringForward(payload, type: .commandIssued, from: 1)
+        let brought = try EventMigrator().bringForward(payload, tag: .commandIssued, from: 1, to: 1)
         XCTAssertEqual(brought["code"] as? String, "101")
         XCTAssertEqual(brought.count, payload.count)
     }
@@ -180,10 +213,12 @@ final class EventSchemaTests: XCTestCase {
     /// without opening the log.
     func testCanReadAnswersWithoutDecoding() {
         let migrator = EventMigrator([RenameCodeMigration()])
-        XCTAssertTrue(migrator.canRead(.commandIssued, version: 0), "the registered step should apply")
-        XCTAssertTrue(migrator.canRead(.commandIssued, version: 1), "already current")
-        XCTAssertFalse(migrator.canRead(.commandIssued, version: 2), "newer than this build")
-        XCTAssertFalse(EventMigrator().canRead(.commandIssued, version: 0), "no step registered")
+        XCTAssertTrue(migrator.canRead(.commandIssued, version: 0, target: 1),
+                      "the registered step should apply")
+        XCTAssertTrue(migrator.canRead(.commandIssued, version: 1, target: 1), "already current")
+        XCTAssertFalse(migrator.canRead(.commandIssued, version: 2, target: 1), "newer than this build")
+        XCTAssertFalse(EventMigrator().canRead(.commandIssued, version: 0, target: 1),
+                       "no step registered")
     }
 
     // MARK: - Determinism of the bytes
@@ -191,7 +226,7 @@ final class EventSchemaTests: XCTestCase {
     /// The same event must always produce the same bytes: the seal is computed over them, so a digest
     /// that varied with dictionary order would be worthless.
     func testEncodingIsByteStable() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let event = ATCEvent.commandIssued(code: "101", callsign: "AIC123",
                                            slots: ["LEVEL": "260", "SPEED": "300"],
                                            at: EventPosition(tick: 7, ordinal: 3),
@@ -204,7 +239,7 @@ final class EventSchemaTests: XCTestCase {
     }
 
     func testEveryKindStillRoundTripsThroughTheEnvelope() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         for event in Self.oneOfEveryKind {
             XCTAssertEqual(try coder.decode(try coder.encode(event)), event)
         }
@@ -229,9 +264,12 @@ final class EventSchemaTests: XCTestCase {
         ]
     }()
 
-    private static func encodedObject(_ payload: EventPayload) throws -> [String: Any] {
-        let data = try EventCoder().encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                                payload: payload))
+    /// One event, encoded, as a mutable object — so a test can corrupt a single envelope field.
+    ///
+    /// Takes an `Event` rather than a payload, because a payload is the adapter's to build and `ATCEvent` is
+    /// how it is built. There is no longer any way to hand a bare payload to the core, which is the point.
+    private static func encodedObject(_ event: Event) throws -> [String: Any] {
+        let data = try EventCoder(coding: ATCEventCodec()).encode(event)
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 }

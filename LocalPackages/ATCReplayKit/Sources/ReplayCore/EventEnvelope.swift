@@ -1,6 +1,6 @@
 //
 //  EventEnvelope.swift
-//  ATCReplayKit
+//  ReplayCore
 //
 //  How a recorded event survives the app changing around it.
 //
@@ -14,16 +14,19 @@
 //      correlationID   the chain this belongs to        } optional; tracing only,
 //      causationID     the event that caused this one   } never ordering, never replay
 //
-//  Three numbers rather than one, because they change at different rates and for different reasons.
-//  A new field on `commandIssued` bumps only that type's `eventVersion`; a change to the envelope
-//  itself bumps `schemaVersion`; and neither has anything to do with the manifest, which is versioned
-//  separately (`SessionManifest.manifestVersion`). Collapsing them into a single number would mean
-//  every unrelated change invalidating every reader's assumptions about every event.
+//  Three numbers rather than one, because they change at different rates, for different reasons, and
+//  at the hands of different owners. A new field on one kind of payload bumps only that tag's
+//  `eventVersion`, and the *adapter* decides that; a change to the envelope itself bumps
+//  `schemaVersion`, and the *core* decides that; and neither has anything to do with the manifest,
+//  which is versioned separately (`SessionManifest.manifestVersion`). Collapsing them into a single
+//  number would mean every unrelated change invalidating every reader's assumptions about every event
+//  — and would mean neither side could release without the other.
 //
 //  ── Why migrations operate on dictionaries ─────────────────────────────────
 //  A migration's whole job is to adapt a shape the current types cannot express. If migrations were
 //  typed, every historical version of every payload would have to be kept as a Swift type, forever,
-//  and the package would accumulate `CommandIssuedV1`, `V2`, `V3`… Operating on the decoded JSON
+//  and the package would accumulate a `V1`, `V2`, `V3`… of every payload a domain ever wrote —
+//  in a package that is not allowed to know what any of them mean. Operating on the decoded JSON
 //  instead means old shapes need no code at all — only the transformation that brings them forward.
 //
 //  The chain runs on read, so the rest of the system only ever sees the current shape. Nothing
@@ -32,28 +35,6 @@
 //
 
 import Foundation
-
-// MARK: - Versions
-
-extension EventKind {
-
-    /// The payload version this build writes for this kind.
-    ///
-    /// Bumped per kind, independently. Written out case by case rather than returning a single
-    /// constant so that bumping one cannot silently bump the others — which is the entire point of
-    /// versioning them separately.
-    public var currentVersion: Int {
-        switch self {
-        case .commandIssued:      return 1
-        case .commandRejected:    return 1
-        case .transcriptReceived: return 1
-        case .readbackSpoken:     return 1
-        case .weatherChanged:     return 1
-        case .scoreEvaluated:     return 1
-        case .timelineAction:     return 1
-        }
-    }
-}
 
 // MARK: - Envelope
 
@@ -64,7 +45,11 @@ public struct EventEnvelope: Equatable, Sendable {
     public static let currentSchemaVersion = 1
 
     public let schemaVersion: Int
-    public let eventType: EventKind
+
+    /// Which kind of event this is. A domain's number, which the core writes and reads but never interprets.
+    public let eventType: EventTypeTag
+
+    /// Which version of *that tag's* payload. The adapter's number — see `EventPayloadCoding.currentVersion`.
     public let eventVersion: Int
     public let position: EventPosition
 
@@ -80,7 +65,7 @@ public struct EventEnvelope: Equatable, Sendable {
     public let wallClock: Date?
 
     public init(schemaVersion: Int = EventEnvelope.currentSchemaVersion,
-                eventType: EventKind,
+                eventType: EventTypeTag,
                 eventVersion: Int,
                 position: EventPosition,
                 source: EventSource = .unspecified,
@@ -97,9 +82,13 @@ public struct EventEnvelope: Equatable, Sendable {
         self.wallClock = wallClock
     }
 
-    public init(_ event: Event) {
-        self.init(eventType: event.kind,
-                  eventVersion: event.kind.currentVersion,
+    /// The envelope for an event, at the payload version the caller's codec writes.
+    ///
+    /// `eventVersion` is a parameter rather than something read off the event, because only the adapter knows
+    /// it. The core reads the tag from the body — it is envelope data — and asks the codec for the version.
+    public init(_ event: Event, eventVersion: Int) {
+        self.init(eventType: event.tag,
+                  eventVersion: eventVersion,
                   position: event.position,
                   source: event.source,
                   correlationID: event.correlationID,
@@ -121,9 +110,9 @@ public enum EventSchemaError: Error, Equatable {
     /// The envelope structure is newer than this build understands.
     case unsupportedSchema(found: Int, supported: Int)
     /// The payload is newer than this build understands, and no migration can go backwards.
-    case unsupportedEventVersion(EventKind, found: Int, supported: Int)
+    case unsupportedEventVersion(EventTypeTag, found: Int, supported: Int)
     /// A step is missing from the chain — version N exists on disk but nothing migrates N → N+1.
-    case missingMigration(EventKind, from: Int)
+    case missingMigration(EventTypeTag, from: Int)
     case malformed(String)
 }
 
@@ -133,54 +122,67 @@ public enum EventSchemaError: Error, Equatable {
 /// have to be rewritten every time another was added, and a gap in the chain would be invisible;
 /// single steps make a gap a loud, specific error.
 public protocol EventMigration: Sendable {
-    var eventType: EventKind { get }
+
+    /// Which kind of event this step migrates. A tag, because a migration belongs to the adapter that owns
+    /// the number — the core neither knows nor reserves any.
+    var tag: EventTypeTag { get }
+
     /// The version this step reads. It produces `fromVersion + 1`.
     var fromVersion: Int { get }
+
     func migrate(_ payload: [String: Any]) throws -> [String: Any]
 }
 
-/// Brings a stored payload forward to the shape this build expects.
+/// Brings a stored payload forward to the shape a codec expects.
 ///
-/// Empty today — nothing has needed migrating yet — and that is the point of having it now: the first
-/// event field ever added is a one-line registration rather than a redesign, and no historical
-/// recording has to be rewritten.
+/// ── Who decides how far forward ────────────────────────────────────────────
+/// The target is a parameter, supplied by the codec through `EventPayloadCoding.currentVersion(for:)`. It
+/// used to be read off a per-kind table in the core, which meant the core knew the roster of a domain's event
+/// kinds and their versions — the last place the ATC vocabulary was reachable from here. Taking it as an
+/// argument is what lets an adapter add a payload version without a core release: the core migrates to the
+/// number it is given and has no opinion about what that number should be.
+///
+/// Empty by default — nothing has needed migrating yet — and that is the point of having it now: the first
+/// event field ever added is a one-line registration rather than a redesign, and no historical recording has
+/// to be rewritten.
 public struct EventMigrator: @unchecked Sendable {
 
     // @unchecked because the dictionary holds existentials. Every `EventMigration` is `Sendable` and
     // the registry is immutable after init, so this is safe — but the compiler cannot see that through
     // a nested dictionary of existentials.
-    private let migrations: [EventKind: [Int: any EventMigration]]
+    private let migrations: [EventTypeTag: [Int: any EventMigration]]
 
     public init(_ migrations: [any EventMigration] = []) {
-        var indexed: [EventKind: [Int: any EventMigration]] = [:]
+        var indexed: [EventTypeTag: [Int: any EventMigration]] = [:]
         for migration in migrations {
-            indexed[migration.eventType, default: [:]][migration.fromVersion] = migration
+            indexed[migration.tag, default: [:]][migration.fromVersion] = migration
         }
         self.migrations = indexed
     }
 
-    /// The migrator this build uses.
-    public static let current = EventMigrator()
+    /// From a codec's table, already keyed by tag and from-version.
+    public init(table: [EventTypeTag: [Int: any EventMigration]]) {
+        self.migrations = table
+    }
 
-    /// Runs every step from `version` up to the current one.
+    /// Runs every step from `version` up to `target`.
     ///
-    /// A payload already at the current version is returned untouched, which is the overwhelmingly
-    /// common case and costs nothing.
+    /// A payload already at the target is returned untouched, which is the overwhelmingly common case and
+    /// costs nothing.
     public func bringForward(_ payload: [String: Any],
-                            type: EventKind,
-                            from version: Int) throws -> [String: Any] {
-        let target = type.currentVersion
-
+                            tag: EventTypeTag,
+                            from version: Int,
+                            to target: Int) throws -> [String: Any] {
         // Newer than we know how to read. Migrations only go forward, so there is nothing to try.
         guard version <= target else {
-            throw EventSchemaError.unsupportedEventVersion(type, found: version, supported: target)
+            throw EventSchemaError.unsupportedEventVersion(tag, found: version, supported: target)
         }
 
         var payload = payload
         var current = version
         while current < target {
-            guard let step = migrations[type]?[current] else {
-                throw EventSchemaError.missingMigration(type, from: current)
+            guard let step = migrations[tag]?[current] else {
+                throw EventSchemaError.missingMigration(tag, from: current)
             }
             payload = try step.migrate(payload)
             current += 1
@@ -188,13 +190,13 @@ public struct EventMigrator: @unchecked Sendable {
         return payload
     }
 
-    /// Whether a stored version can be read, without attempting it. For a session list that wants to
-    /// show "recorded by a newer version" without opening the log.
-    public func canRead(_ type: EventKind, version: Int) -> Bool {
-        guard version <= type.currentVersion else { return false }
+    /// Whether a stored version can be brought up to `target`, without attempting it. For a session list that
+    /// wants to show "recorded by a newer version" without opening the log.
+    public func canRead(_ tag: EventTypeTag, version: Int, target: Int) -> Bool {
+        guard version <= target else { return false }
         var current = version
-        while current < type.currentVersion {
-            guard migrations[type]?[current] != nil else { return false }
+        while current < target {
+            guard migrations[tag]?[current] != nil else { return false }
             current += 1
         }
         return true

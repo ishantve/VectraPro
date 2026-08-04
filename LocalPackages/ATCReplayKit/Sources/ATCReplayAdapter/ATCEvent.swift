@@ -12,9 +12,10 @@
 //
 //  So this is the adapter's construction API and it is meant to outlive the migration. Everything that makes an ATC
 //  event — tests, fixture generation, the golden corpus, future tooling, and the recording path itself — goes
-//  through here. After R2b-atomic the payload type underneath changes from a ReplayCore enum to an opaque body, and
-//  **not one call site moves**. That property is the whole point, and it is only available because the call sites
-//  name an intent ("a command was issued") rather than a representation.
+//  through here. R2b-atomic then changed the payload type underneath from a ReplayCore enum to an opaque body,
+//  and **not one call site moved** — the bodies of these functions are the whole diff. That property was the
+//  point, and it was only available because the call sites name an intent ("a command was issued") rather than a
+//  representation.
 //
 //  ── Why free functions rather than an initialiser ──────────────────────────
 //  An `Event` is core infrastructure: position, source, identity, tracing. What varies per domain is only the
@@ -46,7 +47,7 @@ public enum ATCEvent {
                                      causationID: EventID? = nil,
                                      wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .commandIssued(code: code, callsign: callsign, slots: slots),
+              payload: ATCPayload.commandIssued(code: code, callsign: callsign, slots: slots).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -63,7 +64,7 @@ public enum ATCEvent {
                                        causationID: EventID? = nil,
                                        wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .commandRejected(code: code, callsign: callsign, reason: reason),
+              payload: ATCPayload.commandRejected(code: code, callsign: callsign, reason: reason).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -77,7 +78,7 @@ public enum ATCEvent {
                                           causationID: EventID? = nil,
                                           wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .transcriptReceived(raw: raw, normalized: normalized),
+              payload: ATCPayload.transcriptReceived(raw: raw, normalized: normalized).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -92,7 +93,7 @@ public enum ATCEvent {
                                       causationID: EventID? = nil,
                                       wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .readbackSpoken(callsign: callsign, spoken: spoken),
+              payload: ATCPayload.readbackSpoken(callsign: callsign, spoken: spoken).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -108,8 +109,8 @@ public enum ATCEvent {
                                       causationID: EventID? = nil,
                                       wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .weatherChanged(windDegrees: windDegrees, windKnots: windKnots,
-                                       visibilityMetres: visibilityMetres, qnh: qnh),
+              payload: ATCPayload.weatherChanged(windDegrees: windDegrees, windKnots: windKnots,
+                                                 visibilityMetres: visibilityMetres, qnh: qnh).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -126,7 +127,7 @@ public enum ATCEvent {
                                       causationID: EventID? = nil,
                                       wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .scoreEvaluated(value: value, rulesVersion: rulesVersion),
+              payload: ATCPayload.scoreEvaluated(value: value, rulesVersion: rulesVersion).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
     }
@@ -142,8 +143,22 @@ public enum ATCEvent {
                                causationID: EventID? = nil,
                                wallClock: Date? = nil) -> Event {
         Event(position: position,
-              payload: .timelineAction(action),
+              payload: ATCPayload.timelineAction(action).body,
               source: source, correlationID: correlationID,
               causationID: causationID, wallClock: wallClock)
+    }
+
+    // MARK: - Reading one back
+
+    /// What a recorded event says, in ATC terms.
+    ///
+    /// Nil when the event carries another domain's payload — which in practice means a log from a different
+    /// adapter was handed to this one. Nil rather than throwing because every caller's honest response is the
+    /// same as for a payload it cannot interpret: leave it alone.
+    ///
+    /// This is the counterpart to the constructors above and the only sanctioned way to read a payload back.
+    /// It exists because a body is opaque *to the core* — not to the adapter that wrote it.
+    public static func payload(of event: Event) -> ATCPayload? {
+        try? event.payload.unwrap(ATCPayload.self)
     }
 }

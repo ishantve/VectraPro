@@ -41,6 +41,15 @@ The core hands over a JSON object and a tag; the adapter returns a payload, or t
 object. Dictionaries rather than `Data` on purpose: the core owns the outer object and the sorted-key ordering the
 seal depends on, and handing an adapter raw bytes would let it decide framing that is not its business.
 
+**Where each of the four lives, as built by R2b-atomic.** `Payload` above is the adapter's own typed payload, and
+three of the four signatures are the adapter's typed coding (`ATCEventCodec`, over `ATCPayload`). The core's half of
+the protocol — `EventPayloadCoding` — asks the same questions in terms of `EventBody`, and does **not** ask
+`tag(for:)`: a body carries its tag, supplied by the adapter that built it. That is deliberate and follows from
+§2.2's own principle. If the core had to call a codec to learn an event's tag, then routing, indexing and the
+skip-or-apply decision would all require a codec, and a log written by a domain this build knows nothing about could
+not even be ordered. The tag is envelope data; the payload is not. When R4 makes the codec generic, `tag(for:)`
+becomes total over the typed payload and the two halves collapse back into one protocol.
+
 ### 2.2 Replay policy by tag — required
 
 ```
@@ -220,8 +229,10 @@ everything shared is shared **on purpose**.
 | `EventSource` | `source:` parameter | **Boundary Contract** | Neither side owns the meaning alone. The core routes, filters and reports by source without interpreting it; the adapter supplies which source applies. It is an extensible constant precisely so a domain can add `.simulatedPilot` without a core release — that extensibility is what makes it a contract rather than a core concept. |
 | `EventID` | `correlationID:` / `causationID:` | **Core Concept** | Identity is derived from `(session, ordinal)` — a core rule — and the core guarantees uniqueness. The adapter only ever passes one back that the core produced. |
 | `TimelineAction` | `ATCEvent.timeline(_:)` | **Core Concept** | Pause, resume, speed, seek are platform actions. A racing or medical replay performs them identically, and recording them is how "this trainee paused fourteen times" stays answerable. It reads as ATC vocabulary only because ATC is currently the sole adapter. |
-| `EventPayload` | inside every function body | **Leak** | The ATC vocabulary still lives in ReplayCore. **Recommendation: removed by R2b-atomic** — this is that phase's substance, not debt to carry. |
-| `EventPayloadCoding`, `DefaultEventPayloadCoding` | public in ReplayCore | **Leak** | The protocol is a legitimate boundary contract; the *default implementation* is ATC coding sitting in the core, parked there by R2a so the seam could be proved byte-neutral before the vocabulary moved. **Recommendation: `DefaultEventPayloadCoding` moves to the adapter in R2b-atomic; the protocol stays and is reclassified Boundary Contract.** |
+| `EventBody` | `Event.payload`, built by every `ATCEvent` function | **Core Concept** | Replaced `EventPayload` in R2b-atomic. A tag the core routes on plus a value it cannot read — which is what "the core routes payloads" means once written as a type. The adapter is the only party that boxes or unboxes one. |
+| `EventTypeTag` | `Event.tag`, `EventEnvelope.eventType`, keys of every codec table | **Boundary Contract** | The core owns the type; the adapter owns the values, and `ATCReplayAdapter` declares 1…7 permanently. Neither side owns it alone: the core must read a tag to route and index, and only a domain can say what its tags mean — the same shape as `EventSource`, for the same compatibility reason. |
+| `EventPayloadCoding` | conformed to by `ATCEventCodec` | **Boundary Contract** | Reclassified as scheduled. Every signature is now in tags, bodies, JSON objects and integers; it names no domain noun, and ReplayCore no longer implements it. `DefaultEventPayloadCoding` is gone — its ATC coding is `ATCEventCodec`, in the adapter. |
+| `EventMigration`, `EventMigrator` | `migrations` on the codec | **Boundary Contract** | Re-keyed by tag in R2b-atomic, and `bringForward` now takes the target version from the codec rather than reading a per-kind table in the core. The core runs the chain; the adapter owns its contents and how far it goes. |
 | `EventSchemaError` | thrown by coding functions | **Boundary Contract** | The adapter throws it when a payload will not decode, and the core throws it for envelope problems. Shared deliberately so a caller has one error domain for "this event could not be read", rather than two that mean the same thing. |
 
 **Answer to the question that prompted this.** `EventPosition` is a Core Concept, not a leak. The test that settles
@@ -229,9 +240,15 @@ it: would another deterministic simulation need this concept even if ReplayCore 
 the answer is yes — it is what deterministic ordering *is*. For `EventPayload` the answer is no, and that is exactly
 why one stays and the other moves.
 
-**Two leaks, both known, both scheduled.** Neither is being carried as debt; both are R2b-atomic's work. After that
-phase this table should contain no Leak rows, and the Architecture Stability Review will re-run this classification
-rather than assume it.
+**No Leak rows.** Re-run against the code after R2b-atomic, not assumed: the adapter names exactly nine ReplayCore
+types — `Event`, `EventBody`, `EventTypeTag`, `EventPosition`, `EventSource`, `EventID`, `TimelineAction`,
+`EventPayloadCoding`, `EventSchemaError` — and every one is classified above as a Core Concept or a Boundary
+Contract. `EventPayload`, `EventKind` and `DefaultEventPayloadCoding` no longer exist.
+
+**One naming artefact, permanently carried.** `EventStore`'s frame magic is `"ATC1"` (`0x41544331`). It is ATC
+vocabulary in a core file, and it is four bytes at the head of every frame of every recording ever written — so it
+is a *format*, not a name, and renaming it would make the archive unreadable to buy nothing. Compatibility outranks
+cleanliness (§9). Recorded here so a future reviewer finds a decision rather than an oversight.
 
 ---
 

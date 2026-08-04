@@ -97,7 +97,7 @@ final class EventIDTests: XCTestCase {
     func testAnEnvelopeCanNameItsEventWithoutThePayload() throws {
         let event = ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
                                            at: EventPosition(tick: 3, ordinal: 11))
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let envelope = try coder.decodeEnvelope(try coder.encode(event))
 
         XCTAssertEqual(envelope.id(in: session), event.id(in: session))

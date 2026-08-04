@@ -50,7 +50,8 @@ final class InputGatewayTests: XCTestCase {
             sessionID: UUID(), sessionClass: sessionClass,
             manifestBytes: Data(#"{"seed":1}"#.utf8),
             store: EventStore(url: directory.appendingPathComponent("events.log"),
-                              sessionClass: sessionClass))
+                              sessionClass: sessionClass,
+                              coding: ATCEventCodec()))
         viewModel.inputs.resume(after: try recorder.open())
         viewModel.inputs.recorder = recorder
         return recorder
@@ -58,7 +59,8 @@ final class InputGatewayTests: XCTestCase {
 
     private func log(_ sessionClass: SessionClass = .training) throws -> [Event] {
         try EventStore(url: directory.appendingPathComponent("events.log"),
-                       sessionClass: sessionClass).readAll()
+                       sessionClass: sessionClass,
+                       coding: ATCEventCodec()).readAll()
     }
 
     // MARK: - Stamping
@@ -113,7 +115,7 @@ final class InputGatewayTests: XCTestCase {
 
         let events = try log()
         XCTAssertEqual(events.count, 1)
-        guard case .commandIssued(let code, _, let slots) = events[0].payload else {
+        guard case .commandIssued(let code, _, let slots)? = ATCEvent.payload(of: events[0]) else {
             return XCTFail("expected commandIssued, got \(events[0].payload)")
         }
         XCTAssertEqual(code, "101", "the phraseology code, not a mapped command")
@@ -202,7 +204,8 @@ final class InputGatewayTests: XCTestCase {
             sessionID: UUID(), sessionClass: .assessment,
             manifestBytes: Data("{}".utf8),
             store: EventStore(url: directory.appendingPathComponent("nowhere/events.log"),
-                              sessionClass: .assessment))
+                              sessionClass: .assessment,
+                              coding: ATCEventCodec()))
         viewModel.inputs.recorder = recorder
 
         let target = try XCTUnwrap(viewModel.aircraft.first)
@@ -225,8 +228,9 @@ final class InputGatewayTests: XCTestCase {
         let recorder = try attachRecorder(to: viewModel)
 
         let before = viewModel.stateHash.value
-        viewModel.inputs.annotate(.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING"),
-                                  source: .system)
+        viewModel.inputs.annotate {
+            ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING", at: $0, source: .system)
+        }
         recorder.flush()
 
         XCTAssertEqual(viewModel.stateHash.value, before)

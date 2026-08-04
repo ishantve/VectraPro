@@ -1,19 +1,19 @@
 //
 //  EventCoding.swift
-//  ATCReplayKit
+//  ReplayCore
 //
 //  How an event becomes bytes.
 //
-//  Written out by hand rather than left to Swift's synthesised enum `Codable`. The synthesised form
-//  keys on Swift case and parameter *names*, so renaming a parameter — a refactor with no intent
-//  behind it — would silently stop old recordings decoding. A recording outlives the code that wrote
-//  it, so the mapping between names and bytes has to be a decision, written down, and only ever
-//  added to.
+//  This file writes the envelope and nothing else. The payload arrives as a JSON object from a codec
+//  and is placed under one key; on the way back, an object comes out from under that key, is brought
+//  forward by any migrations, and is handed to the codec. At no point does anything here look inside
+//  it — the core cannot, and that is the property the phase exists to establish.
 //
 //  Rules for changing this file:
-//    • new fields are optional, and absent means "was not recorded", never a default that looks real
-//    • `EventKind` numbers are never reused
-//    • a field's meaning never changes; a new meaning is a new field
+//    • new envelope fields are optional, and absent means "was not recorded", never a default that
+//      looks real
+//    • the envelope's key names never change meaning; a new meaning is a new key
+//    • wire tags are never reused — and they are not ours to reuse: an adapter owns its numbers
 //
 //  The payload encodes as JSON. The doc argued for compact binary and the framing *is* binary, which
 //  is what buys crash safety — but the payload is a separate concern, and at roughly a thousand
@@ -24,108 +24,13 @@
 
 import Foundation
 
-extension EventPayload: Codable {
-
-    private enum CodingKeys: String, CodingKey {
-        case kind
-        case code, callsign, slots, reason
-        case raw, normalized, spoken
-        case windDegrees, windKnots, visibilityMetres, qnh
-        case value, rulesVersion
-        case action
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(kind, forKey: .kind)
-
-        switch self {
-        case .commandIssued(let code, let callsign, let slots):
-            try container.encode(code, forKey: .code)
-            try container.encode(callsign, forKey: .callsign)
-            try container.encode(slots, forKey: .slots)
-
-        case .commandRejected(let code, let callsign, let reason):
-            try container.encodeIfPresent(code, forKey: .code)
-            try container.encodeIfPresent(callsign, forKey: .callsign)
-            try container.encode(reason, forKey: .reason)
-
-        case .transcriptReceived(let raw, let normalized):
-            try container.encode(raw, forKey: .raw)
-            try container.encode(normalized, forKey: .normalized)
-
-        case .readbackSpoken(let callsign, let spoken):
-            try container.encode(callsign, forKey: .callsign)
-            try container.encode(spoken, forKey: .spoken)
-
-        case .weatherChanged(let windDegrees, let windKnots, let visibility, let qnh):
-            try container.encodeIfPresent(windDegrees, forKey: .windDegrees)
-            try container.encodeIfPresent(windKnots, forKey: .windKnots)
-            try container.encodeIfPresent(visibility, forKey: .visibilityMetres)
-            try container.encodeIfPresent(qnh, forKey: .qnh)
-
-        case .scoreEvaluated(let value, let rulesVersion):
-            try container.encode(value, forKey: .value)
-            try container.encode(rulesVersion, forKey: .rulesVersion)
-
-        case .timelineAction(let action):
-            try container.encode(action, forKey: .action)
-        }
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let kind = try container.decode(EventKind.self, forKey: .kind)
-
-        switch kind {
-        case .commandIssued:
-            self = .commandIssued(
-                code: try container.decode(String.self, forKey: .code),
-                callsign: try container.decode(String.self, forKey: .callsign),
-                // Absent rather than empty in older recordings; empty is the honest reading.
-                slots: try container.decodeIfPresent([String: String].self, forKey: .slots) ?? [:])
-
-        case .commandRejected:
-            self = .commandRejected(
-                code: try container.decodeIfPresent(String.self, forKey: .code),
-                callsign: try container.decodeIfPresent(String.self, forKey: .callsign),
-                reason: try container.decode(String.self, forKey: .reason))
-
-        case .transcriptReceived:
-            self = .transcriptReceived(
-                raw: try container.decode(String.self, forKey: .raw),
-                normalized: try container.decode(String.self, forKey: .normalized))
-
-        case .readbackSpoken:
-            self = .readbackSpoken(
-                callsign: try container.decode(String.self, forKey: .callsign),
-                spoken: try container.decode(String.self, forKey: .spoken))
-
-        case .weatherChanged:
-            self = .weatherChanged(
-                windDegrees: try container.decodeIfPresent(Int.self, forKey: .windDegrees),
-                windKnots: try container.decodeIfPresent(Int.self, forKey: .windKnots),
-                visibilityMetres: try container.decodeIfPresent(Int.self, forKey: .visibilityMetres),
-                qnh: try container.decodeIfPresent(Int.self, forKey: .qnh))
-
-        case .scoreEvaluated:
-            self = .scoreEvaluated(
-                value: try container.decode(Int.self, forKey: .value),
-                rulesVersion: try container.decode(String.self, forKey: .rulesVersion))
-
-        case .timelineAction:
-            self = .timelineAction(try container.decode(TimelineAction.self, forKey: .action))
-        }
-    }
-}
-
 // MARK: - Coder
 
 /// Turns an event into bytes and back, through a versioned envelope.
 ///
 /// Two stages on read, deliberately: the envelope is read first, then the payload is brought forward
-/// through any migrations, and only then decoded into a typed `EventPayload`. A single-stage typed
-/// decode could not do that — it would need every historical shape to exist as a Swift type.
+/// through any migrations, and only then handed to the codec. A single-stage typed decode could not do
+/// that — it would need every historical shape to exist as a Swift type.
 ///
 /// The wire form:
 ///
@@ -146,22 +51,30 @@ extension EventPayload: Codable {
 /// without interpreting — or migrating — a payload this build may not understand.
 public struct EventCoder: Sendable {
 
-    private let migrator: EventMigrator
-
-    /// Who turns payloads into JSON objects and back. Injected so a domain owns its own vocabulary; the default
-    /// is the behaviour this coder performed itself before the seam existed, so nothing changes for a caller.
+    /// Who turns payloads into JSON objects and back, which version each tag is written at, and which steps
+    /// bring an older one forward.
+    ///
+    /// Required, with no default. A default would mean some domain's vocabulary living in the core under a
+    /// neutral name, which is the thing this phase removed; a consumer without a codec has not finished
+    /// writing an adapter, and finding that out at the compiler rather than at the first recording is the
+    /// better failure.
     private let payloadCoding: any EventPayloadCoding
 
-    public init(migrator: EventMigrator = .current,
-                payloadCoding: any EventPayloadCoding = DefaultEventPayloadCoding()) {
-        self.migrator = migrator
-        self.payloadCoding = payloadCoding
+    /// Built from the codec's table. The core runs the chain; the adapter owns its contents.
+    private let migrator: EventMigrator
+
+    public init(coding: any EventPayloadCoding) {
+        self.payloadCoding = coding
+        self.migrator = EventMigrator(table: coding.migrations)
     }
 
     // MARK: Encoding
 
     public func encode(_ event: Event) throws -> Data {
-        let envelope = EventEnvelope(event)
+        // The tag comes off the body — envelope data the adapter supplied when it built the event — and the
+        // version comes from the codec, because payload versioning is the adapter's half of the split.
+        let envelope = EventEnvelope(event,
+                                     eventVersion: payloadCoding.currentVersion(for: event.tag))
         var object: [String: Any] = [
             "schemaVersion": envelope.schemaVersion,
             "eventType": envelope.eventType.rawValue,
@@ -197,14 +110,16 @@ public struct EventCoder: Sendable {
         let object = try Self.object(data)
         guard let schemaVersion = object["schemaVersion"] as? Int,
               let typeRaw = object["eventType"] as? Int,
-              let eventType = EventKind(rawValue: UInt16(truncatingIfNeeded: typeRaw)),
               let eventVersion = object["eventVersion"] as? Int,
               let tick = object["tick"] as? Int,
               let ordinal = object["ordinal"] as? Int
         else { throw EventSchemaError.malformed("envelope fields missing or wrong type") }
 
+        // Any tag decodes, known to this build's codec or not — for exactly the reason any source does. The
+        // envelope must stay readable when it names a kind of event only a newer build understands, so an
+        // unknown tag costs its payload and nothing else.
         return EventEnvelope(schemaVersion: schemaVersion,
-                             eventType: eventType,
+                             eventType: EventTypeTag(UInt16(truncatingIfNeeded: typeRaw)),
                              eventVersion: eventVersion,
                              position: EventPosition(tick: tick,
                                                      ordinal: UInt32(truncatingIfNeeded: ordinal)),
@@ -231,13 +146,18 @@ public struct EventCoder: Sendable {
             throw EventSchemaError.malformed("payload missing")
         }
 
-        let brought = try migrator.bringForward(stored,
-                                               type: envelope.eventType,
-                                               from: envelope.eventVersion)
-        // The type discriminator lives in the envelope; `EventPayload`'s decoder reads it from the
-        // payload, so it is put back rather than duplicated on the wire.
+        // Migrated only as far as the codec says this tag currently goes. The core has no table of its own to
+        // consult, which is what lets an adapter add a version without a core release.
+        let brought = try migrator.bringForward(
+            stored,
+            tag: envelope.eventType,
+            from: envelope.eventVersion,
+            to: payloadCoding.currentVersion(for: envelope.eventType))
+
+        // The tag travels beside the object rather than inside it: the discriminator lives in the envelope,
+        // and writing it twice would create two spellings that could disagree.
         let payload = try payloadCoding.payload(from: brought,
-                                                kind: envelope.eventType,
+                                                tag: envelope.eventType,
                                                 version: envelope.eventVersion)
 
         return Event(position: envelope.position, payload: payload,

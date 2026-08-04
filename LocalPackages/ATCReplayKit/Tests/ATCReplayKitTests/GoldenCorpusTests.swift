@@ -61,12 +61,12 @@ final class GoldenCorpusTests: XCTestCase {
                                    exerciseName: "Corpus"),
         createdAt: createdAt)
 
-    /// One event of **every** `EventKind`, plus the envelope features that are easy to break: a non-default
+    /// One event of **every** ATC tag, plus the envelope features that are easy to break: a non-default
     /// source, a correlation, a causation, and an audit-only wall clock.
     ///
-    /// All seven kinds on purpose. Phase R2 moves this vocabulary into an adapter and makes the payload opaque to
-    /// the core; the tags 1…7 and their encodings must survive that move exactly, and a corpus missing a kind is
-    /// a kind nobody notices breaking.
+    /// All seven kinds on purpose. R2b-atomic moved this vocabulary into an adapter and made the payload opaque
+    /// to the core; the tags 1…7 and their encodings had to survive that move exactly, and a corpus missing a
+    /// kind is a kind nobody notices breaking. These fixtures were written before the move and are unchanged.
     private static var corpus: [Event] {
         let root = EventID(session: sessionID, ordinal: 0)
         return [
@@ -144,7 +144,7 @@ final class GoldenCorpusTests: XCTestCase {
             .appendingPathComponent("corpus-\(UUID().uuidString).log")
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let store = EventStore(url: url, sessionClass: .training)
+        let store = EventStore(url: url, sessionClass: .training, coding: ATCEventCodec())
         try store.openForAppending()
         var frames: [Data] = []
         for event in Self.corpus {
@@ -164,7 +164,7 @@ final class GoldenCorpusTests: XCTestCase {
     /// an encode difference means new recordings are written in a dialect the old reader does not know. Only the
     /// pair rules out both.
     func testTheCommittedCorpusStillRoundTripsByteForByte() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
 
         if Self.isRegenerating {
             try regenerate(coder: coder)
@@ -198,7 +198,7 @@ final class GoldenCorpusTests: XCTestCase {
                            "event \(index): position moved")
             XCTAssertEqual(envelope.source, Self.corpus[index].source,
                            "event \(index): source moved")
-            XCTAssertEqual(envelope.eventType, Self.corpus[index].payload.kind,
+            XCTAssertEqual(envelope.eventType, Self.corpus[index].tag,
                            "event \(index): wire tag changed — stored recordings now mean something else")
 
             let event = try coder.decode(stored)
@@ -218,7 +218,7 @@ final class GoldenCorpusTests: XCTestCase {
             .appendingPathComponent("corpus-read-\(UUID().uuidString).log")
         try storedLog.write(to: readURL)
         defer { try? FileManager.default.removeItem(at: readURL) }
-        let reread = try EventStore(url: readURL, sessionClass: .training).readAll()
+        let reread = try EventStore(url: readURL, sessionClass: .training, coding: ATCEventCodec()).readAll()
         XCTAssertEqual(reread, Self.corpus, "a stored log no longer reads back as the events that made it")
 
         // ── The seal ──────────────────────────────────────────────────────────
@@ -246,23 +246,25 @@ final class GoldenCorpusTests: XCTestCase {
         XCTAssertEqual(builder.frameCount, Self.corpus.count)
     }
 
-    /// Every `EventKind` appears in the corpus.
+    /// Every tag the ATC adapter writes appears in the corpus.
     ///
     /// Guards the corpus rather than the code: a kind added later without a fixture is a kind whose encoding
     /// nothing freezes, and it would go unnoticed precisely because all the other tests pass.
-    func testTheCorpusCoversEveryEventKind() {
-        let covered = Set(Self.corpus.map(\.payload.kind))
-        XCTAssertEqual(covered, Set(EventKind.allCases),
-                       "add a corpus event for every new EventKind, and regenerate deliberately")
+    func testTheCorpusCoversEveryEventTag() {
+        let covered = Set(Self.corpus.map(\.tag))
+        XCTAssertEqual(covered, Set(ATCEventCodec.allTags),
+                       "add a corpus event for every new tag, and regenerate deliberately")
     }
 
     /// `affectsSimulation` frozen **by wire tag**.
     ///
-    /// Phase R2 moves this decision out of the payload enum and onto a tag table in the ATC codec. That is the
-    /// single most dangerous edit in the extraction: get it wrong and a replay silently skips a real input or
-    /// applies an annotation. This table is what the new implementation will be checked against.
-    func testWhichKindsAffectTheSimulationIsFrozen() {
-        let expected: [EventKind: Bool] = [
+    /// R2b-atomic moved this decision out of the payload enum and onto a tag table in the ATC codec. That was
+    /// the single most dangerous edit in the extraction: get it wrong and a replay silently skips a real input
+    /// or applies an annotation. This table is what the moved implementation is checked against — the values
+    /// below are the ones that were frozen *before* the move, unchanged.
+    func testWhichTagsAffectTheSimulationIsFrozen() {
+        let codec = ATCEventCodec()
+        let expected: [EventTypeTag: Bool] = [
             .commandIssued: true,
             .weatherChanged: true,
             .commandRejected: false,
@@ -273,12 +275,11 @@ final class GoldenCorpusTests: XCTestCase {
         ]
 
         for event in Self.corpus {
-            let kind = event.payload.kind
-            XCTAssertEqual(event.payload.affectsSimulation, expected[kind],
-                           "\(kind) changed whether it feeds the simulation — replay would diverge")
+            XCTAssertEqual(codec.affectsSimulation(tag: event.tag), expected[event.tag],
+                           "\(event.tag) changed whether it feeds the simulation — replay would diverge")
         }
-        XCTAssertEqual(Set(expected.keys), Set(EventKind.allCases),
-                       "a new kind must declare whether it affects the simulation")
+        XCTAssertEqual(Set(expected.keys), Set(ATCEventCodec.allTags),
+                       "a new tag must declare whether it affects the simulation")
     }
 
     // MARK: - Regeneration

@@ -122,13 +122,22 @@ public final class SessionManager {
     /// The active session's manifest, kept so `EventStore` and a recorder can be built from it.
     public private(set) var activeManifest: SessionManifest?
 
+    /// How this consumer's payloads are coded.
+    ///
+    /// Held because the registrar opens event logs — to recover an interrupted session, and to read one back —
+    /// and a log cannot be read without the codec that wrote it. Passed through to every `EventStore` this
+    /// manager creates, so a caller supplies it once rather than at every open.
+    public let coding: any EventPayloadCoding
+
     public init(root: URL,
                 catalogue: SessionCatalogue,
                 environment: RecordingEnvironment,
+                coding: any EventPayloadCoding,
                 retention: RetentionPolicy = .unlimited) {
         self.root = root
         self.catalogue = catalogue
         self.environment = environment
+        self.coding = coding
         self.retention = retention
     }
 
@@ -272,7 +281,8 @@ public final class SessionManager {
             if summary.id == active?.id { continue }
 
             let store = EventStore(url: eventLogURL(for: summary.id),
-                                   sessionClass: summary.sessionClass)
+                                   sessionClass: summary.sessionClass,
+                                   coding: coding)
             let discarded = (try? store.truncateToLastValidFrame()) ?? 0
             let events = (try? store.readAll().count) ?? 0
 
@@ -323,7 +333,8 @@ public final class SessionManager {
     public func events(for id: SessionID) throws -> [Event] {
         let manifest = try manifest(for: id)
         return try EventStore(url: eventLogURL(for: id),
-                              sessionClass: manifest.sessionClass).readAll()
+                              sessionClass: manifest.sessionClass,
+                              coding: coding).readAll()
     }
 
     // MARK: Retention

@@ -51,7 +51,10 @@ public final class EventStore {
     public let url: URL
     public let sessionClass: SessionClass
 
-    private let coder = EventCoder()
+    /// How payloads become bytes. Supplied by the caller, because the store frames and checksums payloads it
+    /// is not allowed to understand — the codec is the only party that can read one.
+    private let coder: EventCoder
+
     private var handle: FileHandle?
 
     /// Events written but not yet flushed. Always empty for an assessment.
@@ -63,9 +66,10 @@ public final class EventStore {
     /// Events accepted since the store opened.
     public private(set) var count: Int = 0
 
-    public init(url: URL, sessionClass: SessionClass) {
+    public init(url: URL, sessionClass: SessionClass, coding: any EventPayloadCoding) {
         self.url = url
         self.sessionClass = sessionClass
+        self.coder = EventCoder(coding: coding)
     }
 
     deinit {

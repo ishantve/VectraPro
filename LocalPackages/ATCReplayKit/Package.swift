@@ -38,7 +38,9 @@ let package = Package(
                 dependencies: ["ReplayCore"],
                 linkerSettings: [.linkedLibrary("sqlite3")]),
 
-        .target(name: "ATCReplayKit", dependencies: ["ReplayCore"]),
+        // Both, because the old module name covered both: the ATC event vocabulary was part of `ATCReplayKit`
+        // before R1 split the package, and R2b-atomic moved it to the adapter rather than deleting it.
+        .target(name: "ATCReplayKit", dependencies: ["ReplayCore", "ATCReplayAdapter"]),
 
         // A target in this package rather than a package of its own, for one concrete reason: ReplayCore's own
         // test target needs it, and a separate package depending on ReplayCore that ReplayCore's tests then

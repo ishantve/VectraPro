@@ -14,7 +14,7 @@ import ATCReplayAdapter
 final class EventTracingTests: XCTestCase {
 
     private let session = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
-    private let coder = EventCoder()
+    private let coder = EventCoder(coding: ATCEventCodec())
 
     private func event(_ correlation: EventID? = nil, _ causation: EventID? = nil) -> Event {
         ATCEvent.commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"],
