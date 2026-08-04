@@ -22,7 +22,7 @@ WHAT="${1:-all}"
 
 packages() {
   echo "▸ Packages"
-  for package in ATCSimKit ATCTrafficKit ATCReplayKit NetworkKit; do
+  for package in SimDeterminism ATCSimKit ATCTrafficKit ATCReplayKit NetworkKit; do
     printf '  %-16s' "$package"
     if swift test --package-path "LocalPackages/$package" >/tmp/verify-$package.log 2>&1; then
       # The largest count, not the last line: `swift test` prints a summary per suite as well as one

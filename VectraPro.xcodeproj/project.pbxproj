@@ -14,7 +14,9 @@
 		8B7FEE2E2FEC24E10055FDF8 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8B7FEE2D2FEC24E10055FDF8 /* MapLibre */; };
 		A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */; };
 		A7C000000000000000000E1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000E2 /* ATCSimKit */; };
+		5D1000000000000000000E1 /* SimDeterminism in Frameworks */ = {isa = PBXBuildFile; productRef = 5D1000000000000000000E2 /* SimDeterminism */; };
 		A7C000000000000000000F1 /* ATCSimKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C000000000000000000F2 /* ATCSimKit */; };
+		5D1000000000000000000F1 /* SimDeterminism in Frameworks */ = {isa = PBXBuildFile; productRef = 5D1000000000000000000F2 /* SimDeterminism */; };
 		A7C9DD0000000000000000D1 /* ATCParserKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C9DD0000000000000000D2 /* ATCParserKit */; };
 		A7D000000000000000000E1 /* ATCTrafficKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7D000000000000000000E2 /* ATCTrafficKit */; };
 		A7D000000000000000000F1 /* ATCTrafficKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7D000000000000000000F2 /* ATCTrafficKit */; };
@@ -77,6 +79,7 @@
 				A7C9DD0000000000000000D1 /* ATCParserKit in Frameworks */,
 				4E70000000000000000000C1 /* NetworkKit in Frameworks */,
 				A7C000000000000000000E1 /* ATCSimKit in Frameworks */,
+				5D1000000000000000000E1 /* SimDeterminism in Frameworks */,
 				A7D000000000000000000E1 /* ATCTrafficKit in Frameworks */,
 				A7E000000000000000000R1 /* ATCReplayKit in Frameworks */,
 				A7E000000000000000000T1 /* ATCReplayStore in Frameworks */,
@@ -91,6 +94,7 @@
 			files = (
 				6E0C170000000000000000B1 /* GeoNavKit in Frameworks */,
 				A7C000000000000000000F1 /* ATCSimKit in Frameworks */,
+				5D1000000000000000000F1 /* SimDeterminism in Frameworks */,
 				A7D000000000000000000F1 /* ATCTrafficKit in Frameworks */,
 				A7E000000000000000000S1 /* ATCReplayKit in Frameworks */,
 				A7E000000000000000000U1 /* ATCReplayStore in Frameworks */,
@@ -153,6 +157,7 @@
 				A7C9DD0000000000000000D2 /* ATCParserKit */,
 				4E70000000000000000000C2 /* NetworkKit */,
 				A7C000000000000000000E2 /* ATCSimKit */,
+				5D1000000000000000000E2 /* SimDeterminism */,
 				A7D000000000000000000E2 /* ATCTrafficKit */,
 				A7E000000000000000000R2 /* ATCReplayKit */,
 				A7E000000000000000000T2 /* ATCReplayStore */,
@@ -183,6 +188,7 @@
 			packageProductDependencies = (
 				6E0C170000000000000000B2 /* GeoNavKit */,
 				A7C000000000000000000F2 /* ATCSimKit */,
+				5D1000000000000000000F2 /* SimDeterminism */,
 				A7D000000000000000000F2 /* ATCTrafficKit */,
 				A7E000000000000000000S2 /* ATCReplayKit */,
 				A7E000000000000000000U2 /* ATCReplayStore */,
@@ -253,6 +259,7 @@
 				A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */,
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
 				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
+				5D1000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/SimDeterminism" */,
 				A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */,
 				A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */,
 				5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */,
@@ -667,6 +674,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/SpeechKit;
 		};
+		5D1000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/SimDeterminism" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/SimDeterminism;
+		};
 		A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/ATCSimKit;
@@ -755,6 +766,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */;
 			productName = ATCSimKit;
+		};
+		5D1000000000000000000F2 /* SimDeterminism */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/SimDeterminism" */;
+			productName = SimDeterminism;
+		};
+		5D1000000000000000000E2 /* SimDeterminism */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/SimDeterminism" */;
+			productName = SimDeterminism;
 		};
 		A7C000000000000000000F2 /* ATCSimKit */ = {
 			isa = XCSwiftPackageProductDependency;
