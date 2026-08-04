@@ -8,6 +8,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class EventSourceTests: XCTestCase {
@@ -20,9 +21,9 @@ final class EventSourceTests: XCTestCase {
     func testAnUnknownSourceStillDecodes() throws {
         let coder = EventCoder()
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
-            with: try coder.encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                         payload: .timelineAction(.paused),
-                                         source: .voice))) as? [String: Any])
+            with: try coder.encode(ATCEvent.timeline(.paused,
+                                                     at: EventPosition(tick: 1, ordinal: 1),
+                                                     source: .voice))) as? [String: Any])
         object["source"] = "quantum-telepathy"
 
         let decoded = try coder.decode(try JSONSerialization.data(withJSONObject: object))
@@ -35,8 +36,7 @@ final class EventSourceTests: XCTestCase {
     func testAnUnknownSourceRoundTrips() throws {
         let coder = EventCoder()
         let exotic = EventSource(rawValue: "network-relay-v2")
-        let event = Event(position: EventPosition(tick: 1, ordinal: 1),
-                          payload: .timelineAction(.paused), source: exotic)
+        let event = ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1), source: exotic)
 
         XCTAssertEqual(try coder.decode(try coder.encode(event)).source, exotic)
     }
@@ -53,9 +53,9 @@ final class EventSourceTests: XCTestCase {
     func testAnAbsentSourceIsUnspecifiedRatherThanAssumed() throws {
         let coder = EventCoder()
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
-            with: try coder.encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                         payload: .timelineAction(.paused),
-                                         source: .voice))) as? [String: Any])
+            with: try coder.encode(ATCEvent.timeline(.paused,
+                                                     at: EventPosition(tick: 1, ordinal: 1),
+                                                     source: .voice))) as? [String: Any])
         object["source"] = nil
 
         let decoded = try coder.decode(try JSONSerialization.data(withJSONObject: object))
@@ -91,10 +91,9 @@ final class EventSourceTests: XCTestCase {
     /// to decode — payloads a newer build wrote.
     func testSourceIsReadableWithoutDecodingThePayload() throws {
         let coder = EventCoder()
-        let data = try coder.encode(Event(position: EventPosition(tick: 5, ordinal: 5),
-                                          payload: .commandIssued(code: "101", callsign: "A",
-                                                                  slots: [:]),
-                                          source: .keypad))
+        let data = try coder.encode(ATCEvent.commandIssued(code: "101", callsign: "A", slots: [:],
+                                                           at: EventPosition(tick: 5, ordinal: 5),
+                                                           source: .keypad))
         XCTAssertEqual(try coder.decodeEnvelope(data).source, .keypad)
     }
 
@@ -102,8 +101,8 @@ final class EventSourceTests: XCTestCase {
     func testSourceDoesNotAffectIdentity() {
         let session = UUID()
         let position = EventPosition(tick: 1, ordinal: 3)
-        let spoken = Event(position: position, payload: .timelineAction(.paused), source: .voice)
-        let typed = Event(position: position, payload: .timelineAction(.paused), source: .keypad)
+        let spoken = ATCEvent.timeline(.paused, at: position, source: .voice)
+        let typed = ATCEvent.timeline(.paused, at: position, source: .keypad)
 
         XCTAssertEqual(spoken.id(in: session), typed.id(in: session))
     }

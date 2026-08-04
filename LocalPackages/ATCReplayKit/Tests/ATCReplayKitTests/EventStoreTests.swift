@@ -7,6 +7,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class EventStoreTests: XCTestCase {
@@ -28,9 +29,8 @@ final class EventStoreTests: XCTestCase {
     }
 
     private func command(_ code: String, tick: Int, ordinal: UInt32) -> Event {
-        Event(position: EventPosition(tick: tick, ordinal: ordinal),
-              payload: .commandIssued(code: code, callsign: "AIC123",
-                                      slots: ["LEVEL": "260"]))
+        ATCEvent.commandIssued(code: code, callsign: "AIC123", slots: ["LEVEL": "260"],
+                               at: EventPosition(tick: tick, ordinal: ordinal))
     }
 
     // MARK: - Round trip
@@ -90,14 +90,12 @@ final class EventStoreTests: XCTestCase {
     }
 
     func testWallClockIsPreservedButOptional() throws {
-        let stamped = Event(position: EventPosition(tick: 1, ordinal: 1),
-                            payload: .timelineAction(.paused),
-                            wallClock: Date(timeIntervalSince1970: 1_700_000_000))
+        let stamped = ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1),
+                                       wallClock: Date(timeIntervalSince1970: 1_700_000_000))
         let store = makeStore()
         try store.openForAppending()
         try store.append(stamped)
-        try store.append(Event(position: EventPosition(tick: 2, ordinal: 2),
-                               payload: .timelineAction(.resumed)))
+        try store.append(ATCEvent.timeline(.resumed, at: EventPosition(tick: 2, ordinal: 2)))
         try store.close()
 
         let read = try makeStore().readAll()
@@ -312,9 +310,9 @@ final class EventStoreTests: XCTestCase {
         let store = makeStore()
         try store.openForAppending()
         for i in 0..<1_000 {
-            try store.append(Event(position: EventPosition(tick: i, ordinal: UInt32(i)),
-                                   payload: .commandIssued(code: "101", callsign: "AIC1234",
-                                                           slots: ["LEVEL": "260"])))
+            try store.append(ATCEvent.commandIssued(code: "101", callsign: "AIC1234",
+                                                    slots: ["LEVEL": "260"],
+                                                    at: EventPosition(tick: i, ordinal: UInt32(i))))
         }
         try store.close()
 
