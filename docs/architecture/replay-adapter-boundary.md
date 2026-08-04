@@ -235,6 +235,30 @@ rather than assume it.
 
 ---
 
+## 6d · Deferred Schema Evolution Point: the `affectsSimulation` envelope bit
+
+**Not abandoned. Deferred, with an explicit activation condition.**
+
+**Original motivation.** Replay must decide whether an event feeds the simulation or is an annotation to skip. Today
+that decision is made from the wire **tag** via the codec's table. A bit written into the envelope would let a
+consumer make the decision with *no codec at all* — reading a log written by a domain it knows nothing about.
+
+**Why it was deferred.** Discovered during R2b: any new key in the envelope object changes every event's bytes, so
+the golden corpus's re-encode assertion — the property that makes the corpus more than a round-trip test — would
+fail. Preserving it would need a version-aware coder that re-encodes each record at its own `schemaVersion`, and two
+writers to maintain. That cost buys nothing today, because **no consumer exists that reads logs without a codec**.
+Adding it would have violated two standing principles: compatibility before cleanliness, and extraction before
+invention.
+
+**Activation condition.** Introduce the envelope bit only when ReplayCore gains its first consumer that must make
+replay decisions without a payload codec.
+
+Until then, tag-based routing is sufficient and is the sanctioned mechanism. When the condition is met, the path is
+known: bump `schemaVersion`, write the bit at the new version, and make the coder encode each record at the version
+it was read at, so existing recordings continue to re-encode byte-identically.
+
+---
+
 ## 7 · Dependency diagram
 
 ```
