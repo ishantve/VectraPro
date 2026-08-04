@@ -180,6 +180,34 @@ depends on it → shared contract, promoted into the envelope.
 
 ---
 
+## 6b · The adapter speaks its simulation's language
+
+A permanent principle, and the reason `ATCEvent` exists in the shape it does.
+
+**An adapter's public API names facts that occurred. It never names how replay stores them.**
+
+```
+ATCEvent.commandIssued(code:callsign:slots:at:)      ✓ a fact
+ATCEvent.aircraftSpawned(...)                        ✓ a fact
+ATCEvent.makeEvent(kind:payloadObject:version:)      ✗ replay mechanics
+ATCEvent.encodePayload(...)                          ✗ replay mechanics
+```
+
+Future adapters follow the same pattern without needing to be told: `RacingEvent.lapStarted(...)`,
+`MedicalEvent.procedureCompleted(...)`, `RobotEvent.taskAssigned(...)`. Each speaks its own domain.
+
+**The two vocabularies are meant to stay different.** ReplayCore says *envelope, tag, ordinal, tick, seal, position*.
+An adapter says *command, callsign, lap, procedure, task*. Where a word from one appears in the other's public API,
+that is a coupling to look at — a core API naming a callsign is a leak, and an adapter API naming a payload version
+is mechanics escaping upward.
+
+The practical payoff is the one R2b relies on: because call sites name intents, the payload representation
+underneath can change from a core enum to an opaque body and **no call site moves**. An API named after mechanics
+would not have that property, which is why "is this a fact or a mechanism?" is the review question for every new
+adapter function.
+
+---
+
 ## 7 · Dependency diagram
 
 ```
