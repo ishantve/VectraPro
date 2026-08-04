@@ -32,6 +32,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class GoldenCorpusTests: XCTestCase {
@@ -69,52 +70,51 @@ final class GoldenCorpusTests: XCTestCase {
     private static var corpus: [Event] {
         let root = EventID(session: sessionID, ordinal: 0)
         return [
-            Event(position: EventPosition(tick: 0, ordinal: 0),
-                  payload: .timelineAction(.replayStarted),
-                  source: .system),
+            ATCEvent.timeline(.replayStarted,
+                              at: EventPosition(tick: 0, ordinal: 0),
+                              source: .system),
 
-            Event(position: EventPosition(tick: 12, ordinal: 1),
-                  payload: .transcriptReceived(raw: "AIC two three one descend flight level two six zero",
-                                               normalized: "AIC231 DESCEND FL260"),
-                  source: .voice,
-                  wallClock: Date(timeIntervalSince1970: 1_770_000_012)),
+            ATCEvent.transcriptReceived(raw: "AIC two three one descend flight level two six zero",
+                                        normalized: "AIC231 DESCEND FL260",
+                                        at: EventPosition(tick: 12, ordinal: 1),
+                                        source: .voice,
+                                        wallClock: Date(timeIntervalSince1970: 1_770_000_012)),
 
-            Event(position: EventPosition(tick: 12, ordinal: 2),
-                  payload: .commandIssued(code: "C/M*", callsign: "AIC231",
-                                          slots: ["level": "260", "unit": "FL"]),
-                  source: .voice,
-                  correlationID: root,
-                  causationID: root),
+            ATCEvent.commandIssued(code: "C/M*", callsign: "AIC231",
+                                   slots: ["level": "260", "unit": "FL"],
+                                   at: EventPosition(tick: 12, ordinal: 2),
+                                   source: .voice,
+                                   correlationID: root,
+                                   causationID: root),
 
-            Event(position: EventPosition(tick: 12, ordinal: 3),
-                  payload: .readbackSpoken(callsign: "AIC231", spoken: "descending flight level two six zero"),
-                  source: .system,
-                  correlationID: root),
+            ATCEvent.readbackSpoken(callsign: "AIC231",
+                                    spoken: "descending flight level two six zero",
+                                    at: EventPosition(tick: 12, ordinal: 3),
+                                    source: .system,
+                                    correlationID: root),
 
-            Event(position: EventPosition(tick: 30, ordinal: 4),
-                  payload: .commandRejected(code: "H/M*", callsign: nil,
-                                            reason: "no aircraft selected"),
-                  source: .keypad),
+            ATCEvent.commandRejected(code: "H/M*", callsign: nil,
+                                     reason: "no aircraft selected",
+                                     at: EventPosition(tick: 30, ordinal: 4),
+                                     source: .keypad),
 
-            Event(position: EventPosition(tick: 60, ordinal: 5),
-                  payload: .weatherChanged(windDegrees: 270, windKnots: 12,
-                                           visibilityMetres: 8_000, qnh: 1013),
-                  source: .instructor),
+            ATCEvent.weatherChanged(windDegrees: 270, windKnots: 12,
+                                    visibilityMetres: 8_000, qnh: 1013,
+                                    at: EventPosition(tick: 60, ordinal: 5),
+                                    source: .instructor),
 
             // Nil-heavy on purpose: an absent optional must stay absent rather than becoming null, which is a
             // distinction a reader would otherwise have to spell two ways.
-            Event(position: EventPosition(tick: 90, ordinal: 6),
-                  payload: .weatherChanged(windDegrees: nil, windKnots: nil,
-                                           visibilityMetres: nil, qnh: nil),
-                  source: .automation),
+            ATCEvent.weatherChanged(at: EventPosition(tick: 90, ordinal: 6),
+                                    source: .automation),
 
-            Event(position: EventPosition(tick: 120, ordinal: 7),
-                  payload: .scoreEvaluated(value: 87, rulesVersion: "atc-scoring-1.2.0"),
-                  source: .system),
+            ATCEvent.scoreEvaluated(value: 87, rulesVersion: "atc-scoring-1.2.0",
+                                    at: EventPosition(tick: 120, ordinal: 7),
+                                    source: .system),
 
-            Event(position: EventPosition(tick: 150, ordinal: 8),
-                  payload: .timelineAction(.speedChanged(to: 4)),
-                  source: .replay),
+            ATCEvent.timeline(.speedChanged(to: 4),
+                              at: EventPosition(tick: 150, ordinal: 8),
+                              source: .replay),
         ]
     }
 

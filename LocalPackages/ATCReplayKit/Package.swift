@@ -20,6 +20,9 @@ let package = Package(
         // The old names, re-exporting the new ones so the application's imports do not move during the
         // migration. Scaffolding — see the umbrella sources.
         .library(name: "ATCReplayKit", targets: ["ATCReplayKit"]),
+
+        // The reference adapter: ATC vocabulary and the canonical way to construct ATC events.
+        .library(name: "ATCReplayAdapter", targets: ["ATCReplayAdapter"]),
         .library(name: "ATCReplayStore", targets: ["ATCReplayStore"]),
     ],
     targets: [
@@ -36,9 +39,15 @@ let package = Package(
                 linkerSettings: [.linkedLibrary("sqlite3")]),
 
         .target(name: "ATCReplayKit", dependencies: ["ReplayCore"]),
+
+        // A target in this package rather than a package of its own, for one concrete reason: ReplayCore's own
+        // test target needs it, and a separate package depending on ReplayCore that ReplayCore's tests then
+        // depended on would be a dependency cycle SwiftPM refuses. It is a distinct module with the dependency
+        // pointing the right way, so promoting it to its own package later changes no import.
+        .target(name: "ATCReplayAdapter", dependencies: ["ReplayCore"]),
         .target(name: "ATCReplayStore", dependencies: ["ReplayPersistence"]),
 
         .testTarget(name: "ATCReplayKitTests",
-                    dependencies: ["ReplayCore", "ReplayPersistence"]),
+                    dependencies: ["ReplayCore", "ReplayPersistence", "ATCReplayAdapter"]),
     ]
 )
