@@ -17,6 +17,14 @@ import ATCReplayKit
 struct ReplayBrowserView: View {
 
     let coordinator: SessionCoordinator
+
+    /// Show only this exercise's recordings.
+    ///
+    /// The browser opens from a button on an exercise card, so the question being asked is "what have I flown of
+    /// *this*" — an unfiltered list would answer a question nobody asked from here. Nil lists everything, which is
+    /// what a future "all my sessions" screen wants.
+    var exerciseName: String?
+
     let onSelect: (SessionID) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -39,29 +47,41 @@ struct ReplayBrowserView: View {
                                            description: Text("Fly an exercise and it will appear here."))
                 } else {
                     List(rows, id: \.summary.id) { row in
-                        Button { onSelect(row.summary.id); dismiss() } label: {
-                            SessionRow(summary: row.summary, depth: row.depth, environment: environment)
+                        SessionRow(summary: row.summary,
+                                   depth: row.depth,
+                                   environment: environment,
+                                   logURL: coordinator.sessions.eventLogURL(for: row.summary.id)) {
+                            onSelect(row.summary.id)
+                            dismiss()
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .navigationTitle("Recordings")
+            .navigationTitle(exerciseName ?? "Recordings")
             .toolbar { Button("Done") { dismiss() } }
         }
         .task { load() }
     }
 
     /// Roots first, each followed by its descendants — so a branch reads as belonging to what it came from.
+    ///
+    /// Filtering happens before the tree is built, and a branch whose parent was filtered out becomes a root. That
+    /// is the right answer here: a session that is in the list must be reachable, and hiding it because its parent
+    /// belongs to another exercise would strand it.
     private func load() {
         do {
-            let all = try coordinator.sessions.catalogue.allSessions()
+            var all = try coordinator.sessions.catalogue.allSessions()
+            if let exerciseName {
+                all = all.filter { $0.exerciseName == exerciseName }
+            }
+            let present = Set(all.map(\.id))
             let byParent = Dictionary(grouping: all.filter { $0.parentID != nil }) { $0.parentID! }
 
             func walk(_ summary: SessionSummary, depth: Int) -> [(SessionSummary, Int)] {
                 [(summary, depth)] + (byParent[summary.id] ?? []).flatMap { walk($0, depth: depth + 1) }
             }
-            rows = all.filter { $0.parentID == nil }.flatMap { walk($0, depth: 0) }
+            rows = all.filter { $0.parentID == nil || !present.contains($0.parentID!) }
+                .flatMap { walk($0, depth: 0) }
         } catch {
             failure = "\(error)"
         }
@@ -76,6 +96,11 @@ struct SessionRow: View {
     let summary: SessionSummary
     let depth: Int
     let environment: RecordingEnvironment
+
+    /// The sealed log, for sharing.
+    let logURL: URL
+
+    let onPlay: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -125,7 +150,24 @@ struct SessionRow: View {
             }
 
             Spacer(minLength: 0)
-            Image(systemName: "play.circle").foregroundStyle(.tint)
+
+            // Two separate buttons rather than a tappable row plus an accessory: sharing a colleague's assessment
+            // by mis-tapping a row is not a mistake worth allowing.
+            ShareLink(item: logURL) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+
+            Button(action: onPlay) {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
         }
         .padding(.vertical, 2)
     }

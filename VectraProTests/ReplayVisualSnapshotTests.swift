@@ -79,7 +79,9 @@ final class ReplayVisualSnapshotTests: XCTestCase {
             let view = VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { entry in
                     SessionRow(summary: entry.element.0, depth: entry.element.1,
-                               environment: .current())
+                               environment: .current(),
+                               logURL: URL(fileURLWithPath: "/dev/null"),
+                               onPlay: {})
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
                     Divider()

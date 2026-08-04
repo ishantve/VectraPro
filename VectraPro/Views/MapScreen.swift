@@ -11,6 +11,13 @@ import ATCSimKit
 
 struct MapScreen: View {
 
+    /// A recording to replay instead of flying.
+    ///
+    /// Passed in rather than chosen here: the browser lives on the exercise card, so by the time this screen opens
+    /// the choice is already made. It also removes a hazard the radar-side entry point had — opening a replay
+    /// mid-exercise detached the recorder and left the live session open, losing the run in progress.
+    var replaying: SessionID?
+
     @ObservedObject private var viewModel = MapViewModel.shared
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
     @ObservedObject private var presentation = RadarPresentation.shared
@@ -26,9 +33,6 @@ struct MapScreen: View {
     //
     // Replay drives the radar that is already on screen rather than opening a second one: a reviewer watches the
     // same picture the trainee flew, and the only thing added is a transport bar over it.
-
-    /// The browser sheet.
-    @State private var showsRecordings = false
 
     /// The transport, present only while replaying. Its absence *is* "not replaying" — the screen keeps no
     /// separate flag, because a flag and a transport are two things that would have to agree.
@@ -100,9 +104,6 @@ struct MapScreen: View {
                 // Always-visible top icons; the globe toggles the layer buttons.
                 HStack(spacing: 12) {
                     windowToggleButton
-                    topActionButton("clock.arrow.circlepath", isOn: replay != nil) {
-                        showsRecordings = true
-                    }
                     topActionButton("flag.fill") { /* TODO */ }
                     topActionButton("person.2.fill") { /* TODO */ }
                     topActionButton("globe", isOn: showLayers) {
@@ -164,11 +165,6 @@ struct MapScreen: View {
             // Lifts above the transport while replaying. Zoom stays reachable — looking closer at what happened
             // is most of what a review is — but it cannot sit under the bar.
             .padding(.bottom, replay == nil ? 12 : 96)
-        }
-        .sheet(isPresented: $showsRecordings) {
-            ReplayBrowserView(coordinator: .shared) { sessionID in
-                startReplay(of: sessionID)
-            }
         }
         .overlay(alignment: .bottom) {
             if let replay {
@@ -261,7 +257,13 @@ struct MapScreen: View {
         .onKeyPress("+") { viewModel.zoom(by: 1); return .handled }
         .onKeyPress("-") { viewModel.zoom(by: -1); return .handled }
         .onAppear {
-            viewModel.reset()   // fresh radar each time the screen opens
+            if let replaying {
+                // No `reset()` first. Loading restores the world from the recording's own manifest, and resetting
+                // would open a live recording session that the load then orphans.
+                startReplay(of: replaying)
+            } else {
+                viewModel.reset()   // fresh radar each time the screen opens
+            }
             speechViewModel.prepare()
             let vm = viewModel
             speechViewModel.onCommand = { [weak vm] transcript in
@@ -337,10 +339,7 @@ struct MapScreen: View {
                             VStack(alignment: .trailing, spacing: 10) {
                                 HStack(spacing: 10) {
                                     windowToggleButton
-                                    topActionButton("clock.arrow.circlepath", isOn: replay != nil) {
-                        showsRecordings = true
-                    }
-                    topActionButton("flag.fill") { /* TODO */ }
+                                    topActionButton("flag.fill") { /* TODO */ }
                                     topActionButton("person.2.fill") { /* TODO */ }
                                     topActionButton("globe", isOn: showLayers) {
                                         withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
