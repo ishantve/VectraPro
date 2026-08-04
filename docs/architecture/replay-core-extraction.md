@@ -149,6 +149,60 @@ of six packages, exactly as required.
 
 ---
 
+## 2a · Permanent principle
+
+> **ReplayCore routes payloads. Adapters interpret payloads.**
+
+ReplayCore is responsible for moving payloads safely: recording them, ordering them, timing them, routing them,
+replaying them, sealing them, verifying them, storing them and transporting them.
+
+ReplayCore is **not** responsible for understanding what those payloads mean. Only an adapter may decode, validate,
+execute or interpret payload contents.
+
+The operational test: **if ReplayCore ever needs to inspect payload contents to make a replay decision, the
+extraction is incomplete.** The only metadata the core may rely on is what has been *deliberately promoted into the
+envelope* — routing, ordering, replay policy — never the payload itself.
+
+This is why `affectsSimulation` takes a wire tag rather than a decoded payload (R2a). It is a replay decision, so it
+must be answerable from the envelope alone. A build that cannot decode a newer payload must still be able to replay
+the recording correctly, and that is only possible if the decision never required decoding.
+
+This principle joins the twelve frozen principles in `replay-final-review.md` §11 and is not subject to revision for
+convenience.
+
+---
+
+## 2b · Survey: what ReplayCore still knows about ATC
+
+Taken after R2a by grep plus reading, over `Sources/ReplayCore`. Classified as required: **must remain**, **move to
+adapter**, or **promote to generic metadata**. Nothing is moved merely for being ATC-shaped, and nothing is invented
+to tidy the diagram.
+
+| What | Where | Classification | Reasoning |
+|---|---|---|---|
+| `EventPayload` — seven cases naming commands, callsigns, readbacks, transcripts, weather, scores | `Event.swift` | **Move to adapter** | Pure domain vocabulary. This is R2b's substance. |
+| `EventKind` 1…7 | `Event.swift` | **Move to adapter** | The numbers are on disk; the adapter must own them permanently so no future domain can collide. |
+| Per-kind current-version table (`case .transcriptReceived: return 1` …) | `EventEnvelope.swift` | **Move to adapter** | The envelope must ask the codec for a tag's current version rather than knowing the roster. |
+| `DefaultEventPayloadCoding` | `EventPayloadCoding.swift` | **Move to adapter** | Placed in Core by R2a on purpose, so the seam could be proved byte-neutral before the vocabulary moved. |
+| `EmbeddedExercise`, `exerciseID`, `exerciseName` | `SessionManifest.swift` | **Promote to generic metadata** — `ReplayScenario` | Every deterministic simulation runs *some* configuration, and embedding the bytes rather than a reference is a generic decision about reproducibility. "Exercise" is training vocabulary, not ATC, and the shape is already domain-free. R3. |
+| `exerciseName`, `exerciseDigest` on `SessionSummary` | `SessionCatalogue.swift` | **Promote to generic metadata** — `scenarioName`, `scenarioDigest` | Same reasoning. The digest is what lets two sessions be recognised as sharing a configuration, which any simulator wants. |
+| `TimelineAction` (pause / resume / speed / seek) | `Event.swift` | **Must remain in ReplayCore** | These are *platform* actions, not domain ones. A racing or medical replay pauses and scrubs identically. Recording them is how "this trainee paused fourteen times" stays answerable. |
+| `SessionClass.training` / `.assessment` | `Session.swift` | **Promote to generic metadata** — extensible constant + `SessionPolicy` | Training vocabulary, not ATC. The behaviours currently inferred from it (flush-per-event, must-seal) are generic policies worth naming. R3. |
+| `OwnerID.user` / `.device` | `SessionManifest.swift` | **Must remain in ReplayCore** | Identity of who recorded something is universal, and the user/device split is what lets an unauthenticated session be adopted later. |
+| `RecordingEnvironment` (build, architecture, platform) | `SessionManifest.swift` | **Must remain in ReplayCore** | Reproducibility metadata. Architecture equality is what makes a replay scoreable, which is a platform concern. |
+
+**One honest note about method.** The grep for `atc` matched every `catch` in the package, and `SessionRecorder`,
+`SessionManager` and `BranchManager` appeared in the results purely because of that and of `exercise:` parameters
+already covered above. Substantively those three files are clean. A survey like this needs reading, not only
+patterns — reported because the raw counts would otherwise overstate the problem by three files.
+
+**Conclusion.** Four items move to the adapter and they are all one thing wearing four hats: the event vocabulary
+and its wire tags. Four items promote to generic metadata and all four are R3, already planned. Three items must
+remain, each because it is genuinely about recording rather than about aircraft. No item required inventing an
+abstraction.
+
+---
+
 ## 3 · Generic architecture
 
 ### 3.1 The five contracts that carry the platform
