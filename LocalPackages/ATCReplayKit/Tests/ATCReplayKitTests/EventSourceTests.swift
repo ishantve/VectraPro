@@ -69,20 +69,21 @@ final class EventSourceTests: XCTestCase {
     /// Not only the ones with an obvious human behind them.
     func testEveryPayloadKindCanCarryASource() throws {
         let coder = EventCoder()
-        let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: [:]),
-            .commandRejected(code: nil, callsign: nil, reason: "no"),
-            .transcriptReceived(raw: "a", normalized: "a"),
-            .readbackSpoken(callsign: "AIC1", spoken: "ROGER"),
-            .weatherChanged(windDegrees: 1, windKnots: nil, visibilityMetres: nil, qnh: nil),
-            .scoreEvaluated(value: 1, rulesVersion: "v1"),
-            .timelineAction(.paused),
+        func p(_ i: Int) -> EventPosition { EventPosition(tick: i, ordinal: UInt32(i)) }
+        let events: [Event] = [
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
+                                   at: p(0), source: .instructor),
+            ATCEvent.commandRejected(code: nil, callsign: nil, reason: "no",
+                                     at: p(1), source: .instructor),
+            ATCEvent.transcriptReceived(raw: "a", normalized: "a", at: p(2), source: .instructor),
+            ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "ROGER", at: p(3), source: .instructor),
+            ATCEvent.weatherChanged(windDegrees: 1, at: p(4), source: .instructor),
+            ATCEvent.scoreEvaluated(value: 1, rulesVersion: "v1", at: p(5), source: .instructor),
+            ATCEvent.timeline(.paused, at: p(6), source: .instructor),
         ]
-        XCTAssertEqual(Set(payloads.map(\.kind)).count, EventKind.allCases.count)
+        XCTAssertEqual(Set(events.map(\.payload.kind)).count, EventKind.allCases.count)
 
-        for (index, payload) in payloads.enumerated() {
-            let event = Event(position: EventPosition(tick: index, ordinal: UInt32(index)),
-                              payload: payload, source: .instructor)
+        for event in events {
             XCTAssertEqual(try coder.decode(try coder.encode(event)).source, .instructor)
         }
     }

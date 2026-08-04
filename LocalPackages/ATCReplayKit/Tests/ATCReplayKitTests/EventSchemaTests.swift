@@ -12,6 +12,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class EventSchemaTests: XCTestCase {
@@ -21,15 +22,14 @@ final class EventSchemaTests: XCTestCase {
     /// Every stored event carries all three numbers.
     func testEveryEventCarriesTheThreeVersions() throws {
         let coder = EventCoder()
-        for payload in Self.oneOfEveryKind {
-            let data = try coder.encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                              payload: payload))
+        for event in Self.oneOfEveryKind {
+            let data = try coder.encode(event)
             let object = try XCTUnwrap(
                 try JSONSerialization.jsonObject(with: data) as? [String: Any])
 
             XCTAssertEqual(object["schemaVersion"] as? Int, EventEnvelope.currentSchemaVersion)
-            XCTAssertEqual(object["eventType"] as? Int, Int(payload.kind.rawValue))
-            XCTAssertEqual(object["eventVersion"] as? Int, payload.kind.currentVersion)
+            XCTAssertEqual(object["eventType"] as? Int, Int(event.payload.kind.rawValue))
+            XCTAssertEqual(object["eventVersion"] as? Int, event.payload.kind.currentVersion)
         }
     }
 
@@ -37,8 +37,8 @@ final class EventSchemaTests: XCTestCase {
     /// interpreting — or being able to interpret — payloads a newer build wrote.
     func testOrderingCanBeReadWithoutTouchingThePayload() throws {
         let coder = EventCoder()
-        let data = try coder.encode(Event(position: EventPosition(tick: 1_234, ordinal: 99),
-                                          payload: .timelineAction(.paused)))
+        let data = try coder.encode(ATCEvent.timeline(.paused,
+                                                     at: EventPosition(tick: 1_234, ordinal: 99)))
 
         let envelope = try coder.decodeEnvelope(data)
         XCTAssertEqual(envelope.position, EventPosition(tick: 1_234, ordinal: 99))
@@ -192,10 +192,10 @@ final class EventSchemaTests: XCTestCase {
     /// that varied with dictionary order would be worthless.
     func testEncodingIsByteStable() throws {
         let coder = EventCoder()
-        let event = Event(position: EventPosition(tick: 7, ordinal: 3),
-                          payload: .commandIssued(code: "101", callsign: "AIC123",
-                                                  slots: ["LEVEL": "260", "SPEED": "300"]),
-                          wallClock: Date(timeIntervalSince1970: 1_700_000_000))
+        let event = ATCEvent.commandIssued(code: "101", callsign: "AIC123",
+                                           slots: ["LEVEL": "260", "SPEED": "300"],
+                                           at: EventPosition(tick: 7, ordinal: 3),
+                                           wallClock: Date(timeIntervalSince1970: 1_700_000_000))
 
         let first = try coder.encode(event)
         for _ in 0..<20 {
@@ -205,23 +205,29 @@ final class EventSchemaTests: XCTestCase {
 
     func testEveryKindStillRoundTripsThroughTheEnvelope() throws {
         let coder = EventCoder()
-        for payload in Self.oneOfEveryKind {
-            let event = Event(position: EventPosition(tick: 5, ordinal: 5), payload: payload)
+        for event in Self.oneOfEveryKind {
             XCTAssertEqual(try coder.decode(try coder.encode(event)), event)
         }
     }
 
     // MARK: - Fixtures
 
-    private static let oneOfEveryKind: [EventPayload] = [
-        .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
-        .commandRejected(code: "304", callsign: "AIC1", reason: "unmapped"),
-        .transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb"),
-        .readbackSpoken(callsign: "AIC1", spoken: "CLIMBING"),
-        .weatherChanged(windDegrees: 270, windKnots: 12, visibilityMetres: 8_000, qnh: 1013),
-        .scoreEvaluated(value: 82, rulesVersion: "v3"),
-        .timelineAction(.speedChanged(to: 10)),
-    ]
+    /// One event of every kind, each at its own position.
+    ///
+    /// Events rather than payloads: these tests assert envelope properties, and an envelope needs a position.
+    private static let oneOfEveryKind: [Event] = {
+        func p(_ i: Int) -> EventPosition { EventPosition(tick: i, ordinal: UInt32(i)) }
+        return [
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], at: p(0)),
+            ATCEvent.commandRejected(code: "304", callsign: "AIC1", reason: "unmapped", at: p(1)),
+            ATCEvent.transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb", at: p(2)),
+            ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING", at: p(3)),
+            ATCEvent.weatherChanged(windDegrees: 270, windKnots: 12, visibilityMetres: 8_000, qnh: 1013,
+                                    at: p(4)),
+            ATCEvent.scoreEvaluated(value: 82, rulesVersion: "v3", at: p(5)),
+            ATCEvent.timeline(.speedChanged(to: 10), at: p(6)),
+        ]
+    }()
 
     private static func encodedObject(_ payload: EventPayload) throws -> [String: Any] {
         let data = try EventCoder().encode(Event(position: EventPosition(tick: 1, ordinal: 1),
