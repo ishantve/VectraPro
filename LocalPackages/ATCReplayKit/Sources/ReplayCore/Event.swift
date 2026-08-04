@@ -112,13 +112,7 @@ public enum EventPayload: Equatable, Sendable {
     /// The rest are annotations: real records of what happened, but not causes the simulation
     /// consumes. Separating them is what lets a replay skip audio and still be correct.
     public var affectsSimulation: Bool {
-        switch self {
-        case .commandIssued, .weatherChanged:
-            return true
-        case .commandRejected, .transcriptReceived, .readbackSpoken,
-             .scoreEvaluated, .timelineAction:
-            return false
-        }
+        DefaultEventPayloadCoding().affectsSimulation(kind: kind)
     }
 }
 

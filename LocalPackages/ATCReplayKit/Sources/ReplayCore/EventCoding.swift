@@ -148,8 +148,14 @@ public struct EventCoder: Sendable {
 
     private let migrator: EventMigrator
 
-    public init(migrator: EventMigrator = .current) {
+    /// Who turns payloads into JSON objects and back. Injected so a domain owns its own vocabulary; the default
+    /// is the behaviour this coder performed itself before the seam existed, so nothing changes for a caller.
+    private let payloadCoding: any EventPayloadCoding
+
+    public init(migrator: EventMigrator = .current,
+                payloadCoding: any EventPayloadCoding = DefaultEventPayloadCoding()) {
         self.migrator = migrator
+        self.payloadCoding = payloadCoding
     }
 
     // MARK: Encoding
@@ -163,7 +169,7 @@ public struct EventCoder: Sendable {
             "tick": envelope.position.tick,
             "ordinal": envelope.position.ordinal,
             "source": envelope.source.rawValue,
-            "payload": try payloadObject(event.payload),
+            "payload": try payloadCoding.object(for: event.payload),
         ]
         // Written only when present. An absent optional means "was not recorded", and emitting null
         // would make a reader distinguish two spellings of the same absence.
@@ -230,12 +236,9 @@ public struct EventCoder: Sendable {
                                                from: envelope.eventVersion)
         // The type discriminator lives in the envelope; `EventPayload`'s decoder reads it from the
         // payload, so it is put back rather than duplicated on the wire.
-        var payloadObject = brought
-        payloadObject["kind"] = envelope.eventType.rawValue
-
-        let payload = try JSONDecoder().decode(
-            EventPayload.self,
-            from: try JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]))
+        let payload = try payloadCoding.payload(from: brought,
+                                                kind: envelope.eventType,
+                                                version: envelope.eventVersion)
 
         return Event(position: envelope.position, payload: payload,
                      source: envelope.source,
@@ -260,12 +263,5 @@ public struct EventCoder: Sendable {
         return object
     }
 
-    /// The payload as a dictionary, without its `kind` — that belongs to the envelope.
-    private func payloadObject(_ payload: EventPayload) throws -> [String: Any] {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        var object = try Self.object(try encoder.encode(payload))
-        object["kind"] = nil
-        return object
-    }
+
 }
