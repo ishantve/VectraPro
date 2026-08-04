@@ -10,6 +10,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class SessionManagerTests: XCTestCase {
@@ -161,8 +162,8 @@ final class SessionManagerTests: XCTestCase {
         let store = EventStore(url: manager.eventLogURL(for: session.id), sessionClass: .training)
         try store.openForAppending()
         for tick in 1...5 {
-            try store.append(Event(position: EventPosition(tick: tick, ordinal: UInt32(tick)),
-                                   payload: .timelineAction(.paused)))
+            try store.append(ATCEvent.timeline(.paused,
+                                              at: EventPosition(tick: tick, ordinal: UInt32(tick))))
         }
         try store.close()
 
@@ -365,8 +366,8 @@ final class BranchManagerTests: XCTestCase {
         let store = EventStore(url: sessions.eventLogURL(for: parent.id), sessionClass: .training)
         try store.openForAppending()
         for tick in [100, 900, 1_500] {
-            try store.append(Event(position: EventPosition(tick: tick, ordinal: UInt32(tick)),
-                                   payload: .timelineAction(.paused)))
+            try store.append(ATCEvent.timeline(.paused,
+                                              at: EventPosition(tick: tick, ordinal: UInt32(tick))))
         }
         try store.close()
 

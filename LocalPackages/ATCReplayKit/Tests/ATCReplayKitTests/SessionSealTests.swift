@@ -8,6 +8,7 @@
 //
 
 import XCTest
+import ATCReplayAdapter
 @testable import ReplayCore
 
 final class SessionSealTests: XCTestCase {
@@ -35,9 +36,9 @@ final class SessionSealTests: XCTestCase {
     }
 
     private func event(_ ordinal: UInt32) -> Event {
-        Event(position: EventPosition(tick: Int(ordinal), ordinal: ordinal),
-              payload: .commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"]),
-              source: .voice)
+        ATCEvent.commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"],
+                               at: EventPosition(tick: Int(ordinal), ordinal: ordinal),
+                               source: .voice)
     }
 
     // MARK: - The two forms agree
