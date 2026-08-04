@@ -13,21 +13,32 @@ let package = Package(
     name: "ATCReplayKit",
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
+        // The platform, under its own names.
+        .library(name: "ReplayCore", targets: ["ReplayCore"]),
+        .library(name: "ReplayPersistence", targets: ["ReplayPersistence"]),
+
+        // The old names, re-exporting the new ones so the application's imports do not move during the
+        // migration. Scaffolding — see the umbrella sources.
         .library(name: "ATCReplayKit", targets: ["ATCReplayKit"]),
         .library(name: "ATCReplayStore", targets: ["ATCReplayStore"]),
     ],
     targets: [
-        // The portable core: sessions, events, manifests, managers. Foundation only.
-        .target(name: "ATCReplayKit"),
+        // Replay infrastructure: sessions, lifecycle, events, manifests, recorder, branching, managers.
+        // Foundation only. Still holds `EventStore`, because moving it needs a protocol in the core first
+        // and that is Phase R4 — a packaging phase must not invert a dependency.
+        .target(name: "ReplayCore"),
 
-        // The catalogue's SQLite implementation, split out so the core stays free of a platform
-        // library. The catalogue is the one part that genuinely wants a database — it answers queries
-        // and wants transactions — and this is where that dependency is confined.
-        .target(name: "ATCReplayStore",
-                dependencies: ["ATCReplayKit"],
+        // The catalogue's SQLite implementation, split out so the core stays free of a platform library.
+        // The catalogue is the one part that genuinely wants a database — it answers queries and wants
+        // transactions — and this is where that dependency is confined.
+        .target(name: "ReplayPersistence",
+                dependencies: ["ReplayCore"],
                 linkerSettings: [.linkedLibrary("sqlite3")]),
 
+        .target(name: "ATCReplayKit", dependencies: ["ReplayCore"]),
+        .target(name: "ATCReplayStore", dependencies: ["ReplayPersistence"]),
+
         .testTarget(name: "ATCReplayKitTests",
-                    dependencies: ["ATCReplayKit", "ATCReplayStore"]),
+                    dependencies: ["ReplayCore", "ReplayPersistence"]),
     ]
 )

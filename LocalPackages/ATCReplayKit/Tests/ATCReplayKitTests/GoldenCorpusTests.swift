@@ -32,7 +32,7 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+@testable import ReplayCore
 
 final class GoldenCorpusTests: XCTestCase {
 

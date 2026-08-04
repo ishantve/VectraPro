@@ -8,7 +8,7 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+@testable import ReplayCore
 
 final class SessionSealTests: XCTestCase {
 

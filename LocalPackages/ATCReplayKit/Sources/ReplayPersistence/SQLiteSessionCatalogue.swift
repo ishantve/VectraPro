@@ -53,7 +53,7 @@
 
 import Foundation
 import SQLite3
-import ATCReplayKit
+import ReplayCore
 
 public final class SQLiteSessionCatalogue: SessionCatalogue {
 
