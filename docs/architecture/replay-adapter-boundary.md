@@ -137,6 +137,49 @@ evolve its envelope without every adapter re-releasing. That independence is the
 
 ---
 
+## 6a · Ownership Decision Matrix
+
+For classifying **new** functionality without relying on architectural intuition. Answer the questions in order and
+stop at the first that applies — they are ordered so the strongest constraint wins.
+
+| # | Question | If yes → | Why this order |
+|---|---|---|---|
+| 1 | Would it let ReplayCore reach a concrete adapter type, an app type, or a simulation package? | **Never allowed** | Structural. It would reverse the dependency graph and no later cleanup recovers it. |
+| 2 | Would it let an adapter change envelope format, ordering, tick timing, framing, or the seal? | **Never allowed** | These are the compatibility contract. Two writers means recordings diverge per adapter and assessments stop being verifiable. |
+| 3 | Does it require understanding what a payload *means*? | **Adapter** | The governing principle. Includes interpretation, execution, validation, and any decision read out of payload contents. |
+| 4 | Does it require executing simulation behaviour or mutating the world? | **Adapter** | The core advances ticks; only the adapter changes state. |
+| 5 | Does it require domain validation — is this instruction sensible? | **Adapter** | Validity is semantic. The core's only validity question is "are these bytes intact". |
+| 6 | Does it require deterministic replay **ordering**? | **ReplayCore** | `(tick, ordinal)` is the single ordering authority. |
+| 7 | Does it require deterministic **timing**? | **ReplayCore** | `SimulationClock` is the only time; speed changes the interval, never the step. |
+| 8 | Does it require **storage** — framing, appending, truncation recovery, indexing? | **ReplayCore** (contract) + **ReplayPersistence** (implementation) | The contract is the core's; a consumer may bring their own store behind it. |
+| 9 | Does it require replay **verification** — sealing, digest comparison, scoreability? | **ReplayCore** | Incremental and one-pass forms must agree; a second implementation makes assessments unverifiable. |
+| 10 | Does it require replay **transport** — play, pause, seek, speed, position? | **ReplayCore** | `ReplayClock` is the single authority, all the way to the presentation layer. |
+| 11 | Does the core need a fact to route or schedule, but only the domain can supply it? | **Shared contract** | Promote it into the envelope and answer it *by tag*, never by payload. `affectsSimulation` is the worked example. |
+| 12 | Is it a *choice* the domain makes but the core must *enforce*? | **Shared contract** | `SessionPolicy` — flush-per-event, must-seal, allows-branching, retention. Adapter chooses; core enforces. |
+| 13 | Would another deterministic simulation need it, expressed without domain nouns? | **ReplayCore** | The general test, applied only after the specific ones above. |
+| 14 | Anything else | **Adapter** | The default is the adapter. A thing that cannot be justified as generic is not generic. |
+
+### Worked examples
+
+| Proposed feature | Path | Owner |
+|---|---|---|
+| "Record which runway was in use" | Q3 — needs payload meaning | Adapter |
+| "Skip audio-only events when seeking" | Q11 — core schedules, domain classifies by tag | Shared contract |
+| "Encrypt the event log at rest" | Q8 — storage | ReplayCore contract + Persistence |
+| "Warn if a trainee paused more than ten times" | Q3 — reads recorded meaning | Adapter (from `TimelineAction`, which the core records) |
+| "Let an assessment forbid branching" | Q12 — domain chooses, core enforces | Shared contract (`SessionPolicy`) |
+| "Let an adapter renumber its own event tags" | Q2 — tags are on disk | Never allowed |
+| "Add a per-aircraft snapshot every 60 ticks" | Q3/Q4 — capture is domain, cadence is core | Split: core owns `ReplaySnapshotting` + trigger, adapter owns capture |
+| "Expose replay position to a Unity UI" | Q10 — transport | ReplayCore (via the Codable boundary) |
+
+### The tie-breaker
+
+When two answers seem to apply, ask: **does this decision have to be identical for every adapter, or may it differ
+per simulation?** Must be identical → ReplayCore. May differ → adapter. Must differ per simulation *but* the core
+depends on it → shared contract, promoted into the envelope.
+
+---
+
 ## 7 · Dependency diagram
 
 ```
