@@ -328,6 +328,12 @@ public API and `ATCReplayAdapter`. Concretely, they must be able to answer witho
 If any answer requires reading `EventCoder`, `EventStore` or `SessionManager`, this document is incomplete and that
 is the defect to fix — not the reader's problem.
 
+**This test has now been run and passed.** `GridBotAdapter` — a grid robot, deliberately unrelated to ATC —
+was built against ReplayCore's public API only (no `@testable`, no core internals) and driven end to end:
+record → replay (fingerprint match) → seal → golden corpus → payload migration, all green, with ReplayCore
+unchanged. It is the canonical worked example; the step-by-step guide is
+[`building-an-adapter.md`](building-an-adapter.md) and the executable proof is `GridBotAdapterTests`.
+
 ---
 
 ## 9 · Compatibility gates, restated as the definition of done
