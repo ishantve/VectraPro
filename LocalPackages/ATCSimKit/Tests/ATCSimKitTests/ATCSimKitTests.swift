@@ -143,21 +143,16 @@ final class HoldingTests: XCTestCase {
     }
 }
 
-final class CommandParserTests: XCTestCase {
-    func testParse() {
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("turn left heading 270")), [.headingTurn(270, .left)])
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("hold at papa juliet")), [.hold("PJ")])
-        XCTAssertEqual(CommandParser.parse(CommandParser.normalize("climb flight level 250")), [.flightLevel(250)])
-    }
-}
+// CommandParser moved to the standalone ATCParserKit package; its parsing is
+// covered by that package's own test suite.
 
 final class CommandValidatorTests: XCTestCase {
     private func ctx(_ r: Runway? = nil, loc: Set<String> = [], fixes: [Fix] = []) -> CommandValidator.Context {
         .init(runways: r.map { [$0] } ?? [], activeLocalizerRunways: loc, holdingFixes: fixes)
     }
     func testEnvelopes() {
-        XCTAssertEqual(CommandValidator.validate([.flightLevel(250)], for: F.aircraft(), context: ctx()), .ok)
-        if case .ok = CommandValidator.validate([.flightLevel(600)], for: F.aircraft(), context: ctx()) { XCTFail() }
+        XCTAssertEqual(CommandValidator.validate([.altitude(feet: 25_000)], for: F.aircraft(), context: ctx()), .ok)
+        if case .ok = CommandValidator.validate([.altitude(feet: 60_000)], for: F.aircraft(), context: ctx()) { XCTFail() }
         if case .ok = CommandValidator.validate([.speed(50)], for: F.aircraft(), context: ctx()) { XCTFail() }
     }
     func testHoldFixMustExist() {

@@ -7,6 +7,7 @@
 
 import Combine
 import ATCSimKit
+import ATCTrafficKit
 import GeoNavKit
 import CoreLocation
 import Foundation
@@ -74,14 +75,11 @@ final class MapViewModel: ObservableObject {
     private var freqArrival: ExerciseDetail.FrequencyOfArrival?
     private var freqEnroute: ExerciseDetail.FrequencyOfEnroute?
 
-    /// How a category spawns: fixed interval up to quota (Custom), or random
-    /// intervals up to a quota (Random). Both modes stop when `remaining` hits 0.
-    private enum SpawnMode {
-        case custom(interval: Double, remaining: Int)
-        case random(remaining: Int)
-    }
-    /// Active spawners (one per category that has Custom/Random frequency).
-    private var spawners: [(category: FlightCategory, mode: SpawnMode, countdown: Double)] = []
+    /// Traffic scheduling — when the next aircraft appears and of which kind.
+    /// Owned by ATCTrafficKit, which knows nothing about aircraft or geometry, so
+    /// the rules are testable on their own and portable off Apple platforms.
+    private var schedule: TrafficSchedule?
+    private var promotion = RadarPromotionSchedule()
 
     /// Multi-aircraft spawning (from the exercise).
     private var isMultiMode = false
@@ -90,40 +88,12 @@ final class MapViewModel: ObservableObject {
     private var airlines: [ExerciseDetail.Airline] = []
     private var aircraftTypes: [ExerciseDetail.AircraftType] = []
 
-    /// Random-mode interval choices (seconds).
-    private let randomIntervals: [Double] = [15, 20, 30, 45, 60, 90]
-
-    /// Countdown (seconds) until the next hangar-to-radar promotion.
-    /// Stays `.infinity` when the airspace is already at capacity.
-    private var radarPromotionCountdown: Double = .infinity
-    private let promotionIntervals: [Double] = [15, 20, 30, 45, 60, 90]
-
-    /// Fixed capacity weights: Arrival=40%, Departure=30%, Enroute=30%.
-    private let categoryWeights: [FlightCategory: Double] = [
-        .arrival: 40, .departure: 30, .enroute: 30
-    ]
-
-    /// Splits `total` across `categories` by their 40/30/30 weights,
-    /// renormalised to whichever categories are active.
-    /// The returned array always sums to exactly `total`.
-    private func weightedSplit(total: Int, categories: [FlightCategory]) -> [Int] {
-        guard total > 0, !categories.isEmpty else { return Array(repeating: 0, count: categories.count) }
-        let weights = categories.map { categoryWeights[$0] ?? 1.0 }
-        let totalWeight = weights.reduce(0, +)
-        var shares = weights.map { Int((Double(total) * $0 / totalWeight).rounded()) }
-        // Correct rounding by adjusting the largest share so sum == total.
-        let diff = total - shares.reduce(0, +)
-        if diff != 0, let idx = shares.indices.max(by: { shares[$0] < shares[$1] }) {
-            shares[idx] += diff
-        }
-        return shares
-    }
 
     /// Whether a category is active (Custom or Random). "None" or missing → inactive.
     /// Used by the UI to hide hangar-list sections for disabled categories.
-    var isArrivalActive:   Bool { isActiveType(freqArrival?.type)   }
-    var isDepartureActive: Bool { isActiveType(freqDeparture?.type) }
-    var isEnrouteActive:   Bool { isActiveType(freqEnroute?.type)   }
+    var isArrivalActive:   Bool { frequency(for: .arrival).isActive   }
+    var isDepartureActive: Bool { frequency(for: .departure).isActive }
+    var isEnrouteActive:   Bool { frequency(for: .enroute).isActive   }
 
     /// Radial lines for the exercise's VOR fixes (empty when none).
     func fixRadialLines() -> [MapLine] {
@@ -165,6 +135,26 @@ final class MapViewModel: ObservableObject {
         holdingFixes.map(\.asDomain)
     }
 
+    /// Every fix an aircraft may be routed direct to or asked to report — waypoints
+    /// and VORs as well as holding fixes, since "proceed direct" and "report passing"
+    /// are not limited to holds.
+    var navigationFixesDomain: [ATCSimKit.Fix] {
+        fixes.map(\.asDomain)
+    }
+
+    /// The aircraft answering to a callsign, radar or hangar.
+    func aircraft(callsign: String) -> Aircraft? {
+        (aircraft + traffic).first { $0.callsign.caseInsensitiveCompare(callsign) == .orderedSame }
+    }
+
+    /// Scene inputs for validation, shared by the command path and the report path.
+    var validationContext: CommandValidator.Context {
+        CommandValidator.Context(runways: runways,
+                                 activeLocalizerRunways: activeLocalizerRunways,
+                                 holdingFixes: holdingFixesDomain,
+                                 navigationFixes: navigationFixesDomain)
+    }
+
     /// Public: coordinate of a holding fix by name (used by the map controller
     /// to draw the racetrack).
     func holdingFixPosition(named name: String) -> CLLocationCoordinate2D? {
@@ -184,31 +174,6 @@ final class MapViewModel: ObservableObject {
         obstructions = detail.obstructions
         _zoneShapesDirty = true
 
-        #if DEBUG
-        let holdings = detail.fixes.filter { $0.type?.uppercased() == "HOLDING" }
-        print("📡 HOLDING FIXES FROM API — \(holdings.count) found")
-        for f in holdings {
-            print("""
-              • fixId : \(f.fixId ?? "-")
-                name  : \(f.fixName ?? "-")
-                type  : \(f.type ?? "-")   fixType: \(f.fixType ?? "-")
-                lat   : \(f.latitude.map { String($0) } ?? "-")
-                lon   : \(f.longitude.map { String($0) } ?? "-")
-                radials: \(f.radials?.count ?? 0)
-            """)
-        }
-        #endif
-
-        #if DEBUG
-        print("========== ZONES (\(zones.count)) ==========")
-        for z in zones {
-            print("  zone: id=\(z.zoneId ?? "—")  name=\(z.zoneName ?? "—")  type=\(z.zoneType ?? "—")  isActive=\(String(describing: z.isActive))  color=\(z.color ?? "—")  colliders=\(z.colliders?.count ?? 0)")
-            for (i, c) in (z.colliders ?? []).enumerated() {
-                print("    [\(i)] lat=\(String(describing: c.latitude))  lon=\(String(describing: c.longitude))")
-            }
-        }
-        print("==========================================")
-        #endif
         freqDeparture = detail.frequencyOfDeparture
         freqArrival = detail.frequencyOfArrival
         freqEnroute = detail.frequencyOfEnroute
@@ -223,64 +188,20 @@ final class MapViewModel: ObservableObject {
         // gameEndTime arrives in minutes from the API.
         exerciseDurationSeconds = (detail.gameEndTime ?? 0) * 60
 
-        #if DEBUG
-        print("""
-        ========== EXERCISE DETAIL ==========
-        name: \(detail.exerciseName)   icao: \(detail.icaoCode ?? "—")   airport: \(detail.airportName ?? "—")
-        map: \(detail.mapLatitude ?? 0), \(detail.mapLongitude ?? 0)
-        isMultiMode: \(String(describing: detail.isMultiMode))
-        airspaceCapacity: \(String(describing: detail.airspaceCapacity))
-        aircraftSpawningCount: \(String(describing: detail.aircraftSpawningCount))
-        → initialSpawnCount: \(initialSpawnCount())
-        runways: \(detail.runways.count)   fixes: \(fixes.count)   zones: \(zones.count)   obstructions: \(obstructions.count)
-        airlines (\(airlines.count)): \(airlines.map { "\($0.icaoCode ?? "?")/\($0.callSign ?? "?")" })
-        aircrafts (\(aircraftTypes.count)): \(aircraftTypes.map { "\($0.icaoCode ?? "?")=\($0.model ?? "?") [\($0.icaoWTC ?? "?")]" })
-        freqDeparture: type=\(detail.frequencyOfDeparture?.type ?? "—") flights=\(String(describing: detail.frequencyOfDeparture?.departureFlights)) time=\(String(describing: detail.frequencyOfDeparture?.departureFlightsTimeValue))
-        freqArrival:   type=\(detail.frequencyOfArrival?.type ?? "—") flights=\(String(describing: detail.frequencyOfArrival?.arrivalFlights)) time=\(String(describing: detail.frequencyOfArrival?.arrivalFlightsTimeValue))
-        freqEnroute:   type=\(detail.frequencyOfEnroute?.type ?? "—") flights=\(String(describing: detail.frequencyOfEnroute?.enrouteFlights)) time=\(String(describing: detail.frequencyOfEnroute?.enrouteFlightsTimeValue))
-        =====================================
-        """)
-        #endif
+        let layout = ExerciseRunwayLayout(from: detail.runways)
+        activeLocalizerRunways = layout.activeLocalizerRunways
 
-        var built: [Runway] = []
-        var enabled: Set<ApproachID> = []
-        var activeLocs: Set<String> = []
-        for rw in detail.runways {
-            let strips = rw.runwayStrips ?? []
-            guard strips.count >= 2,
-                  let aLat = strips[0].stripLatitude, let aLon = strips[0].stripLongitude,
-                  let bLat = strips[1].stripLatitude, let bLon = strips[1].stripLongitude else { continue }
-
-            let runway = Runway(
-                endA: RunwayThreshold(designator: strips[0].stripName ?? "",
-                                      coordinate: CLLocationCoordinate2D(latitude: aLat, longitude: aLon)),
-                endB: RunwayThreshold(designator: strips[1].stripName ?? "",
-                                      coordinate: CLLocationCoordinate2D(latitude: bLat, longitude: bLon)),
-                lengthMeters: nil
-            )
-            built.append(runway)
-            // Show a localizer only when it's set to display AND is active.
-            if strips[0].displayLocalizer == true && strips[0].activeLocalizer == true {
-                enabled.insert(ApproachID(runwayID: runway.id, side: .a))
-            }
-            if strips[1].displayLocalizer == true && strips[1].activeLocalizer == true {
-                enabled.insert(ApproachID(runwayID: runway.id, side: .b))
-            }
-            // Track which runway ends have an active localizer (intercept-eligible).
-            if strips[0].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[0].stripName ?? "")) }
-            if strips[1].activeLocalizer == true { activeLocs.insert(RunwayGeometry.canonical(strips[1].stripName ?? "")) }
-        }
-        activeLocalizerRunways = activeLocs
-
-        if built.isEmpty {
+        if layout.isEmpty {
             exerciseRunways = nil
             exerciseApproaches = nil
         } else {
-            exerciseRunways = built
-            exerciseApproaches = enabled
-            runways = built
-            enabledApproaches = enabled
+            exerciseRunways = layout.runways
+            exerciseApproaches = layout.enabledApproaches
+            runways = layout.runways
+            enabledApproaches = layout.enabledApproaches
         }
+
+        detail.dumpToConsole(initialSpawnCount: initialSpawnCount())
     }
 
     // MARK: - Runways & approaches
@@ -455,12 +376,22 @@ final class MapViewModel: ObservableObject {
         panPublisher.send(bearing)
     }
 
+    /// Where spoken and logged output goes. Named rather than reached for, so a
+    /// test can hand over a spy — the real one talks to the device synthesiser.
+    private let feedback: CommandFeedback
+    /// Reports aircraft owe, evaluated each tick.
+    private let reports: DeferredReportAnnouncing
+
     init(physics: AircraftPhysics? = nil,
          collision: AircraftCollisionDetector? = nil,
-         spawner: AircraftSpawner? = nil) {
+         spawner: AircraftSpawner? = nil,
+         feedback: CommandFeedback? = nil,
+         reports: DeferredReportAnnouncing? = nil) {
         self.physics   = physics ?? .shared
         self.collision = collision ?? .shared
         self.spawner   = spawner ?? .shared
+        self.feedback  = feedback ?? CommandFeedbackManager.shared
+        self.reports   = reports ?? DeferredReportCoordinator.shared
         aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
     }
 
@@ -473,29 +404,35 @@ final class MapViewModel: ObservableObject {
 
     /// Apply parsed commands to the selected aircraft.
     /// Routes all audio feedback through CommandFeedbackManager.
-    func apply(_ commands: [AircraftCommand]) {
+    func apply(_ commands: [AircraftCommand], readback: String? = nil) {
         guard let id = selectedAircraftID else {
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
             return
         }
-        applyCommands(commands, toAircraftWithID: id)
+        applyCommands(commands, toAircraftWithID: id, readback: readback)
+    }
+
+    /// Callsign of the aircraft a keypad command would act on — needed to render
+    /// its readback, which names the aircraft.
+    var selectedCallsign: String? {
+        guard let id = selectedAircraftID else { return nil }
+        return (aircraft + traffic).first { $0.id == id }?.callsign
     }
 
     /// Central command application. Radar aircraft get the command directly.
     /// A holding aircraft keeps holding for speed/altitude clearances, but is
     /// released back onto the radar for a vectoring / direct / hold command.
-    private func applyCommands(_ commands: [AircraftCommand], toAircraftWithID id: UUID) {
+    private func applyCommands(_ commands: [AircraftCommand],
+                               toAircraftWithID id: UUID,
+                               readback: String? = nil) {
         // Validate the whole utterance against the aircraft + scene before applying
         // anything (altitude/speed envelope, turn limits, hold-fix existence, and
         // the localizer-intercept checks). On failure, speak the reason and apply
         // nothing.
         if let ac = (aircraft + traffic).first(where: { $0.id == id }) {
-            let context = CommandValidator.Context(
-                runways: runways,
-                activeLocalizerRunways: activeLocalizerRunways,
-                holdingFixes: holdingFixesDomain)
-            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac, context: context) {
-                CommandFeedbackManager.shared.commandError(reason)
+            if case .rejected(let reason) = CommandValidator.validate(commands, for: ac,
+                                                                       context: validationContext) {
+                feedback.commandError(reason)
                 return
             }
         }
@@ -503,7 +440,7 @@ final class MapViewModel: ObservableObject {
         // Live radar aircraft.
         if let i = aircraft.firstIndex(where: { $0.id == id }) {
             physics.apply(commands, to: &aircraft[i])
-            CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[i].callsign, commands: commands)
+            announce(readback, callsign: aircraft[i].callsign, commands: commands)
             return
         }
         // Holding aircraft (in the hangar).
@@ -519,15 +456,31 @@ final class MapViewModel: ObservableObject {
                 aircraft.append(ac)
                 let last = aircraft.count - 1
                 physics.apply(commands, to: &aircraft[last])
-                CommandFeedbackManager.shared.commandAccepted(callsign: aircraft[last].callsign, commands: commands)
+                announce(readback, callsign: aircraft[last].callsign, commands: commands)
             } else {
                 // Speed / altitude clearance: obey while remaining in the hold.
                 physics.apply(commands, to: &traffic[ti])
-                CommandFeedbackManager.shared.commandAccepted(callsign: traffic[ti].callsign, commands: commands)
+                announce(readback, callsign: traffic[ti].callsign, commands: commands)
             }
             return
         }
-        CommandFeedbackManager.shared.aircraftNotFound()
+        feedback.aircraftNotFound()
+    }
+
+    /// Speaks the readback rendered from the template that was spoken.
+    ///
+    /// Nothing assembles a reply here any more. A missing readback means a command was
+    /// applied without the vocabulary that describes it, which both input paths refuse
+    /// outright — so it is a programming error rather than a case to paper over with
+    /// English of our own.
+    private func announce(_ readback: String?,
+                          callsign: String,
+                          commands: [AircraftCommand]) {
+        guard let readback, !readback.isEmpty else {
+            assertionFailure("applied \(commands.count) command(s) to \(callsign) with no readback")
+            return
+        }
+        feedback.readback(readback)
     }
 
     /// Commands that take an aircraft OUT of a holding pattern (vectoring,
@@ -535,9 +488,11 @@ final class MapViewModel: ObservableObject {
     private func commandsLeaveHold(_ commands: [AircraftCommand]) -> Bool {
         commands.contains { cmd in
             switch cmd {
-            case .heading, .headingTurn, .relativeTurn, .presentHeading, .hold, .interceptLocalizer:
+            case .heading, .headingTurn, .relativeTurn, .presentHeading, .stopTurn,
+                 .hold, .proceedDirect, .interceptLocalizer, .goAround:
                 return true
-            case .speed, .minSpeed, .maxSpeed, .flightLevel, .altitudeBlock:
+            case .speed, .minSpeed, .maxSpeed, .altitude, .altitudeBlock,
+                 .stopClimb, .stopDescent, .squawk, .clearedForTakeoff:
                 return false
             }
         }
@@ -586,7 +541,8 @@ final class MapViewModel: ObservableObject {
         tickCount = 0
         aircraft = []
         traffic  = []
-        spawners = []
+        schedule = nil
+        promotion = RadarPromotionSchedule()
         selectedAircraftID   = nil
         yellowConflictIDs    = []
         redConflictIDs       = []
@@ -615,7 +571,6 @@ final class MapViewModel: ObservableObject {
         isMultiMode          = false
         airspaceCapacity     = 1
         aircraftSpawningCount = 1
-        radarPromotionCountdown = .infinity
         exerciseName             = ""
         elapsedSeconds           = 0
         exerciseDurationSeconds  = 0
@@ -648,10 +603,9 @@ final class MapViewModel: ObservableObject {
         }
         aircraft = spawned
         resetTraffic()
-        // Start filling toward capacity if initial spawn didn't reach it.
-        radarPromotionCountdown = aircraft.count < airspaceCapacity
-            ? (promotionIntervals.randomElement() ?? 30)
-            : .infinity
+        promotion = RadarPromotionSchedule()
+        // Fill toward capacity promptly if the initial spawn fell short of it.
+        if aircraft.count < airspaceCapacity { promotion.hurry() }
         startSimulation()
     }
 
@@ -665,68 +619,58 @@ final class MapViewModel: ObservableObject {
         return max(1, min(requested, capacity))
     }
 
-    /// A category is active if its frequency type is Custom or Random.
-    private func isActiveType(_ type: String?) -> Bool {
-        let t = type?.lowercased()
-        return t == "custom" || t == "random"
+    /// The exercise's spawn configuration for a category. The only place the
+    /// backend's frequency payload is read; what its type strings mean is
+    /// ATCTrafficKit's business, not this layer's.
+    private func frequency(for category: TrafficCategory) -> SpawnFrequency {
+        switch category {
+        case .arrival:
+            return SpawnFrequency(type: freqArrival?.type,
+                                  flights: freqArrival?.arrivalFlights,
+                                  minutes: freqArrival?.arrivalFlightsTimeValue)
+        case .departure:
+            return SpawnFrequency(type: freqDeparture?.type,
+                                  flights: freqDeparture?.departureFlights,
+                                  minutes: freqDeparture?.departureFlightsTimeValue)
+        case .enroute:
+            return SpawnFrequency(type: freqEnroute?.type,
+                                  flights: freqEnroute?.enrouteFlights,
+                                  minutes: freqEnroute?.enrouteFlightsTimeValue)
+        }
+    }
+
+    private var configuredFrequencies: [TrafficCategory: SpawnFrequency] {
+        Dictionary(uniqueKeysWithValues: TrafficCategory.allCases.map {
+            ($0, frequency(for: $0))
+        })
     }
 
     /// Active categories in priority order (arrival → departure → enroute).
-    private func activeCategories() -> [FlightCategory] {
-        var result: [FlightCategory] = []
-        if isActiveType(freqArrival?.type)   { result.append(.arrival) }
-        if isActiveType(freqDeparture?.type) { result.append(.departure) }
-        if isActiveType(freqEnroute?.type)   { result.append(.enroute) }
-        return result
+    private func activeCategories() -> [TrafficCategory] {
+        TrafficCategory.inPriorityOrder.filter { frequency(for: $0).isActive }
     }
 
     /// Categories for the initially-spawned (on-map) aircraft. Only Arrival &
     /// Enroute spawn on the radar — Departures leave from the runway, so they
     /// live only in the hangar list (via the frequency spawner).
     private func initialCategories() -> [FlightCategory] {
-        let count = initialSpawnCount()
-        let cats = activeCategories().filter { $0 != .departure }
-        guard !cats.isEmpty else { return Array(repeating: .arrival, count: count) }
-        let split = weightedSplit(total: count, categories: cats)
-        return zip(cats, split).flatMap { Array(repeating: $0.0, count: $0.1) }
+        CapacityPlan.initialRadarCategories(count: initialSpawnCount(),
+                                            active: activeCategories())
+            .map(\.asFlight)
     }
 
-    /// Clear the hangar lists and rebuild the spawners from the exercise.
-    /// Capacity is divided 40% Arrival / 30% Departure / 30% Enroute among
-    /// the active categories; "none" (or missing) categories get no spawner.
+    /// Clear the hangar lists and rebuild the traffic schedule from the exercise.
+    /// Quotas are divided 40% Arrival / 30% Departure / 30% Enroute among the
+    /// active categories; "none" (or missing) categories get none.
     private func resetTraffic() {
         traffic = []
-        spawners = []
-
-        let configs: [(category: FlightCategory, type: String?, flights: Int?, minutes: Int?)] = [
-            (.arrival,   freqArrival?.type,   freqArrival?.arrivalFlights,     freqArrival?.arrivalFlightsTimeValue),
-            (.departure, freqDeparture?.type, freqDeparture?.departureFlights, freqDeparture?.departureFlightsTimeValue),
-            (.enroute,   freqEnroute?.type,   freqEnroute?.enrouteFlights,     freqEnroute?.enrouteFlightsTimeValue)
-        ]
-
-        // Per-category quota: 40/30/30 weighted split across all active categories.
-        let activeCats = configs.filter { isActiveType($0.type) }.map(\.category)
-        let quotas     = weightedSplit(total: airspaceCapacity, categories: activeCats)
-        let quotaMap   = Dictionary(uniqueKeysWithValues: zip(activeCats, quotas))
-
-        for config in configs {
-            guard let quota = quotaMap[config.category], quota > 0 else { continue }
-            switch config.type?.lowercased() {
-            case "custom":
-                guard let flights = config.flights, flights > 0,
-                      let minutes = config.minutes, minutes > 0 else { continue }
-                let interval = Double(minutes) * 60.0 / Double(flights)
-                spawners.append((config.category, .custom(interval: interval, remaining: quota), interval))
-            case "random":
-                spawners.append((config.category, .random(remaining: quota), randomIntervals.randomElement() ?? 30))
-            default:
-                continue   // "none" / missing → no spawner
-            }
-        }
+        schedule = TrafficSchedule(configuration: .init(
+            frequencies: configuredFrequencies,
+            airspaceCapacity: airspaceCapacity))
 
         // Seed one departure aircraft into the hangar immediately so the
         // controller always has something to clear for takeoff at exercise start.
-        if spawners.contains(where: { $0.category == .departure }) {
+        if schedule?.isActive(.departure) == true {
             traffic.append(spawner.makeListAircraft(context: spawnContext, category: .departure))
         }
     }
@@ -744,12 +688,17 @@ final class MapViewModel: ObservableObject {
         tickCount += 1
         advanceSpawners()
         advanceRadarPromotion()
+        rollClearedDepartures()
 
         var landedIDs = Set<UUID>()
         for index in aircraft.indices {
             guard !destroyedAircraftIDs.contains(aircraft[index].id) else { continue }
             // Auto-turn toward a commanded holding fix (proceed direct).
             HoldingController.steer(&aircraft[index], fixes: holdingFixesDomain)
+            // Direct routing to any fix — steered the same way, but the aircraft
+            // passes the fix and carries on instead of entering a racetrack.
+            DirectRouteController.steer(&aircraft[index], fixes: navigationFixesDomain)
+            DirectRouteController.releaseOnArrival(&aircraft[index], fixes: navigationFixesDomain)
             // Localizer intercept: align with the centreline, then track it in.
             LocalizerGuidanceService.guide(&aircraft[index], runways: runways)
             physics.stepPhysics(&aircraft[index], dt: tickInterval)
@@ -765,6 +714,14 @@ final class MapViewModel: ObservableObject {
             }
         }
 
+        // Reports the pilots owe: speak any that have just come due, now that
+        // positions have advanced this tick.
+        reports.advance(
+            aircraft: aircraft,
+            allCallsigns: Set((aircraft + traffic).map(\.callsign)),
+            fixes: navigationFixesDomain,
+            runways: runways)
+
         // Aircraft that reached the runway on the localizer have landed.
         if !landedIDs.isEmpty {
             if let sel = selectedAircraftID, landedIDs.contains(sel) { selectedAircraftID = nil }
@@ -778,8 +735,7 @@ final class MapViewModel: ObservableObject {
         if !captured.isEmpty {
             if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
             if aircraft.count < airspaceCapacity {
-                let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
-                radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
+                promotion.hurry()
             }
         }
 
@@ -791,19 +747,7 @@ final class MapViewModel: ObservableObject {
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
-        if !acResult.destroyed.isEmpty {
-            let fresh = acResult.destroyed.subtracting(destroyedAircraftIDs)
-            if !fresh.isEmpty {
-                destroyedAircraftIDs.formUnion(fresh)
-                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self else { return }
-                    self.aircraft.removeAll { fresh.contains($0.id) }
-                    self.traffic.removeAll  { fresh.contains($0.id) }
-                    self.destroyedAircraftIDs.subtract(fresh)
-                }
-            }
-        }
+        destroy(acResult.destroyed)
         let yellows = acResult.yellows.subtracting(acResult.destroyed)
         let reds    = acResult.reds.subtracting(acResult.destroyed)
         if yellows != yellowConflictIDs { yellowConflictIDs = yellows }
@@ -811,24 +755,11 @@ final class MapViewModel: ObservableObject {
 
         // Zone boundary collisions.
         let zoneResult = collision.detectZoneConflicts(aircraft: aircraft, zoneShapes: zoneShapes())
-        if !zoneResult.destroyed.isEmpty {
-            let fresh = zoneResult.destroyed.subtracting(destroyedAircraftIDs)
-            if !fresh.isEmpty {
-                destroyedAircraftIDs.formUnion(fresh)
-                if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self else { return }
-                    self.aircraft.removeAll { fresh.contains($0.id) }
-                    self.traffic.removeAll  { fresh.contains($0.id) }
-                    self.destroyedAircraftIDs.subtract(fresh)
-                }
-            }
-        }
+        destroy(zoneResult.destroyed)
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.
         if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
-            let fastRefill = promotionIntervals.prefix(3).randomElement() ?? 15
-            radarPromotionCountdown = min(radarPromotionCountdown, fastRefill)
+            promotion.hurry()
         }
         let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
         if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
@@ -850,49 +781,43 @@ final class MapViewModel: ObservableObject {
         }
     }
 
-    /// Advance every spawner; add a list aircraft when its countdown elapses.
-    private func advanceSpawners() {
-        for i in spawners.indices {
-            spawners[i].countdown -= tickInterval
-            guard spawners[i].countdown <= 0 else { continue }
+    /// How long the wreck stays on the radar before the aircraft leaves the scene.
+    private static let wreckageDisplaySeconds = 1.5
 
-            // Global cap = airspaceCapacity, counting the initially-spawned
-            // aircraft too (map targets + hangar traffic).
-            guard listAircraft.count < airspaceCapacity else {
-                spawners[i].countdown = .infinity
-                continue
-            }
-
-            switch spawners[i].mode {
-            case .custom(let interval, let remaining):
-                guard remaining > 0 else { spawners[i].countdown = .infinity; continue }
-                traffic.append(spawner.makeListAircraft(context: spawnContext, category: spawners[i].category))
-                spawners[i].mode = .custom(interval: interval, remaining: remaining - 1)
-                spawners[i].countdown += interval
-
-            case .random(let remaining):
-                guard remaining > 0 else {
-                    spawners[i].countdown = .infinity   // quota done — stop
-                    continue
-                }
-                traffic.append(spawner.makeListAircraft(context: spawnContext, category: spawners[i].category))
-                let left = remaining - 1
-                spawners[i].mode = .random(remaining: left)
-                // Pick a fresh random interval for the next one (or stop).
-                spawners[i].countdown = left > 0 ? (randomIntervals.randomElement() ?? 30) : .infinity
-            }
+    /// Marks aircraft destroyed, and removes them once the wreck has been shown.
+    ///
+    /// Both collision detectors end the same way and used to say so in two copies. Only
+    /// IDs that were not already destroyed count, so an aircraft caught by both detectors
+    /// on the same tick is scheduled for removal once rather than twice.
+    private func destroy(_ ids: Set<UUID>) {
+        let fresh = ids.subtracting(destroyedAircraftIDs)
+        guard !fresh.isEmpty else { return }
+        destroyedAircraftIDs.formUnion(fresh)
+        if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.wreckageDisplaySeconds) { [weak self] in
+            guard let self else { return }
+            self.aircraft.removeAll { fresh.contains($0.id) }
+            self.traffic.removeAll  { fresh.contains($0.id) }
+            self.destroyedAircraftIDs.subtract(fresh)
         }
     }
 
-    /// Counts down and promotes one hangar aircraft to the radar when the
-    /// airspace has room. Rearms itself for the next promotion automatically.
-    private func advanceRadarPromotion() {
-        guard aircraft.count < airspaceCapacity else {
-            radarPromotionCountdown = .infinity
-            return
+    /// Advance every spawner; add a list aircraft when its countdown elapses.
+    private func advanceSpawners() {
+        guard var schedule else { return }
+        // The schedule decides what and when; making the aircraft is this layer's
+        // job, since that needs a position and the schedule has no geometry.
+        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count) {
+            traffic.append(spawner.makeListAircraft(context: spawnContext,
+                                                    category: category.asFlight))
         }
-        radarPromotionCountdown -= tickInterval
-        guard radarPromotionCountdown <= 0 else { return }
+        self.schedule = schedule
+    }
+
+    private func advanceRadarPromotion() {
+        guard promotion.advance(by: tickInterval,
+                                radarCount: aircraft.count,
+                                capacity: airspaceCapacity) else { return }
         promoteFromHangar()
     }
 
@@ -912,22 +837,27 @@ final class MapViewModel: ObservableObject {
         }
         aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category,
                                                    existing: aircraft.map(\.position)))
-        radarPromotionCountdown = aircraft.count < airspaceCapacity
-            ? (promotionIntervals.randomElement() ?? 30)
-            : .infinity
+        // The schedule restarts its own interval; nothing to reset here.
     }
 
     // MARK: - Departure clearance
 
     /// Moves a departure aircraft from the hangar to its assigned runway threshold
     /// and starts the takeoff ground roll.
-    func clearForTakeoff(callsign: String) {
-        guard let idx = traffic.firstIndex(where: {
-            $0.callsign.uppercased() == callsign.uppercased() && $0.category == .departure
-        }) else {
-            CommandFeedbackManager.shared.aircraftNotFound()
-            return
+    /// Acts on takeoff clearances that have been issued but not yet carried out.
+    ///
+    /// `AircraftPhysics` records the clearance on the aircraft and stops there —
+    /// putting one on a runway threshold moves it between the hangar and the radar,
+    /// which is a change to the scene rather than to the aircraft's flight state.
+    /// The same division `hold` and `interceptLocalizer` already use.
+    private func rollClearedDepartures() {
+        while let idx = traffic.firstIndex(where: { $0.pendingTakeoffRunway != nil }) {
+            rollForTakeoff(at: idx)
         }
+    }
+
+    /// Moves a hangar departure onto its runway and starts the roll.
+    private func rollForTakeoff(at idx: Int) {
         var ac = traffic[idx]
         let (threshold, heading) = RunwayGeometry.departureThreshold(for: ac, in: runways, center: center)
 
@@ -939,36 +869,39 @@ final class MapViewModel: ObservableObject {
         ac.targetAltitudeFeet = 5000   // climb to FL050 after liftoff
         ac.takeoffState       = .groundRoll(runwayHeading: heading)
         ac.history            = []
+        ac.pendingTakeoffRunway = nil
 
         traffic.remove(at: idx)
         aircraft.append(ac)
-        CommandFeedbackManager.shared.commandAccepted(callsign: ac.callsign, commands: [])
-    }
-
-    /// Resolves a departure callsign from an already-normalised voice transcript.
-    func resolveDepartureCallsign(from normalizedText: String) -> String? {
-        CallsignResolver.resolve(from: normalizedText,
-                                 among: traffic.filter { $0.category == .departure },
-                                 airlines: airlines.map(\.asDomain))
     }
 
     /// Resolves a live radar aircraft callsign from an already-normalised voice
     /// transcript. Holding aircraft (in the hangar) are included so they can be
     /// cleared/vectored by callsign.
     func resolveRadarCallsign(from normalizedText: String) -> String? {
-        let candidates = aircraft + traffic.filter { $0.holdingName != nil }
+        // Departures waiting in the hangar are included: a takeoff clearance names
+        // an aircraft that is not on the radar yet.
+        let candidates = aircraft
+            + traffic.filter { $0.holdingName != nil || $0.category == .departure }
         return CallsignResolver.resolve(from: normalizedText, among: candidates, airlines: airlines.map(\.asDomain))
     }
 
     /// Applies commands to an aircraft found by callsign — no selection required.
-    func applyToCallsign(_ callsign: String, commands: [AircraftCommand]) {
+    ///
+    /// `readback` carries ICAO phraseology already rendered from the backend's own
+    /// `readBackText`. When present it is spoken instead of the English that
+    /// `CommandFeedbackManager` builds from the command enum — by that point the
+    /// template is forgotten, so the real phraseology could never be used.
+    func applyToCallsign(_ callsign: String,
+                         commands: [AircraftCommand],
+                         readback: String? = nil) {
         guard let id = (aircraft + traffic).first(where: {
             $0.callsign.uppercased() == callsign.uppercased()
         })?.id else {
-            CommandFeedbackManager.shared.aircraftNotFound()
+            feedback.aircraftNotFound()
             return
         }
-        applyCommands(commands, toAircraftWithID: id)
+        applyCommands(commands, toAircraftWithID: id, readback: readback)
     }
 
     // MARK: - Approach enabling
