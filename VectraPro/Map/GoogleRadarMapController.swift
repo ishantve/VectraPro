@@ -407,22 +407,24 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             let r        = ac.colliderRadiusNM * 1852.0
             let isRed    = viewModel.redConflictIDs.contains(ac.id)
             let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
+            let inConflict = (isRed || isYellow) && blink
             let stroke: UIColor = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.9)
                                 : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.9)
                                 :                       UIColor.white.withAlphaComponent(0.35)
-            let fill: UIColor   = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.06)
-                                : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.06)
-                                :                       .clear
+            // Match RadarMapController line widths (1.8 conflict, 1.2 normal) and,
+            // like MapLibre, draw no fill — these are line-only rings. (A GMSCircle
+            // cannot dash, so the conflict ring stays solid rather than dashed.)
+            let width: CGFloat = inConflict ? 1.8 : 1.2
             if let c = separationCircles[ac.id] {
                 c.position    = ac.position
                 c.radius      = r
                 c.strokeColor = stroke
-                c.fillColor   = fill
+                c.strokeWidth = width
             } else {
                 let c = GMSCircle(position: ac.position, radius: r)
                 c.strokeColor = stroke
-                c.strokeWidth = 1.5
-                c.fillColor   = fill
+                c.strokeWidth = width
+                c.fillColor   = .clear
                 c.map = mapView
                 separationCircles[ac.id] = c
             }
@@ -440,7 +442,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 let c = GMSCircle(position: ac.position, radius: r)
                 c.strokeColor = UIColor.orange.withAlphaComponent(0.9)
                 c.strokeWidth = 1.8
-                c.fillColor   = UIColor.orange.withAlphaComponent(0.08)
+                c.fillColor   = .clear   // MapLibre draws this ring line-only, no fill
                 c.map = mapView
                 zoneColliderCircles[ac.id] = c
             }
@@ -634,13 +636,25 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         path.add(mapView.projection.coordinate(for: edge))
         if let tether = tethers[id] {
             tether.path = path
+            tether.spans = tetherDashSpans(for: path)
         } else {
             let line = GMSPolyline(path: path)
-            line.strokeColor = UIColor.white.withAlphaComponent(0.5)
             line.strokeWidth = 1.5
+            line.spans = tetherDashSpans(for: path)
             line.map = mapView
             tethers[id] = line
         }
+    }
+
+    /// White dashed spans for the tether. Mirrors RadarMapController's dashed
+    /// tether (screen-space [2,2]); GMS style spans are geographic, so the cadence
+    /// is the same accepted approximation used by the trail and measurement lines.
+    private func tetherDashSpans(for path: GMSPath) -> [GMSStyleSpan] {
+        let white = UIColor.white.withAlphaComponent(0.5)
+        return GMSStyleSpans(path,
+                             [GMSStrokeStyle.solidColor(white), GMSStrokeStyle.solidColor(.clear)],
+                             [NSNumber(value: 150), NSNumber(value: 150)],
+                             .rhumb)
     }
 
     // MARK: Holding racetracks
