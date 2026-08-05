@@ -76,9 +76,6 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var fixNameKey = ""
     private var radialNameMarkers: [GMSMarker] = []
     private var radialNameKey = ""
-    /// Body diamond outlines (cyan) and nose diamond outlines (magenta) for debug visualisation.
-    private var bodyDiamondLines: [UUID: GMSPolyline] = [:]
-    private var noseDiamondLines: [UUID: GMSPolyline] = [:]
     /// Separation circles — always visible, one per aircraft. Color reflects conflict state.
     private var separationCircles: [UUID: GMSCircle] = [:]
     /// Orange rings — aircraft approaching a zone boundary.
@@ -397,36 +394,10 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let liveIDs = Set(viewModel.aircraft.map(\.id))
         let blink   = viewModel.blinkState
 
-        // — Body & nose diamonds (debug visualisation) —
-        for id in Array(bodyDiamondLines.keys) where !liveIDs.contains(id) {
-            bodyDiamondLines[id]?.map = nil; bodyDiamondLines[id] = nil
-            noseDiamondLines[id]?.map = nil; noseDiamondLines[id] = nil
-        }
-        for ac in viewModel.aircraft {
-            let bodyPath = gmsDiamondPath(center: ac.position,
-                                          forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
-                                          headingDeg: ac.headingDegrees)
-            let noseCenter = Geo.offset(from: ac.position,
-                                        distanceMeters: ac.noseOffsetNM * 1852,
-                                        bearingDegrees: ac.headingDegrees)
-            let nosePath = gmsDiamondPath(center: noseCenter,
-                                          forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
-                                          headingDeg: ac.headingDegrees)
-            if let bd = bodyDiamondLines[ac.id] { bd.path = bodyPath }
-            else {
-                let l = GMSPolyline(path: bodyPath)
-                l.strokeColor = UIColor.cyan.withAlphaComponent(0.9)
-                l.strokeWidth = 1.5; l.map = mapView
-                bodyDiamondLines[ac.id] = l
-            }
-            if let nd = noseDiamondLines[ac.id] { nd.path = nosePath }
-            else {
-                let l = GMSPolyline(path: nosePath)
-                l.strokeColor = UIColor.magenta.withAlphaComponent(0.9)
-                l.strokeWidth = 1.5; l.map = mapView
-                noseDiamondLines[ac.id] = l
-            }
-        }
+        // Body & nose collider diamonds are debug-only geometry — RadarMapController
+        // computes them but keeps their layers invisible (lineOpacity 0). Collision
+        // detection itself runs in MapViewModel, independent of any drawing, so we
+        // simply don't draw them here (matching MapLibre's on-screen result).
 
         // — Separation circles (always visible, colour varies) —
         for id in Array(separationCircles.keys) where !liveIDs.contains(id) {
@@ -961,23 +932,6 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             if rect.insetBy(dx: -16, dy: -16).contains(point) { return id }
         }
         return nil
-    }
-
-    private func gmsDiamondPath(center: CLLocationCoordinate2D,
-                                 forwardNM: Double, sideNM: Double,
-                                 headingDeg: Double) -> GMSMutablePath {
-        let bearings: [(Double, Double)] = [
-            (forwardNM * 1852, headingDeg),
-            (sideNM    * 1852, headingDeg + 90),
-            (forwardNM * 1852, headingDeg + 180),
-            (sideNM    * 1852, headingDeg + 270),
-        ]
-        let path = GMSMutablePath()
-        for (dist, bearing) in bearings {
-            path.add(Geo.offset(from: center, distanceMeters: dist, bearingDegrees: bearing))
-        }
-        path.add(Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg))
-        return path
     }
 
     private static let darkStyleJSON = """
