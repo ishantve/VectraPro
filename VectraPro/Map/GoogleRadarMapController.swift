@@ -183,6 +183,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     // MARK: Sync
 
     func sync() {
+        // Disable GMS's implicit position/property animations for the whole pass.
+        // GMSMarker animates every `position` change over ~0.2s by default; at high
+        // simulation speeds (10X+) a new, far-away position arrives before the last
+        // animation finishes, so markers visibly slide back and forth (jitter).
+        // Applying updates instantly — as MapLibre does — removes the jitter.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         applyZoomLimit()
         syncStaticLines()
         syncRadialNames()
@@ -193,6 +200,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncSelectionRing()
         syncHoldingRacetracks()
         syncMeasurement()
+        CATransaction.commit()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
