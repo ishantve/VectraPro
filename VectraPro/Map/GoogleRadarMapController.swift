@@ -41,6 +41,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private var didLimitZoom = false
 
+    /// Opaque black view kept on top of the map until the first frame is fully
+    /// rendered. GMSMapView paints its surface white for the first frames while
+    /// the dark-styled tiles load, so without this the radar flashes white before
+    /// turning black. Removed in mapViewSnapshotReady. (Does not affect load time —
+    /// it only hides the white; both the cover and the styled map are black.)
+    private var loadingCover: UIView?
+
     private enum PanMode { case none, map, label }
     private var panMode: PanMode = .none
     // Pan anchor captured once at gesture start — avoids re-projecting against a
@@ -138,6 +145,22 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         pan.delegate = self
         pan.maximumNumberOfTouches = 1
         mapView.addGestureRecognizer(pan)
+
+        // Black cover on top until the first frame renders — kills the white flash.
+        // Interaction disabled so taps/pans still reach the map underneath.
+        let cover = UIView(frame: mapView.bounds)
+        cover.backgroundColor = .black
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.isUserInteractionEnabled = false
+        mapView.addSubview(cover)
+        loadingCover = cover
+    }
+
+    /// First fully-rendered frame (tiles loaded) — the map is now black, so it is
+    /// safe to remove the cover with no white showing through.
+    func mapViewSnapshotReady(_ mapView: GMSMapView) {
+        loadingCover?.removeFromSuperview()
+        loadingCover = nil
     }
 
     private func applyZoom(_ delta: Double) {
