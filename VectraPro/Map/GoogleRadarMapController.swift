@@ -6,6 +6,24 @@
 //  but uses GMS APIs. Consumes the same provider-agnostic geometry (MapLine),
 //  symbols (AircraftSymbol) and shared MapViewModel.
 //
+//  ── Feature parity with the MapLibre backend ────────────────────────────────
+//  This backend is at feature parity with RadarMapController. Switching
+//  MapProvider changes the rendering engine, not the feature set.
+//
+//  ── Intentional, accepted renderer differences (NOT parity defects) ─────────
+//  • Aircraft/trail symbols are screen-fixed (constant on-screen size) rather
+//    than scaling with zoom as MapLibre's do. GMSMarkers are screen-fixed by
+//    design; emulating MapLibre's 2^(zoom-baseZoom) growth would need per-camera
+//    icon regeneration (perf + jitter) or a GroundOverlay rewrite, for little
+//    product value — screen-fixed radar symbols are acceptable/arguably better.
+//  • Dashed lines (trail, distance measurement) use a geographic dash cadence.
+//    GMS style-span dashes are geographic (rhumb/geodesic/projected), with no
+//    screen-space option; MapLibre dashes in screen points. Exact screen-space
+//    parity is only possible via a custom GMSProjection + Core Graphics overlay
+//    (future optional work); the geographic approximation is accepted.
+//  • Display DPI/crispness is handled natively by GMSMapView's GL surface — there
+//    is no contentScaleFactor to manage as there is for MapLibre's MLNMapView.
+//
 
 import Combine
 import ATCSimKit
@@ -496,9 +514,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 labelMarkers[aircraft.id] = m
                 return m
             }()
-            if labelTexts[aircraft.id] != labelKey {
-                label.icon = AircraftSymbol.label(for: aircraft, conflictColor: labelColor)
-                labelTexts[aircraft.id] = labelKey
+            // labelScale is part of the cache key so the block re-bakes at the new
+            // size when the radar view is resized / moved to an external display.
+            let scaledKey = "\(labelKey)@\(labelScale)"
+            if labelTexts[aircraft.id] != scaledKey {
+                label.icon = scaledLabel(AircraftSymbol.label(for: aircraft, conflictColor: labelColor),
+                                         by: labelScale)
+                labelTexts[aircraft.id] = scaledKey
             }
             if draggingLabelID != aircraft.id { label.position = offset }
 
@@ -869,6 +891,26 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+    /// Data-block scale, proportional to the radar view's height relative to the
+    /// iPad screen — smaller in a small detached window, larger on a big external
+    /// display. Mirrors RadarMapController.labelScale (clamped 0.6…1.4).
+    private var labelScale: CGFloat {
+        let reference = UIScreen.main.bounds.height
+        let h = mapView.bounds.height
+        guard reference > 0, h > 0 else { return 1.0 }
+        return min(1.4, max(0.6, h / reference))
+    }
+
+    /// GMSMarker has no view transform (unlike MapLibre's annotation view), so the
+    /// data-block scale is baked into the label image instead.
+    private func scaledLabel(_ image: UIImage, by scale: CGFloat) -> UIImage {
+        guard scale != 1.0 else { return image }
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
 
     /// The aircraft id whose data block contains `point` (nil = none).
     private func labelHit(_ point: CGPoint) -> UUID? {
