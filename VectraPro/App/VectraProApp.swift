@@ -25,31 +25,46 @@ struct VectraProApp: App {
         WindowGroup(id: "radar") {
             RadarWindowScene()
         }
+        .defaultSize(CGSize(width: 800, height: 600))
     }
 }
 
 struct RadarWindowScene: View {
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
 
-    /// Largest square edge we'll render the radar at.
-    private let maxSquare: CGFloat = 1920
-
     var body: some View {
         GeometryReader { geo in
-            // Detect the available resolution (the window fills the external
-            // display once dragged over) and fit the biggest square that fits,
-            // capped at 1920×1920. The rest stays black.
-            let side = min(min(geo.size.width, geo.size.height), maxSquare)
-            ZStack {
-                Color.black
+            // Radar is a square whose side = window height; the rest is the
+            // info area. (capped at width so a portrait window won't overflow.)
+            let side = min(geo.size.height, geo.size.width)
+            HStack(spacing: 0) {
+                // Radar panel — square, height = window height.
                 radarMap
                     .frame(width: side, height: side)
                     .clipped()
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(width: 1)
+
+                // Info area — placeholder space for now.
+                ZStack {
+                    Color(red: 0.06, green: 0.10, blue: 0.22)
+                    Text("Info")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea()
         .background(.black)
+        // Green border so the detached radar window is easy to tell apart.
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.green, lineWidth: 3)
+                .ignoresSafeArea()
+        )
         .onAppear { RadarPresentation.shared.isMapDetached = true }
         .onDisappear { RadarPresentation.shared.isMapDetached = false }
     }

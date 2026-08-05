@@ -10,7 +10,11 @@ import Security
 
 enum Keychain {
 
-    static func set(_ data: Data, for key: String) {
+    /// Writes a blob, replacing any existing value. Returns the `SecItemAdd`
+    /// status so callers can detect (and surface) a write failure instead of it
+    /// being swallowed silently. `errSecSuccess` means it was stored.
+    @discardableResult
+    static func set(_ data: Data, for key: String) -> OSStatus {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key
@@ -19,7 +23,7 @@ enum Keychain {
         var attributes = base
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(attributes as CFDictionary, nil)
+        return SecItemAdd(attributes as CFDictionary, nil)
     }
 
     static func get(_ key: String) -> Data? {
@@ -34,11 +38,12 @@ enum Keychain {
         return result as? Data
     }
 
-    static func delete(_ key: String) {
+    @discardableResult
+    static func delete(_ key: String) -> OSStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key
         ]
-        SecItemDelete(query as CFDictionary)
+        return SecItemDelete(query as CFDictionary)
     }
 }

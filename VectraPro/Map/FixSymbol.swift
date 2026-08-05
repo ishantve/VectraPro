@@ -34,7 +34,7 @@ enum FixSymbol {
         let height = icon.size.height + gap + textSize.height
         let canvas = CGSize(width: ceil(width), height: ceil(height))
 
-        return UIGraphicsImageRenderer(size: canvas).image { _ in
+        return UIGraphicsImageRenderer(size: canvas, format: AircraftSymbol.hiResFormat).image { _ in
             let iconRect = CGRect(x: (canvas.width - icon.size.width) / 2, y: 0,
                                   width: icon.size.width, height: icon.size.height)
             icon.draw(in: iconRect)
@@ -53,7 +53,7 @@ enum FixSymbol {
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: offWhite]
         let textSize = (label as NSString).size(withAttributes: attrs)
         let canvas = CGSize(width: ceil(textSize.width + 2), height: ceil(textSize.height))
-        return UIGraphicsImageRenderer(size: canvas).image { _ in
+        return UIGraphicsImageRenderer(size: canvas, format: AircraftSymbol.hiResFormat).image { _ in
             (label as NSString).draw(in: CGRect(x: 1, y: 0, width: textSize.width, height: textSize.height),
                                      withAttributes: attrs)
         }
@@ -65,14 +65,14 @@ enum FixSymbol {
         let aspect = base.size.height == 0 ? 1 : base.size.width / base.size.height
         var target = CGSize(width: size, height: size)
         if aspect > 1 { target.height = size / aspect } else { target.width = size * aspect }
-        return UIGraphicsImageRenderer(size: target).image { _ in
+        return UIGraphicsImageRenderer(size: target, format: AircraftSymbol.hiResFormat).image { _ in
             base.draw(in: CGRect(origin: .zero, size: target))
         }
     }
 
     private static func drawnTriangle(size: CGFloat, color: UIColor = UIColor.green.withAlphaComponent(0.9)) -> UIImage {
         let canvas = CGSize(width: size, height: size)
-        return UIGraphicsImageRenderer(size: canvas).image { _ in
+        return UIGraphicsImageRenderer(size: canvas, format: AircraftSymbol.hiResFormat).image { _ in
             let inset: CGFloat = 2
             let path = UIBezierPath()
             path.move(to: CGPoint(x: size / 2, y: inset))

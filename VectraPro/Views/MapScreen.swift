@@ -6,84 +6,31 @@
 //
 
 import SwiftUI
+import ATCSimKit
 
 struct MapScreen: View {
 
     @ObservedObject private var viewModel = MapViewModel.shared
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
     @ObservedObject private var presentation = RadarPresentation.shared
+    @ObservedObject private var feedbackManager = CommandFeedbackManager.shared
     @State private var isLandscape = false
     @State private var isWindowed = false
     @State private var activeLayers: Set<RadarLayer> = []
     /// Whether the layer buttons row is shown (toggled by the globe icon).
     @State private var showLayers = false
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
-    enum LeftMenu { case operations, comms, reference, display, insert, collab }
     @State private var openLeftMenu: LeftMenu?
-    /// Display-layer rows (icon, name), in order.
-    private let displayOptions: [(icon: String, name: String)] = [
-        ("cloud.fill", "Weather"),
-        ("scope", "Radials"),
-        ("scope", "Radials Names"),
-        ("triangle.fill", "Fixes"),
-        ("triangle.fill", "Fixes Names"),
-        ("exclamationmark.triangle.fill", "NOTAM"),
-        ("nosign", "Zone"),
-        ("smallcircle.filled.circle", "Holding"),
-        ("mountain.2.fill", "Obstacles"),
-        ("wind", "Wind"),
-        ("wind", "Wind Speed"),
-        ("cloud.fill", "Clouds"),
-        ("bolt.fill", "Lightening"),
-        ("cloud.bolt.rain.fill", "Thunderstorm")
-    ]
+    /// Which operations popup is open (nil = none). Only one at a time.
+    enum OperationsPopup { case flightData }
+    @State private var activePopup: OperationsPopup?
+    /// Display-layer rows, in menu order (single source of truth).
+    private let displayOptions = RadarDisplayLayer.allCases
 
     /// Tint applied to the layer icons (keeps their detail via colorMultiply).
     private let layerTint: Color = .white
 
-    /// Top-right radar layer toggles — each uses its own image asset.
-    enum RadarLayer: String, CaseIterable, Identifiable {
-        case obstacle, zone, holdingPattern, enroute, arrival, departure
-        var id: String { rawValue }
-        var asset: String { rawValue }
-
-        /// Title shown above the hangar list.
-        var title: String {
-            switch self {
-            case .arrival:   return "Arrival"
-            case .departure: return "Departure"
-            case .enroute:   return "Enroute"
-            default:         return rawValue.capitalized
-            }
-        }
-
-        /// The aircraft category this layer lists (nil = not a flight list).
-        var flightCategory: FlightCategory? {
-            switch self {
-            case .arrival:   return .arrival
-            case .departure: return .departure
-            case .enroute:   return .enroute
-            default:         return nil
-            }
-        }
-
-        /// Layers that open a list panel (single-select among themselves).
-        var opensHangar: Bool {
-            flightCategory != nil || self == .holdingPattern || self == .zone || self == .obstacle
-        }
-        /// Enroute / Arrival / Departure ship with the grey bg + border baked into
-        /// the asset; the first three are plain icons we style to match in code.
-        var hasBakedStyle: Bool {
-            switch self {
-            case .enroute, .arrival, .departure: return true
-            default: return false
-            }
-        }
-    }
-
     // Match the styling baked into the enroute/arrival/departure assets.
-    private let layerBG = Color(red: 0/255, green: 36/255, blue: 68/255).opacity(0.5)   // #002444
-    private let layerBorder = Color(red: 110/255, green: 220/255, blue: 255/255)         // #6EDCFF
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -97,13 +44,17 @@ struct MapScreen: View {
             // flashes white before the map paints.
             Color.black.ignoresSafeArea()
 
-            if !presentation.isMapDetached {
-                mapView
-                    .ignoresSafeArea()
-                    .id(providerRaw)   // recreate when the provider changes
-            }
+            // Keep the map alive even while detached (just covered), so it
+            // reappears instantly on close instead of re-initialising. While
+            // detached, the blank main screen shows the big Macro Keyboard.
+            mapView
+                .ignoresSafeArea()
+                .id(providerRaw)   // recreate when the provider changes
+                // Kept alive while detached (covered by the workspace layout),
+                // so it reappears instantly on close.
 
             controlPanel
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background {
             GeometryReader { proxy in
@@ -123,20 +74,9 @@ struct MapScreen: View {
         }
         .animation(.easeInOut(duration: 0.25), value: speechViewModel.showField)
         .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.6), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
-            }
-            .padding(.leading, 16)
-            // Drop below the native window controls only when windowed; keep the
-            // original placement in fullscreen.
-            .padding(.top, isWindowed ? 44 : 8)
+            exerciseHeader
+                .padding(.leading, 16)
+                .padding(.top, isWindowed ? 44 : 8)
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
@@ -196,30 +136,73 @@ struct MapScreen: View {
             }
         }
         .overlay(alignment: .bottomLeading) {
-            zoomButtons
+            HStack(spacing: 12) {
+                zoomButtons
+                speedButtons
+            }
+            .padding(.leading, 24)
+            .padding(.bottom, 12)
+        }
+        .overlay(alignment: .bottomLeading) {
+            feedbackLogView
                 .padding(.leading, 24)
-                .padding(.bottom, 12)
+                .padding(.bottom, 90)
         }
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
                 PushToTalkMicButton(viewModel: speechViewModel)
-                CommandKeyboard(
-                    onCommand: { CommandKeyboardHandler.shared.perform($0) },
-                    requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
-                    promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
-                    onValue: { command, value in
-                        CommandKeyboardHandler.shared.perform(command, value: value)
-                    },
-                    onBlock: { command, low, high in
-                        CommandKeyboardHandler.shared.perform(command, low: low, high: high)
-                    },
-                    valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
-                    onPreview: { text in speechViewModel.previewCommand(text) },
-                    onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
-                )
+                // Command keyboard only on the main (attached) view. While
+                // detached, the big Macro Keyboard fills the main screen instead.
+                if !presentation.isMapDetached {
+                    CommandKeyboard(
+                        onCommand: { CommandKeyboardHandler.shared.perform($0) },
+                        requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
+                        promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
+                        onValue: { command, value in
+                            CommandKeyboardHandler.shared.perform(command, value: value)
+                        },
+                        onBlock: { command, low, high in
+                            CommandKeyboardHandler.shared.perform(command, low: low, high: high)
+                        },
+                        valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
+                        onPreview: { text in speechViewModel.previewCommand(text) },
+                        onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
+                    )
+                }
             }
             .padding(.trailing, 16)
             .padding(.bottom, 12)
+        }
+        // While the radar is in its own window, the main screen becomes a
+        // three-panel workspace (left controls · right macro keyboard · bottom bar).
+        .overlay {
+            if presentation.isMapDetached {
+                detachedLayout
+            }
+        }
+        // Operations popups (e.g. Flight Data). Tapping anywhere outside closes.
+        .overlay {
+            if activePopup != nil {
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { activePopup = nil }
+
+                    if activePopup == .flightData {
+                        GeometryReader { geo in
+                            // Stick to the Operations button, like the left menus.
+                            let toolbarTop = max(8, (geo.size.height - toolbarHeight) / 2)
+                            FlightDataPopup(aircraft: selectedAircraft) { activePopup = nil }
+                                .offset(x: 68, y: toolbarTop)   // 16 pad + 48 button + 4 gap
+                        }
+                    }
+                }
+            }
+        }
+        .overlay {
+            if viewModel.isExerciseFinished {
+                exerciseSummaryOverlay
+            }
         }
         .navigationBarBackButtonHidden(true)
         .disablesSwipeBack()
@@ -239,7 +222,7 @@ struct MapScreen: View {
                 vm?.handleVoiceCommand(transcript)
             }
         }
-        .onDisappear { viewModel.stopSimulation() }
+        .onDisappear { viewModel.clearOnExit() }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
@@ -258,14 +241,124 @@ struct MapScreen: View {
     private var controlPanel: some View {
         VStack(spacing: 12) {
             approachChips
-
-            Text("\(viewModel.enabledApproaches.count) enabled")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.6))
         }
+        // Hug the runway chips instead of stretching the panel full width.
+        .fixedSize(horizontal: true, vertical: false)
         .padding()
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
-        .padding()
+        // Sit above the zoom / fast-forward buttons at the bottom-left.
+        .padding(.leading, 24)
+        .padding(.bottom, 50)
+    }
+
+    // MARK: - Detached workspace layout (radar in its own window)
+
+    /// Three-panel workspace shown on the main screen while the radar is
+    /// detached: left controls · right macro keyboard · bottom control bar.
+    private var detachedLayout: some View {
+        let gap: CGFloat = 12
+        return GeometryReader { geo in
+            // Macro keyboard = 2/3 of the usable width, pinned to the right;
+            // the left panel gets the remaining 1/3.
+            let usable = geo.size.width - gap * 2 - gap   // minus outer + inner gap
+            let macroW = max(0, usable * 2 / 3)
+
+            VStack(spacing: gap) {
+                HStack(spacing: gap) {
+                    // LEFT — takes the remaining width. Left-toolbar sits at the
+                    // left-centre; the top-right action buttons at the top-right;
+                    // any open menu / layer popup shows inside this panel.
+                    workspacePanel {
+                        ZStack(alignment: .topLeading) {
+                            // Back button + timer — top-left of the panel.
+                            exerciseHeader
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .padding(10)
+
+                            // Left toolbar — left edge, vertically centred.
+                            leftToolbar
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                .padding(.leading, 12)
+
+                            // Open left-tool menu, next to the toolbar.
+                            if anyLeftMenuOpen {
+                                activeMenuView(maxHeight: 420)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    .padding(.leading, 70)
+                            }
+
+                            // Top-right action buttons + layer popup + hangar list.
+                            VStack(alignment: .trailing, spacing: 10) {
+                                HStack(spacing: 10) {
+                                    windowToggleButton
+                                    topActionButton("flag.fill") { /* TODO */ }
+                                    topActionButton("person.2.fill") { /* TODO */ }
+                                    topActionButton("globe", isOn: showLayers) {
+                                        withAnimation(.easeInOut(duration: 0.2)) { showLayers.toggle() }
+                                    }
+                                }
+                                if showLayers {
+                                    layerButtons
+                                    detachedHangarContent
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(10)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    // RIGHT — macro keyboard (2/3 of the width), pinned right.
+                    // .equatable() so unrelated state changes don't rebuild it.
+                    MacroKeyboard(onMacro: { _ in /* TODO: macro actions */ })
+                        .equatable()
+                        .frame(width: macroW)
+                }
+
+                // BOTTOM — zoom + fast-forward (left) and the mic (right).
+                workspacePanel {
+                    HStack(alignment: .center) {
+                        HStack(spacing: 12) {
+                            zoomButtons
+                            speedButtons
+                        }
+                        Spacer()
+                        PushToTalkMicButton(viewModel: speechViewModel)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 96)
+            }
+            .padding(gap)
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    /// The hangar / list panel for the currently-selected layer, shown inside
+    /// the detached left panel (holding, flight lists, obstacles, zones).
+    @ViewBuilder
+    private var detachedHangarContent: some View {
+        if activeLayers.contains(.holdingPattern) {
+            let holdings = viewModel.holdingFixes
+            HoldingHangarPanel(
+                tabs: holdings.map { $0.fixName ?? "—" },
+                aircraftByHolding: holdings.map { fix in
+                    viewModel.listAircraft.filter { $0.holdingName == fix.fixName }
+                }
+            )
+        } else if let category = activeFlightList {
+            HangarPanel(title: category.title,
+                        aircraft: viewModel.listAircraft.filter { $0.category == category.flightCategory })
+        } else if let layer = buttonAnchoredLayer {
+            listPanel(for: layer)
+        }
+    }
+
+    @ViewBuilder
+    private func workspacePanel<Content: View>(
+        @ViewBuilder _ content: @escaping () -> Content
+    ) -> some View {
+        WorkspacePanel(content: content)
     }
 
     @ViewBuilder
@@ -306,56 +399,16 @@ struct MapScreen: View {
     }
 
     /// Left-side tool column: 4 tools + Instructor Mode (2). Clickable; actions TBD.
-    private var leftToolbar: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(spacing: 10) {
-                toolButton("building.2.fill", isOn: openLeftMenu == .operations) {
-                    toggleLeftMenu(.operations)                      // Operations
-                }
-                toolButton("antenna.radiowaves.left.and.right", isOn: openLeftMenu == .comms) {
-                    toggleLeftMenu(.comms)                           // Communications
-                }
-                toolButton("book.fill", isOn: openLeftMenu == .reference) {
-                    toggleLeftMenu(.reference)                       // Reference
-                }
-                toolButton("list.bullet.rectangle.portrait.fill", isOn: openLeftMenu == .display) {
-                    toggleLeftMenu(.display)                         // Display layers
-                }
-            }
-
-            HStack(spacing: 6) {
-                Image(systemName: "flag.fill")
-                Text("Instructor Mode")
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.9))
-            .fixedSize()
-            // Keep the column as wide as the buttons (48) with a fixed height so
-            // button positions are deterministic; let the label overflow right.
-            .frame(width: 48, height: 20, alignment: .leading)
-
-            VStack(spacing: 10) {
-                toolButton("rectangle.stack.badge.plus", isOn: openLeftMenu == .insert) {
-                    toggleLeftMenu(.insert)                          // Insert
-                }
-                toolButton("doc.text.fill", isOn: openLeftMenu == .collab) {
-                    toggleLeftMenu(.collab)                          // ATC Collaboration Hub
-                }
-            }
+    /// Back button and clock. Both layouts show it; each pads it differently.
+    private var exerciseHeader: some View {
+        ExerciseHeader(elapsedSeconds: viewModel.elapsedSeconds,
+                       showsTimer: viewModel.exerciseDurationSeconds > 0) {
+            dismiss()
         }
     }
 
-    private func toolButton(_ systemName: String, isOn: Bool = false, action: @escaping () -> Void = {}) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 45)   // same as the top layer buttons
-                .background(isOn ? Color(red: 0.20, green: 0.45, blue: 0.95) : layerBG,
-                            in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(layerBorder, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
+    private var leftToolbar: some View {
+        LeftToolbar(openMenu: openLeftMenu) { toggleLeftMenu($0) }
     }
 
     /// The currently-open left-tool menu, capped to `maxHeight` (scrolls if taller).
@@ -363,161 +416,95 @@ struct MapScreen: View {
     private func activeMenuView(maxHeight: CGFloat) -> some View {
         switch openLeftMenu {
         case .operations:
-            menuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
-                collabRow("doc.text.fill", "Flight Data")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("airplane", "Aircraft Control")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("arrow.left.arrow.right", "Handoffs")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("square.grid.2x2.fill", "Sector Management")
+            MenuCard(width: 230, maxHeight: maxHeight, title: "OPERATIONS", rows: 4) {
+                MenuActionRow(systemName: "doc.text.fill", title: "Flight Data") {
+                    openLeftMenu = nil            // close the menu
+                    activePopup = .flightData     // open the popup
+                }
+                MenuDivider()
+                MenuActionRow(systemName: "airplane", title: "Aircraft Control")
+                MenuDivider()
+                MenuActionRow(systemName: "arrow.left.arrow.right", title: "Handoffs")
+                MenuDivider()
+                MenuActionRow(systemName: "square.grid.2x2.fill", title: "Sector Management")
             }
         case .comms:
-            menuCard(width: 230, maxHeight: maxHeight, title: "COMMUNICATIONS", rows: 3) {
-                collabRow("antenna.radiowaves.left.and.right", "Radio Operations")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("message.fill", "Message Center")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("mappin.and.ellipse", "Coordination")
+            MenuCard(width: 230, maxHeight: maxHeight, title: "COMMUNICATIONS", rows: 3) {
+                MenuActionRow(systemName: "antenna.radiowaves.left.and.right", title: "Radio Operations")
+                MenuDivider()
+                MenuActionRow(systemName: "message.fill", title: "Message Center")
+                MenuDivider()
+                MenuActionRow(systemName: "mappin.and.ellipse", title: "Coordination")
             }
         case .reference:
-            menuCard(width: 230, maxHeight: maxHeight, title: "REFERENCE", rows: 3) {
-                collabRow("map.fill", "Maps & Charts")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("gearshape.2.fill", "Procedures")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("doc.text.magnifyingglass", "Quick Reference")
+            MenuCard(width: 230, maxHeight: maxHeight, title: "REFERENCE", rows: 3) {
+                MenuActionRow(systemName: "map.fill", title: "Maps & Charts")
+                MenuDivider()
+                MenuActionRow(systemName: "gearshape.2.fill", title: "Procedures")
+                MenuDivider()
+                MenuActionRow(systemName: "doc.text.magnifyingglass", title: "Quick Reference")
             }
         case .display:
-            menuCard(width: 250, maxHeight: maxHeight, title: "MAP LAYERS", rows: displayOptions.count) {
-                ForEach(displayOptions, id: \.name) { option in
-                    displayRow(option.icon, option.name)
-                    if option.name != displayOptions.last?.name {
-                        Divider().overlay(.white.opacity(0.12))
+            MenuCard(width: 250, maxHeight: maxHeight, title: "MAP LAYERS", rows: displayOptions.count) {
+                ForEach(displayOptions) { option in
+                    LayerToggleRow(layer: option,
+                                   isOn: viewModel.layerOn(option)) {
+                        viewModel.setLayer(option, $0)
                     }
+                    if option != displayOptions.last { MenuDivider() }
                 }
             }
         case .insert:
-            menuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 8) {
-                collabRow("cloud.fill", "Insert Weather")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("exclamationmark.triangle.fill", "Insert NOTAM")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("airplane", "Insert Rogue Plane")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("flame.fill", "Engine Fire")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("fanblades.fill", "Single Engine Failure")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("gearshape.2.fill", "Double Engine Failure")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("wrench.and.screwdriver.fill", "Hydraulic Failure")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("cross.case.fill", "Medical Emergency")
+            MenuCard(width: 240, maxHeight: maxHeight, title: "INSERT", rows: 9) {
+                MenuToggleRow(systemName: "ruler", title: "Distance Measurement",
+                              isOn: viewModel.isDistanceMeasuring) {
+                    viewModel.toggleDistanceMeasurement()
+                    if viewModel.isDistanceMeasuring { openLeftMenu = nil }
+                }
+                MenuDivider()
+                MenuActionRow(systemName: "cloud.fill", title: "Insert Weather")
+                MenuDivider()
+                MenuActionRow(systemName: "exclamationmark.triangle.fill", title: "Insert NOTAM")
+                MenuDivider()
+                MenuActionRow(systemName: "airplane", title: "Insert Rogue Plane")
+                MenuDivider()
+                MenuActionRow(systemName: "flame.fill", title: "Engine Fire")
+                MenuDivider()
+                MenuActionRow(systemName: "fanblades.fill", title: "Single Engine Failure")
+                MenuDivider()
+                MenuActionRow(systemName: "gearshape.2.fill", title: "Double Engine Failure")
+                MenuDivider()
+                MenuActionRow(systemName: "wrench.and.screwdriver.fill", title: "Hydraulic Failure")
+                MenuDivider()
+                MenuActionRow(systemName: "cross.case.fill", title: "Medical Emergency")
             }
         case .collab:
-            menuCard(width: 220, maxHeight: maxHeight, title: "ATC COLLABORATION HUB", rows: 4) {
-                collabRow("questionmark.circle", "Ask A Question")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("text.bubble", "Comment")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("airplane", "Issue TFR")
-                Divider().overlay(.white.opacity(0.12))
-                collabRow("list.bullet.rectangle", "Issue PREP")
+            MenuCard(width: 220, maxHeight: maxHeight, title: "ATC COLLABORATION HUB", rows: 4) {
+                MenuActionRow(systemName: "questionmark.circle", title: "Ask A Question")
+                MenuDivider()
+                MenuActionRow(systemName: "text.bubble", title: "Comment")
+                MenuDivider()
+                MenuActionRow(systemName: "airplane", title: "Issue TFR")
+                MenuDivider()
+                MenuActionRow(systemName: "list.bullet.rectangle", title: "Issue PREP")
             }
         case .none:
             EmptyView()
         }
     }
 
-    /// A styled popup card sized to its rows, capped at `maxHeight` (scrolls if
-    /// taller). Height is computed from `rows` so it hugs content reliably.
-    private func menuCard<Content: View>(width: CGFloat, maxHeight: CGFloat,
-                                         title: String?, rows: Int,
-                                         @ViewBuilder content: () -> Content) -> some View {
-        let rowHeight: CGFloat = 48
-        let titleHeight: CGFloat = title != nil ? 50 : 0
-        let rowsHeight = 12 + CGFloat(rows) * rowHeight
-        // The header stays fixed; only the rows scroll, capped to fit maxHeight.
-        let scrollHeight = min(rowsHeight, max(80, maxHeight - titleHeight))
-
-        return VStack(alignment: .leading, spacing: 0) {
-            if let title {
-                Text(title)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-            }
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) { content() }
-                    .padding(.vertical, 6)
-            }
-            .frame(height: scrollHeight)
-        }
-        .frame(width: width)
-        .background(Color(red: 0.06, green: 0.10, blue: 0.18).opacity(0.97),
-                    in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(Color(red: 0.32, green: 0.56, blue: 0.95).opacity(0.7), lineWidth: 1.5))
-        .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
-    }
-
-    private func displayRow(_ icon: String, _ name: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 18))
-                .foregroundStyle(.white)
-                .frame(width: 26)
-            Text(name)
-                .font(.system(size: 16))
-                .foregroundStyle(.white)
-            Spacer(minLength: 8)
-            Toggle("", isOn: Binding(
-                get: { viewModel.layers[name] ?? false },
-                set: { viewModel.setLayer(name, $0) }
-            ))
-            .labelsHidden()
-            .tint(Color(red: 0.20, green: 0.55, blue: 0.98))
-            .scaleEffect(0.8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-
-    private func collabRow(_ systemName: String, _ title: String) -> some View {
-        Button {
-            // TODO: wire hub action
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: systemName)
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white)
-                    .frame(width: 24)
-                Text(title)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// The currently-selected aircraft (nil when none is selected → the Flight
+    /// Data popup shows all fields blank/dashed).
+    private var selectedAircraft: Aircraft? {
+        guard let id = viewModel.selectedAircraftID else { return nil }
+        return viewModel.listAircraft.first { $0.id == id }
     }
 
     /// Top-right action icon (flag / people / globe). `isOn` highlights it.
-    private func topActionButton(_ systemName: String, isOn: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 45)
-                .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4)
-                    .stroke(isOn ? Color.green : layerBorder, lineWidth: isOn ? 2 : 1))
-        }
-        .buttonStyle(.plain)
+    private func topActionButton(_ systemName: String,
+                                 isOn: Bool = false,
+                                 action: @escaping () -> Void) -> some View {
+        TopActionButton(systemName: systemName, isOn: isOn, action: action)
     }
 
     /// Open the radar in its own window, or merge it back into this screen.
@@ -525,8 +512,10 @@ struct MapScreen: View {
         Button {
             if presentation.isMapDetached {
                 dismissWindow(id: "radar")
+                presentation.isMapDetached = false
             } else {
                 openWindow(id: "radar")
+                presentation.isMapDetached = true
             }
         } label: {
             Image(systemName: presentation.isMapDetached ? "rectangle.on.rectangle.slash" : "rectangle.on.rectangle")
@@ -593,16 +582,14 @@ struct MapScreen: View {
         if activeLayers.contains(layer) {
             activeLayers.remove(layer)
         } else {
+            // Hangar layers are single-select: opening one closes the others.
             if layer.opensHangar {
                 for other in RadarLayer.allCases where other != layer && other.opensHangar {
-                    if activeLayers.remove(other) != nil {
-                        RadarLayerHandler.shared.toggle(other, isOn: false)
-                    }
+                    activeLayers.remove(other)
                 }
             }
             activeLayers.insert(layer)
         }
-        RadarLayerHandler.shared.toggle(layer, isOn: activeLayers.contains(layer))
     }
 
     /// Obstacles / Enroute / Arrival / Departure layer toggles (40×40, asset art).
@@ -626,65 +613,44 @@ struct MapScreen: View {
 
     @ViewBuilder
     private func layerIcon(_ layer: RadarLayer) -> some View {
-        if layer.hasBakedStyle {
-            // Grey background + cyan border already part of the asset.
-            Image(layer.asset)
-                .resizable()
-                .renderingMode(.original)
-                .scaledToFit()
-        } else {
-            // Plain icon — match the baked assets: small glyph, grey bg, cyan border.
-            Image(layer.asset)
-                .resizable()
-                .renderingMode(.original)
-                .scaledToFit()
-                .colorMultiply(layerTint)
-                // holdingPattern is a wide glyph — less padding so its height matches the rest.
-                .padding(layer == .holdingPattern ? 8 : 13)
-                .frame(width: 48, height: 45)
-                .background(layerBG, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(layerBorder, lineWidth: 1))
-        }
+        RadarLayerIcon(layer: layer, tint: layerTint)
+    }
+
+    // MARK: - Overlay controls
+    //
+    // Each of these lives in its own file now; what stays here is the wiring that
+    // says where the values come from.
+
+    private var feedbackLogView: some View {
+        FeedbackLogView(feedbackManager: feedbackManager)
     }
 
     private var zoomButtons: some View {
-        HStack(spacing: 1) {
-            zoomButton(systemImage: "minus", delta: -1)
-            Divider().frame(height: 44).background(.white.opacity(0.2))
-            zoomButton(systemImage: "plus", delta: 1)
-        }
-        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 1))
+        RadarZoomControl { viewModel.zoom(by: $0) }
     }
 
-    private func zoomButton(systemImage: String, delta: Double) -> some View {
-        Button {
-            viewModel.zoom(by: delta)
-        } label: {
-            Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+    private var speedButtons: some View {
+        SimulationSpeedControl(
+            speed: viewModel.simulationSpeed,
+            canSlowDown: viewModel.simulationSpeed != MapViewModel.speedOptions.first,
+            canSpeedUp: viewModel.simulationSpeed != MapViewModel.speedOptions.last,
+            slowDown: { viewModel.decreaseSpeed() },
+            speedUp: { viewModel.increaseSpeed() })
+    }
+
+    @ViewBuilder
+    private var exerciseSummaryOverlay: some View {
+        ExerciseSummaryOverlay(exerciseName: viewModel.exerciseName,
+                               durationSeconds: viewModel.exerciseDurationSeconds) {
+            viewModel.clearOnExit()
+            dismiss()
         }
     }
 
     private var approachChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(viewModel.allApproaches) { approach in
-                    let on = viewModel.isEnabled(approach.id)
-                    Button(approach.designator) {
-                        viewModel.toggleApproach(approach.id)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(on ? Color.green : Color.white.opacity(0.15), in: Capsule())
-                    .foregroundStyle(on ? .black : .white)
-                }
-            }
-            .padding(.horizontal, 2)
-        }
+        ApproachChips(approaches: viewModel.allApproaches,
+                      isEnabled: { viewModel.isEnabled($0) },
+                      toggle: { viewModel.toggleApproach($0) })
     }
 }
 

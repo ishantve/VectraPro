@@ -65,11 +65,11 @@ struct HomeScreen: View {
         .overlay(alignment: .topTrailing) { accountOverlay }
     }
 
-    /// Loads the exercise config (and saves it), then navigates to the radar.
+    /// Asks the view model to load the exercise config + set up the radar, then
+    /// navigates to it. The orchestration lives in the view model.
     private func start(_ exercise: Exercise) async {
         do {
-            let detail = try await ExerciseService.shared.loadDetail(exerciseID: exercise.id)
-            MapViewModel.shared.applyExercise(detail)   // center rings on the exercise location
+            try await viewModel.startExercise(exercise)
             startedExercise = exercise
         } catch {
             startError = error.localizedDescription

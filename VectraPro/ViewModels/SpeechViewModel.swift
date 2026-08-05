@@ -11,6 +11,7 @@
 //
 
 import Combine
+import SpeechKit
 import Foundation
 
 @MainActor
@@ -53,7 +54,7 @@ final class SpeechViewModel: ObservableObject {
         isCancelling = false
         transcript = ""
         showField = true
-        FeedbackSound.micOn()
+        CommandFeedbackManager.shared.micStarted()
 
         if let live {
             isRecording = true
@@ -77,7 +78,7 @@ final class SpeechViewModel: ObservableObject {
         if live != nil {
             live?.stop()
             isRecording = false
-            FeedbackSound.micOff()
+            CommandFeedbackManager.shared.micStopped()
             if !transcript.isEmpty { onCommand?(transcript) }
             scheduleAutoHide()
             return
@@ -86,7 +87,7 @@ final class SpeechViewModel: ObservableObject {
         // REST fallback: stop recording and upload the WAV.
         isRecording = false
         let recordedURL = recorder.stop()
-        FeedbackSound.micOff()
+        CommandFeedbackManager.shared.micStopped()
         guard let url = recordedURL else { scheduleAutoHide(); return }
 
         isTranscribing = true

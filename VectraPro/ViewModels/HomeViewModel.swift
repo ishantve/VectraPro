@@ -6,6 +6,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 @MainActor
@@ -20,8 +21,30 @@ final class HomeViewModel: ObservableObject {
     private var pageNo = 0
     private var total = 0
 
+    // Collaborators — injected (default to the shared instances) so the view
+    // model owns no global reaches and can be tested with doubles.
+    private let api: APIManager
+    private let exerciseService: ExerciseService
+    private let radar: MapViewModel
+
+    init(api: APIManager? = nil,
+         exerciseService: ExerciseService? = nil,
+         radar: MapViewModel? = nil) {
+        self.api = api ?? .shared
+        self.exerciseService = exerciseService ?? .shared
+        self.radar = radar ?? .shared
+    }
+
     /// More pages available to load.
     private var hasMore: Bool { exercises.count < total }
+
+    /// Load the started exercise's config and set up the radar. Throws on
+    /// failure so the view can surface the error. (Orchestration lives here,
+    /// not in the view.)
+    func startExercise(_ exercise: Exercise) async throws {
+        let detail = try await exerciseService.loadDetail(exerciseID: exercise.id)
+        radar.applyExercise(detail)
+    }
 
     /// Load (or reload) the first page.
     func load() async {
@@ -62,8 +85,18 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func fetch(page: Int) async throws -> ExercisesResponse {
-        try await APIManager.shared.request(
-            .exercises(pageNo: page, pageSize: pageSize, search: "")
+        try await api.request(
+            Endpoint.exercises(pageNo: page, pageSize: pageSize, search: "")
         )
     }
+
+    /// Released classes need this. The target compiles with
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so a class's compiler-generated
+    /// deinit is an isolated one, and the runtime hops an isolated deinit onto the
+    /// main executor — which aborts the process on this toolchain (Swift 6.2.4).
+    /// Singletons hide it by never being released; anything created per screen or
+    /// per view is released for real. Declaring the deinit `nonisolated` says what is
+    /// true — tearing this down needs no actor — and skips the hop.
+    /// `IsolatedDeinitScanTests` is what catches a class that forgets it.
+    nonisolated deinit { }
 }

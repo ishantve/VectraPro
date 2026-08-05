@@ -1,0 +1,725 @@
+{
+    "reports": [
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT PASSING [SIGNIFICANT POINT]",
+            "abbreviationCode": "316",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], PASSING [SIGNIFICANT POINT].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT [DISTANCE] MILES GNSS FROM [DME STATION]",
+            "abbreviationCode": "317",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], [DISTANCE] MILES GNSS FROM [DME STATION]",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT [DISTANCE] MILES GNSS FROM [SIGNIFICANT POINT]",
+            "abbreviationCode": "318",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], [DISTANCE] MILES GNSS FROM [SIGNIFICANT POINT].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT [DISTANCE] MILES DME FROM [DME STATION]",
+            "abbreviationCode": "319",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], [DISTANCE] MILES DME FROM [DME STATION].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT [DISTANCE] MILES DME FROM  [SIGNIFICANT POINT]",
+            "abbreviationCode": "320",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], [DISTANCE] MILES DME FROM [DME STATION].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "climb": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLIMB TO FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "101",
+            "readBackText": "RADAR CLIMB TO FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLIMB TO [ALTITUDE] FEET",
+            "abbreviationCode": "102",
+            "readBackText": "RADAR CLIMB TO [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR REQUEST LEVEL CHANGE FROM [UNIT NAME] AT [TIME ]",
+            "abbreviationCode": "122",
+            "readBackText": "RADAR REQUEST LEVEL CHANGE FROM [UNIT NAME] AT [TIME ], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR REQUEST LEVEL CHANGE FROM [UNIT NAME] AT [SIGNIFICANT POINT]",
+            "abbreviationCode": "123",
+            "readBackText": "RADAR REQUEST LEVEL CHANGE FROM [UNIT NAME] AT [SIGNIFICANT POINT], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR STOP CLIMB AT FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "124",
+            "readBackText": "RADAR STOP CLIMB AT FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR STOP CLIMB AT [ALTITUDE] FEET",
+            "abbreviationCode": "125",
+            "readBackText": "RADAR STOP CLIMB AT [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLIMB TO AND MAINTAIN BLOCK FLIGHT LEVEL [LEVEL] TO FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "103",
+            "readBackText": "RADAR CLIMB TO AND MAINTAIN BLOCK FLIGHT LEVEL [LEVEL] TO FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLIMB TO AND MAINTAIN BLOCK [ALTITUDE]  FEET TO [ALTITUDE] FEET",
+            "abbreviationCode": "104",
+            "readBackText": "RADAR CLIMB TO AND MAINTAIN BLOCK [ALTITUDE]  FEET TO [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLIMB TO AND MAINTAIN BLOCK [ALTITUDE]  FEET TO FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "105",
+            "readBackText": "RADAR CLIMB TO AND MAINTAIN BLOCK [ALTITUDE]  FEET TO FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "departure": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR [STANDARD DEPARTURE NAME AND NUMBER] DEPARTURE",
+            "abbreviationCode": "304",
+            "readBackText": "RADAR [STANDARD DEPARTURE NAME AND NUMBER] DEPARTURE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "descend": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR DESCEND TO FLIGHT LEVEL  [LEVEL]",
+            "abbreviationCode": "158",
+            "readBackText": "RADAR DESCEND TO FLIGHT LEVEL  [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR DESCEND TO [ALTITUDE] FEET",
+            "abbreviationCode": "159",
+            "readBackText": "RADAR DESCEND TO [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR STOP DESCENT AT [LEVEL]",
+            "abbreviationCode": "182",
+            "readBackText": "RADAR STOP DESCENT AT [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR STOP DESCENT AT [ALTITUDE] FEET",
+            "abbreviationCode": "183",
+            "readBackText": "RADAR STOP DESCENT AT [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CONTINUE DESCENT TO FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "184",
+            "readBackText": "RADAR CONTINUE DESCENT TO FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CONTINUE DESCENT TO [ALTITUDE] FEET",
+            "abbreviationCode": "185",
+            "readBackText": "RADAR CONTINUE DESCENT TO [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "identification": [
+        {
+            "icaoTemplate": "[CALLSIGN] IDENTIFIED [POSITION]",
+            "abbreviationCode": "264",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT HEADING AND FLIGHT  LEVEL",
+            "abbreviationCode": "258",
+            "readBackText": "[CALLSIGN], HEADING [THREE DIGITS], FLIGHT LEVEL [LEVEL].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "levelcheck": [
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM [LEVEL]",
+            "abbreviationCode": "430",
+            "readBackText": "MAINTAINING [LEVEL], [CALLSIGN]. If not: NEGATIVE, [ACTUAL LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "maintain": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "219",
+            "readBackText": "RADAR MAINTAIN FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN [ALTITUDE] FEET",
+            "abbreviationCode": "220",
+            "readBackText": "RADAR MAINTAIN [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN BLOCK FLIGHT LEVEL [LEVEL] TO FLIGHT [LEVEL]",
+            "abbreviationCode": "235",
+            "readBackText": "RADAR MAINTAIN BLOCK FLIGHT LEVEL [LEVEL] TO FLIGHT [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN BLOCK [ALTITUDE] FEET  TO [ALTITUDE] FEET",
+            "abbreviationCode": "236",
+            "readBackText": "RADAR MAINTAIN BLOCK [ALTITUDE] FEET  TO [ALTITUDE] FEET, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN BLOCK [ALTITUDE] FEET  TO FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "237",
+            "readBackText": "RADAR MAINTAIN BLOCK [ALTITUDE] FEET  TO FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "missed": [
+        {
+            "icaoTemplate": "[CALLSIGN], GO AROUND",
+            "abbreviationCode": "327",
+            "readBackText": "GOING AROUND, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "radarterm": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR SERVICE TERMINATED DUE [REASON]",
+            "abbreviationCode": "449",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        }
+    ],
+    "freqtransfer": [
+        {
+            "icaoTemplate": "[CALLSIGN] CONTACT [UNIT CALL SIGN] [FREQUENCY] NOW",
+            "abbreviationCode": "448",
+            "readBackText": "CONTACT [UNIT CALL SIGN] [FREQUENCY], [CALLSIGN]",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "squawk": [
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM SQUAWK [CODE]",
+            "abbreviationCode": "216",
+            "readBackText": "SQUAWKING [CODE], [CALLSIGN]. If incorrect: NEGATIVE, SQUAWKING [ACTUAL CODE], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] SQUAWK [CODE]",
+            "abbreviationCode": "218",
+            "readBackText": "SQUAWK [CODE], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "vectoring": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR TURN RIGHT HEADING [THREE DIGITS]",
+            "abbreviationCode": "247",
+            "readBackText": "RADAR TURN RIGHT HEADING [THREE DIGITS], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR TURN LEFT HEADING [THREE DIGITS]",
+            "abbreviationCode": "246",
+            "readBackText": "RADAR TURN LEFT HEADING [THREE DIGITS], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CONTINUE PRESENT HEADING",
+            "abbreviationCode": "243",
+            "readBackText": "RADAR CONTINUE PRESENT HEADING, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR STOP TURN HEADING [THREE DIGITS]",
+            "abbreviationCode": "254",
+            "readBackText": "RADAR STOP TURN HEADING [THREE DIGITS], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR TURN LEFT [NUMBER OF DEGREES] DEGREES",
+            "abbreviationCode": "250",
+            "readBackText": "RADAR TURN LEFT [NUMBER OF DEGREES] DEGREES, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR TURN RIGHT [NUMBER OF DEGREES] DEGREES",
+            "abbreviationCode": "251",
+            "readBackText": "RADAR TURN RIGHT [NUMBER OF DEGREES] DEGREES, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR FLY HEADING [THREE DIGITS]",
+            "abbreviationCode": "245",
+            "readBackText": "RADAR FLY HEADING [THREE DIGITS], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "vectorapproach": [
+        {
+            "icaoTemplate": "[CALLSIGN] VECTORING FOR [TYPE OF APPROACH] APPROACH RUNWAY [NUMBER]",
+            "abbreviationCode": "267",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        }
+    ],
+    "ilsvectoring": [
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT ESTABLISHED ON ILS LOCALIZER",
+            "abbreviationCode": "405",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], ESTABLISHED ON ILS LOCALIZER.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT ESTABLISHED ON GBAS APPROACH COURSE",
+            "abbreviationCode": "406",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], ESTABLISHED ON GBAS APPROACH COURSE.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT ESTABLISHED ON SBAS APPROACH COURSE",
+            "abbreviationCode": "407",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], ESTABLISHED ON SBAS APPROACH COURSE.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT ESTABLISHED ON MLS APPROACH COURSE",
+            "abbreviationCode": "408",
+            "readBackText": "WILCO, [CALLSIGN]. Later: [CALLSIGN], ESTABLISHED ON MLS APPROACH COURSE.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM ESTABLISHED ON ILS LOCALIZER",
+            "abbreviationCode": "409",
+            "readBackText": "AFFIRM, ESTABLISHED ON ILS LOCALIZER, [CALLSIGN], If not: NEGATIVE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM ESTABLISHED ON GBAS APPROACH COURSE",
+            "abbreviationCode": "410",
+            "readBackText": "AFFIRM, ESTABLISHED ON GBAS APPROACH COURSE, [CALLSIGN]. If not: NEGATIVE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM ESTABLISHED ON SBAS APPROACH COURSE",
+            "abbreviationCode": "411",
+            "readBackText": "AFFIRM, ESTABLISHED ON SBAS APPROACH COURSE, [CALLSIGN].  If not: NEGATIVE, [CALLSIGN].   If not: NEGATIVE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] CONFIRM ESTABLISHED ON MLS APPROACH COURSE",
+            "abbreviationCode": "412",
+            "readBackText": "AFFIRM, ESTABLISHED ON MLS APPROACH COURSE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 0
+        }
+    ],
+    "speedcontrol": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN [NUMBER] KNOTS",
+            "abbreviationCode": "344",
+            "readBackText": "RADAR MAINTAIN [NUMBER] KNOTS, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN [NUMBER] KNOTS OR GREATER",
+            "abbreviationCode": "346",
+            "readBackText": "RADAR MAINTAIN [NUMBER] KNOTS OR GREATER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR MAINTAIN [NUMBER] KNOTS OR LESS",
+            "abbreviationCode": "348",
+            "readBackText": "RADAR MAINTAIN [NUMBER] KNOTS OR LESS, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR INCREASE SPEED TO [NUMBER] KNOTS",
+            "abbreviationCode": "359",
+            "readBackText": "RADAR INCREASE SPEED TO [NUMBER] KNOTS, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR REDUCE SPEED TO [NUMBER] KNOTS",
+            "abbreviationCode": "361",
+            "readBackText": "RADAR REDUCE SPEED TO [NUMBER] KNOTS, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR DO NOT EXCEED [NUMBER] KNOTS",
+            "abbreviationCode": "356",
+            "readBackText": "RADAR DO NOT EXCEED [NUMBER] KNOTS, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "pressurealt": [
+        {
+            "icaoTemplate": "[CALLSIGN] SQUAWK CHARLIE",
+            "abbreviationCode": "371",
+            "readBackText": "SQUAWK CHARLIE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] CHARLIE OBSERVED",
+            "abbreviationCode": "372",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "qnhtrans": [
+        {
+            "icaoTemplate": "[CALLSIGN] QNH [VALUE] TRANSITION LEVEL [LEVEL]",
+            "abbreviationCode": "431",
+            "readBackText": "QNH [VALUE], TRANSITION LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "standby": [
+        {
+            "icaoTemplate": "[CALLSIGN] STANDBY",
+            "abbreviationCode": "432",
+            "readBackText": "STANDING BY, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] STANDBY FOR FURTHER CLEARANCE",
+            "abbreviationCode": "433",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] STANDBY FOR FURTHER INSTRUCTIONS",
+            "abbreviationCode": "434",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "roger": [
+        {
+            "icaoTemplate": "[CALLSIGN] ROGER",
+            "abbreviationCode": "435",
+            "readBackText": "No pilot readback normally required.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "termpressalt": [
+        {
+            "icaoTemplate": "[CALLSIGN] STOP SQUAWK CHARLIE",
+            "abbreviationCode": "437",
+            "readBackText": "STOP SQUAWK CHARLIE, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        }
+    ],
+    "genphrase": [
+        {
+            "icaoTemplate": "[CALLSIGN] WHAT ARE YOUR INTENTIONS",
+            "abbreviationCode": "442",
+            "readBackText": "[CALLSIGN], INTEND [INTENTIONS].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] REPORT RADIALS",
+            "abbreviationCode": "443",
+            "readBackText": "[CALLSIGN], [THREE DIGITS] RADIAL [VOR NAME] VOR.",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] DISREGARD",
+            "abbreviationCode": "444",
+            "readBackText": "ROGER, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] PROCEED DIRECT TO [WAYPOINT/FIX/]",
+            "abbreviationCode": "445",
+            "readBackText": "PROCEED DIRECT TO [WAYPOINT/FIX], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": null,
+            "comments": null,
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] GO TO [WAYPOINT/FIX/]",
+            "abbreviationCode": "446",
+            "readBackText": "GO TO [WAYPOINT/FIX/], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "hold": [
+        {
+            "icaoTemplate": "[CALLSIGN] PROCEED DIRECT TO [HOLDING FIX] NDB AND HOLD AS PUBLISHED, MAINTAIN FLIGHT LEVEL [LEVEL]",
+            "abbreviationCode": "453",
+            "readBackText": "PROCEED DIRECT TO [HOLDING FIX] NDB AND HOLD AS PUBLISHED, MAINTAIN FLIGHT LEVEL [LEVEL], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] PROCEED DIRECT TO [HOLDING FIX] NDB AND HOLD AS PUBLISHED, MAINTAIN [ALTITUDE]",
+            "abbreviationCode": "",
+            "readBackText": "PROCEED DIRECT TO [HOLDING FIX] NDB AND HOLD AS PUBLISHED, MAINTAIN [ALTITUDE], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN], LEAVE [HOLDING FIX]",
+            "abbreviationCode": "",
+            "readBackText": "LEAVE [HOLDING FIX], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "approach": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR INTERCEPT THE LOCALIZER RUNWAY [NUMBER]",
+            "abbreviationCode": "454",
+            "readBackText": "RADAR INTERCEPT THE LOCALIZER RUNWAY [NUMBER], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        },
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR CLEARED FOR ILS APPROACH RUNWAY [NUMBER]",
+            "abbreviationCode": "376",
+            "readBackText": "RADAR CLEARED FOR ILS APPROACH RUNWAY [NUMBER], [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ],
+    "takeoffclr": [
+        {
+            "icaoTemplate": "[CALLSIGN] RADAR RUNWAY [NUMBER] CLEARED FOR TAKEOFF",
+            "abbreviationCode": "436",
+            "readBackText": "RADAR RUNWAY [NUMBER] CLEARED FOR TAKEOFF, [CALLSIGN].",
+            "speaker": "ATC",
+            "keyboardShortCut": "",
+            "comments": "",
+            "show": 1
+        }
+    ]
+}

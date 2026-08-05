@@ -39,7 +39,7 @@ enum MapConfiguration {
     /// same centre as the range rings.
     static let areaControlRings: [RangeRing] = {
         let dashed = RingStyle.dashed(dashMeters: 6000, gapMeters: 4000)
-        let faint = UIColor(white: 0.78, alpha: 0.35)
+        let faint = UIColor(white: 0.6, alpha: 0.25) //white: 0.78
         return [100, 150, 200, 250].map {
             RangeRing(radiusNM: $0, style: dashed, color: faint, lineWidth: 0.9)
         }

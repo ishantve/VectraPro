@@ -8,6 +8,8 @@
 //
 
 import CoreLocation
+import ATCSimKit
+import GeoNavKit
 import UIKit
 
 enum LocalizerRenderer {
@@ -40,9 +42,12 @@ enum LocalizerRenderer {
         let apex = Geo.offset(from: threshold, distanceMeters: coneApexNM * nauticalMile, bearingDegrees: course)
         let armLength = coneArmLength()
         let armRight = Geo.offset(from: apex, distanceMeters: armLength, bearingDegrees: course + coneHalfAngle)
-        let armLeft = Geo.offset(from: apex, distanceMeters: armLength, bearingDegrees: course - coneHalfAngle)
+        let armLeft  = Geo.offset(from: apex, distanceMeters: armLength, bearingDegrees: course - coneHalfAngle)
 
-        return [line(apex, armRight), line(apex, armLeft)]
+        return [
+            line(apex, armRight),
+            line(apex, armLeft),
+        ]
     }
 
     private static func circuit(runway: Runway) -> [MapLine] {

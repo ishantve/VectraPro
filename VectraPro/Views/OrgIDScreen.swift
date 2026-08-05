@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import NetworkKit
 
 struct OrgIDScreen: View {
 

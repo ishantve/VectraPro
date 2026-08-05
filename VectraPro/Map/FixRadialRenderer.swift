@@ -2,15 +2,19 @@
 //  FixRadialRenderer.swift
 //  VectraPro
 //
-//  Draws radials for VOR fixes from the exercise detail. A radial is a line
-//  from the fix outward at its bearing for its distance (NM). Only fixes whose
-//  `type` is "VOR" and that actually carry radials are drawn.
+//  Draws radials for VOR / HOLDING fixes from the exercise detail. A radial is
+//  a line from the fix outward at its bearing for its distance (NM). Fixes whose
+//  `type` is "VOR" or "HOLDING" and that actually carry radials are drawn.
 //
 
 import CoreLocation
+import GeoNavKit
 import UIKit
 
 enum FixRadialRenderer {
+
+    /// Fix types that draw radials when they carry any.
+    private static let radialTypes: Set<String> = ["VOR", "HOLDING"]
 
     private static let color = UIColor.green.withAlphaComponent(0.7)
     private static let width: CGFloat = 0.8
@@ -35,7 +39,7 @@ enum FixRadialRenderer {
         var result: [RadialLabel] = []
 
         for fix in fixes {
-            guard fix.type?.uppercased() == "VOR",
+            guard let type = fix.type?.uppercased(), radialTypes.contains(type),
                   let lat = fix.latitude, let lon = fix.longitude,
                   let radials = fix.radials, !radials.isEmpty else { continue }
             let origin = CLLocationCoordinate2D(latitude: lat, longitude: lon)
@@ -68,7 +72,7 @@ enum FixRadialRenderer {
     static func lines(fixes: [ExerciseDetail.Fix]) -> [MapLine] {
         var result: [MapLine] = []
         for fix in fixes {
-            guard fix.type?.uppercased() == "VOR",
+            guard let type = fix.type?.uppercased(), radialTypes.contains(type),
                   let lat = fix.latitude, let lon = fix.longitude,
                   let radials = fix.radials, !radials.isEmpty else { continue }
 

@@ -8,6 +8,8 @@
 //
 
 import Combine
+import ATCSimKit
+import GeoNavKit
 import CoreLocation
 import GoogleMaps
 import QuartzCore
@@ -49,6 +51,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var fixNameKey = ""
     private var radialNameMarkers: [GMSMarker] = []
     private var radialNameKey = ""
+    /// Body diamond outlines (cyan) and nose diamond outlines (magenta) for debug visualisation.
+    private var bodyDiamondLines: [UUID: GMSPolyline] = [:]
+    private var noseDiamondLines: [UUID: GMSPolyline] = [:]
+    /// Separation circles — always visible, one per aircraft. Color reflects conflict state.
+    private var separationCircles: [UUID: GMSCircle] = [:]
+    /// Orange rings — aircraft approaching a zone boundary.
+    private var zoneColliderCircles: [UUID: GMSCircle] = [:]
     private var zoneOverlays: [GMSOverlay] = []
     private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -116,11 +125,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncZones()
         syncFixes()
         syncAircraft()
+        syncColliders()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
     private func syncRadialNames() {
-        let showNames = viewModel.layerOn("Radials Names") && viewModel.layerOn("Radials")
+        let showNames = viewModel.layerOn(.radialsNames) && viewModel.layerOn(.radials)
         let key = "\(showNames)-\(viewModel.fixes.count)"
         guard key != radialNameKey else { return }
         radialNameKey = key
@@ -145,12 +155,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     /// Add each zone as a transparent fill polygon (solid border) + center label.
     private func syncZones() {
-        let key = viewModel.layerOn("Zone") ? "on-\(viewModel.zones.count)" : "off"
+        let key = viewModel.layerOn(.zone) ? "on-\(viewModel.zones.count)" : "off"
         guard key != zoneKey else { return }
         zoneKey = key
         zoneOverlays.forEach { $0.map = nil }
         zoneOverlays = []
-        guard viewModel.layerOn("Zone") else { return }
+        guard viewModel.layerOn(.zone) else { return }
         for shape in viewModel.zoneShapes() {
             let path = GMSMutablePath()
             shape.coordinates.forEach { path.add($0) }
@@ -173,9 +183,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// Sync fix icon markers and name labels independently so toggling names
     /// never repositions the icon markers.
     private func syncFixes() {
-        let showFixes   = viewModel.layerOn("Fixes")
-        let showHolding = viewModel.layerOn("Holding")
-        let showNames   = viewModel.layerOn("Fixes Names")
+        let showFixes   = viewModel.layerOn(.fixes)
+        let showHolding = viewModel.layerOn(.holding)
+        let showNames   = viewModel.layerOn(.fixesNames)
         let iconKey = "\(showFixes)-\(showHolding)-\(viewModel.fixes.count)"
         let nameKey = "\(showNames)-\(iconKey)"
 
@@ -233,7 +243,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private func applyZoomLimit() {
         guard !didLimitZoom, mapView.bounds.width > 0, mapView.bounds.height > 0 else { return }
-        let radius = 70 * 1852.0
+        let radius = 65 * 1852.0
         let center = viewModel.center
         let north = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 0)
         let south = Geo.offset(from: center, distanceMeters: radius, bearingDegrees: 180)
@@ -262,7 +272,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
 
         // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
-        let radialsOn = viewModel.layerOn("Radials")
+        let radialsOn = viewModel.layerOn(.radials)
         let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             radialLines.forEach { $0.map = nil }
@@ -304,10 +314,97 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
     }
 
+    // MARK: Colliders
+
+    /// One GMSCircle per aircraft, always visible. Stroke color reflects conflict level + blink state.
+    /// Zone proximity circles (orange) are maintained separately.
+    private func syncColliders() {
+        let liveIDs = Set(viewModel.aircraft.map(\.id))
+        let blink   = viewModel.blinkState
+
+        // — Body & nose diamonds (debug visualisation) —
+        for id in Array(bodyDiamondLines.keys) where !liveIDs.contains(id) {
+            bodyDiamondLines[id]?.map = nil; bodyDiamondLines[id] = nil
+            noseDiamondLines[id]?.map = nil; noseDiamondLines[id] = nil
+        }
+        for ac in viewModel.aircraft {
+            let bodyPath = gmsDiamondPath(center: ac.position,
+                                          forwardNM: ac.bodyForwardNM, sideNM: ac.bodySideNM,
+                                          headingDeg: ac.headingDegrees)
+            let noseCenter = Geo.offset(from: ac.position,
+                                        distanceMeters: ac.noseOffsetNM * 1852,
+                                        bearingDegrees: ac.headingDegrees)
+            let nosePath = gmsDiamondPath(center: noseCenter,
+                                          forwardNM: ac.noseForwardNM, sideNM: ac.noseSideNM,
+                                          headingDeg: ac.headingDegrees)
+            if let bd = bodyDiamondLines[ac.id] { bd.path = bodyPath }
+            else {
+                let l = GMSPolyline(path: bodyPath)
+                l.strokeColor = UIColor.cyan.withAlphaComponent(0.9)
+                l.strokeWidth = 1.5; l.map = mapView
+                bodyDiamondLines[ac.id] = l
+            }
+            if let nd = noseDiamondLines[ac.id] { nd.path = nosePath }
+            else {
+                let l = GMSPolyline(path: nosePath)
+                l.strokeColor = UIColor.magenta.withAlphaComponent(0.9)
+                l.strokeWidth = 1.5; l.map = mapView
+                noseDiamondLines[ac.id] = l
+            }
+        }
+
+        // — Separation circles (always visible, colour varies) —
+        for id in Array(separationCircles.keys) where !liveIDs.contains(id) {
+            separationCircles[id]?.map = nil; separationCircles[id] = nil
+        }
+        for ac in viewModel.aircraft {
+            let r        = ac.colliderRadiusNM * 1852.0
+            let isRed    = viewModel.redConflictIDs.contains(ac.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(ac.id) && !isRed
+            let stroke: UIColor = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.9)
+                                : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.9)
+                                :                       UIColor.white.withAlphaComponent(0.35)
+            let fill: UIColor   = (isRed && blink)    ? UIColor.systemRed.withAlphaComponent(0.06)
+                                : (isYellow && blink) ? UIColor.systemYellow.withAlphaComponent(0.06)
+                                :                       .clear
+            if let c = separationCircles[ac.id] {
+                c.position    = ac.position
+                c.radius      = r
+                c.strokeColor = stroke
+                c.fillColor   = fill
+            } else {
+                let c = GMSCircle(position: ac.position, radius: r)
+                c.strokeColor = stroke
+                c.strokeWidth = 1.5
+                c.fillColor   = fill
+                c.map = mapView
+                separationCircles[ac.id] = c
+            }
+        }
+
+        // — Zone proximity (orange) —
+        for id in Array(zoneColliderCircles.keys)
+            where !viewModel.zoneConflictIDs.contains(id) || !liveIDs.contains(id) {
+            zoneColliderCircles[id]?.map = nil; zoneColliderCircles[id] = nil
+        }
+        for ac in viewModel.aircraft where viewModel.zoneConflictIDs.contains(ac.id) {
+            let r = ac.colliderRadiusNM * 1852.0
+            if let c = zoneColliderCircles[ac.id] { c.position = ac.position; c.radius = r }
+            else {
+                let c = GMSCircle(position: ac.position, radius: r)
+                c.strokeColor = UIColor.orange.withAlphaComponent(0.9)
+                c.strokeWidth = 1.8
+                c.fillColor   = UIColor.orange.withAlphaComponent(0.08)
+                c.map = mapView
+                zoneColliderCircles[ac.id] = c
+            }
+        }
+    }
+
     // MARK: Aircraft
 
     private func syncAircraft() {
-        let current = viewModel.aircraft
+        let current = viewModel.radarAircraft
         let liveIDs = Set(current.map(\.id))
 
         // Remove markers for aircraft that no longer exist.
@@ -337,6 +434,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
             // Data block.
             let text = aircraft.dataBlock
+            let isRed    = viewModel.redConflictIDs.contains(aircraft.id)
+                        || viewModel.zoneConflictIDs.contains(aircraft.id)
+            let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
+            let blink    = viewModel.blinkState
+            let conflictColor: UIColor? = blink ? (isRed ? .systemRed : isYellow ? .systemYellow : nil) : nil
+            let labelKey = conflictColor != nil ? "\(text)-\(isRed ? "red" : "yellow")" : text
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
                                     bearingDegrees: aircraft.labelBearingDegrees)
@@ -348,9 +451,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 labelMarkers[aircraft.id] = m
                 return m
             }()
-            if labelTexts[aircraft.id] != text {
-                label.icon = AircraftSymbol.label(text)
-                labelTexts[aircraft.id] = text
+            if labelTexts[aircraft.id] != labelKey {
+                label.icon = AircraftSymbol.label(for: aircraft, conflictColor: conflictColor)
+                labelTexts[aircraft.id] = labelKey
             }
             if draggingLabelID != aircraft.id { label.position = offset }
 
@@ -481,6 +584,23 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         return nil
     }
 
+    private func gmsDiamondPath(center: CLLocationCoordinate2D,
+                                 forwardNM: Double, sideNM: Double,
+                                 headingDeg: Double) -> GMSMutablePath {
+        let bearings: [(Double, Double)] = [
+            (forwardNM * 1852, headingDeg),
+            (sideNM    * 1852, headingDeg + 90),
+            (forwardNM * 1852, headingDeg + 180),
+            (sideNM    * 1852, headingDeg + 270),
+        ]
+        let path = GMSMutablePath()
+        for (dist, bearing) in bearings {
+            path.add(Geo.offset(from: center, distanceMeters: dist, bearingDegrees: bearing))
+        }
+        path.add(Geo.offset(from: center, distanceMeters: forwardNM * 1852, bearingDegrees: headingDeg))
+        return path
+    }
+
     private static let darkStyleJSON = """
     [
       { "elementType": "labels", "stylers": [{ "visibility": "off" }] },
@@ -492,4 +612,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
       { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
     ]
     """
+
+    /// Released classes need this. The target compiles with
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so a class's compiler-generated
+    /// deinit is an isolated one, and the runtime hops an isolated deinit onto the
+    /// main executor — which aborts the process on this toolchain (Swift 6.2.4).
+    /// Singletons hide it by never being released; anything created per screen or
+    /// per view is released for real. Declaring the deinit `nonisolated` says what is
+    /// true — tearing this down needs no actor — and skips the hop.
+    /// `IsolatedDeinitScanTests` is what catches a class that forgets it.
+    nonisolated deinit { }
 }
