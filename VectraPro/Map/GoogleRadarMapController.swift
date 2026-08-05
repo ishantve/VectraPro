@@ -41,6 +41,10 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private var didLimitZoom = false
 
+    // Environment tracking for external-display / window-size changes.
+    private var lastKnownSize: CGSize = .zero
+    private weak var lastScreen: UIScreen?
+
     /// Opaque black view kept on top of the map until the first frame is fully
     /// rendered. GMSMapView paints its surface white for the first frames while
     /// the dark-styled tiles load, so without this the radar flashes white before
@@ -166,6 +170,31 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         loadingCover = nil
     }
 
+    /// Detects a change in the map view's size or host screen (e.g. moving to an
+    /// external display) and, if so, clears the one-shot zoom-limit guard so the
+    /// next applyZoomLimit re-fits the 65 NM bounds to the new viewport. Data-block
+    /// labels re-bake at the new labelScale automatically on the same sync pass.
+    /// GMS renders its GL surface at native scale, so — unlike MapLibre — there is
+    /// no contentScaleFactor to manage. Returns true when a change was handled.
+    @discardableResult
+    private func handleEnvironmentChangeIfNeeded() -> Bool {
+        let size = mapView.bounds.size
+        let screen = mapView.window?.screen
+        let sizeChanged = size != lastKnownSize && size.width > 0 && size.height > 0
+        let screenChanged = screen !== lastScreen
+        guard sizeChanged || screenChanged else { return false }
+        lastKnownSize = size
+        lastScreen = screen
+        didLimitZoom = false
+        return true
+    }
+
+    /// A resize / external-display move settles the camera without a model change,
+    /// so re-fit here too (covers the case where the simulation is paused).
+    func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
+        if handleEnvironmentChangeIfNeeded() { sync() }
+    }
+
     private func applyZoom(_ delta: Double) {
         let target = max(mapView.minZoom, min(mapView.maxZoom, mapView.camera.zoom + Float(delta)))
         mapView.animate(toZoom: target)
@@ -187,6 +216,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         // Applying updates instantly — as MapLibre does — removes the jitter.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        handleEnvironmentChangeIfNeeded()   // re-fit zoom limit on size/screen change
         applyZoomLimit()
         syncStaticLines()
         syncRadialNames()
