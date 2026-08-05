@@ -58,6 +58,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var separationCircles: [UUID: GMSCircle] = [:]
     /// Orange rings — aircraft approaching a zone boundary.
     private var zoneColliderCircles: [UUID: GMSCircle] = [:]
+    /// Green ring around the selected aircraft.
+    private var selectionCircle: GMSCircle?
     private var zoneOverlays: [GMSOverlay] = []
     private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -132,6 +134,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncFixes()
         syncAircraft()
         syncColliders()
+        syncSelectionRing()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -456,14 +459,17 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
             // Landing-sequence spacing warning (below the required separation).
             let isSeq    = viewModel.sequencingConflictIDs.contains(aircraft.id) && !isRed && !isYellow
+            let isSelected = viewModel.selectedAircraftID == aircraft.id
             let blink    = viewModel.blinkState
             let conflictColor: UIColor? = blink
                 ? (isRed ? .systemRed : isYellow ? .systemYellow : isSeq ? .systemOrange : nil)
                 : nil
+            let labelColor: UIColor? = conflictColor ?? (isSelected ? .systemGreen : nil)
             let labelKey: String
             if isRed && blink         { labelKey = "\(text)-red" }
             else if isYellow && blink  { labelKey = "\(text)-yellow" }
             else if isSeq && blink     { labelKey = "\(text)-seq" }
+            else if isSelected         { labelKey = "\(text)-selected" }
             else                       { labelKey = text }
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
@@ -472,12 +478,15 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 let m = GMSMarker(position: offset)
                 m.groundAnchor = CGPoint(x: 0, y: 1)   // bottom-left corner on the point
                 m.isFlat = true
+                // Not tappable: selection uses a geometric hit-test in didTapAt
+                // (like RadarMapController), so the label must not swallow the tap.
+                m.isTappable = false
                 m.map = mapView
                 labelMarkers[aircraft.id] = m
                 return m
             }()
             if labelTexts[aircraft.id] != labelKey {
-                label.icon = AircraftSymbol.label(for: aircraft, conflictColor: conflictColor)
+                label.icon = AircraftSymbol.label(for: aircraft, conflictColor: labelColor)
                 labelTexts[aircraft.id] = labelKey
             }
             if draggingLabelID != aircraft.id { label.position = offset }
@@ -567,6 +576,43 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             line.strokeWidth = 1.5
             line.map = mapView
             tethers[id] = line
+        }
+    }
+
+    // MARK: Selection
+
+    /// Small green ring around the selected aircraft, matching RadarMapController
+    /// (0.4 NM radius). GMS has a native circle, so no polyline geometry is needed.
+    private func syncSelectionRing() {
+        guard let id = viewModel.selectedAircraftID,
+              let ac = viewModel.radarAircraft.first(where: { $0.id == id }) else {
+            selectionCircle?.map = nil
+            selectionCircle = nil
+            return
+        }
+        let radius = 0.4 * 1852.0
+        if let c = selectionCircle {
+            c.position = ac.position
+            c.radius = radius
+        } else {
+            let c = GMSCircle(position: ac.position, radius: radius)
+            c.strokeColor = .systemGreen
+            c.strokeWidth = 2.0
+            c.fillColor = .clear
+            c.map = mapView
+            selectionCircle = c
+        }
+    }
+
+    /// Tap a data block → select that aircraft (tap again → deselect); tap
+    /// elsewhere → deselect. Uses the same geometric hit-test as the label drag,
+    /// mirroring RadarMapController.handleTap.
+    func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
+        let point = mapView.projection.point(for: coordinate)
+        if let id = labelHit(point) {
+            viewModel.selectAircraft(viewModel.selectedAircraftID == id ? nil : id)
+        } else {
+            viewModel.selectAircraft(nil)
         }
     }
 
