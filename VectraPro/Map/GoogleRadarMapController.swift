@@ -66,6 +66,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private let trailIcons: [UIImage] = (0..<8).map {
         AircraftSymbol.trailDot(fraction: Double($0) / 7)
     }
+    /// Trail-dot spacing — mirrors RadarMapController: fixed 0.60 NM gaps (the
+    /// dynamic-spacing branch is kept for parity with the same off-by-default flag).
+    private let dynamicTrailSpacing = false
+    private let fixedTrailSpacingNM = 0.60
+    /// Dashed history line per aircraft, shown only when the Trail layer is on.
+    private var trailLines: [UUID: GMSPolyline] = [:]
 
     init(viewModel: MapViewModel) {
         self.viewModel = viewModel
@@ -415,9 +421,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             labelTexts[id] = nil
             trailMarkers[id]?.forEach { $0.map = nil }; trailMarkers[id] = nil
             tethers[id]?.map = nil; tethers[id] = nil
+            trailLines[id]?.map = nil; trailLines[id] = nil
         }
 
         for aircraft in current {
+            let isDestroyed = viewModel.destroyedAircraftIDs.contains(aircraft.id)
+
             // Symbol.
             let marker = aircraftMarkers[aircraft.id] ?? {
                 let m = GMSMarker(position: aircraft.position)
@@ -429,6 +438,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 aircraftMarkers[aircraft.id] = m
                 return m
             }()
+            if isDestroyed {
+                // Show the wreck and freeze label / trail / rotation until the
+                // aircraft is removed — exactly as RadarMapController does.
+                marker.icon = UIImage(named: "destroyed_Aircraft")
+                marker.position = aircraft.position
+                continue
+            }
+            marker.icon = AircraftSymbol.image()
             marker.position = aircraft.position
             marker.rotation = aircraft.headingDegrees
 
@@ -437,9 +454,17 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             let isRed    = viewModel.redConflictIDs.contains(aircraft.id)
                         || viewModel.zoneConflictIDs.contains(aircraft.id)
             let isYellow = viewModel.yellowConflictIDs.contains(aircraft.id) && !isRed
+            // Landing-sequence spacing warning (below the required separation).
+            let isSeq    = viewModel.sequencingConflictIDs.contains(aircraft.id) && !isRed && !isYellow
             let blink    = viewModel.blinkState
-            let conflictColor: UIColor? = blink ? (isRed ? .systemRed : isYellow ? .systemYellow : nil) : nil
-            let labelKey = conflictColor != nil ? "\(text)-\(isRed ? "red" : "yellow")" : text
+            let conflictColor: UIColor? = blink
+                ? (isRed ? .systemRed : isYellow ? .systemYellow : isSeq ? .systemOrange : nil)
+                : nil
+            let labelKey: String
+            if isRed && blink         { labelKey = "\(text)-red" }
+            else if isYellow && blink  { labelKey = "\(text)-yellow" }
+            else if isSeq && blink     { labelKey = "\(text)-seq" }
+            else                       { labelKey = text }
             let offset = Geo.offset(from: aircraft.position,
                                     distanceMeters: aircraft.labelDistanceMeters,
                                     bearingDegrees: aircraft.labelBearingDegrees)
@@ -460,15 +485,23 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             syncTrail(aircraft.history, id: aircraft.id)
             updateTether(for: aircraft.id, from: aircraft.position, to: label.position)
         }
+
+        syncTrailLines()
     }
 
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
         trailMarkers[id]?.forEach { $0.map = nil }
+        // Same sampling as RadarMapController: evenly-/fixed-spaced dots, not one
+        // marker per raw history point.
+        let positions = dynamicTrailSpacing
+            ? TrailSampler.equalSpaced(from: history, count: 6)
+            : TrailSampler.fixedSpaced(from: history, count: 6, spacingNM: fixedTrailSpacingNM)
+        guard !positions.isEmpty else { trailMarkers[id] = []; return }
         var markers: [GMSMarker] = []
-        for index in history.indices {
-            let fraction = history.count > 1 ? Double(index) / Double(history.count - 1) : 1
+        for index in positions.indices {
+            let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
-            let marker = GMSMarker(position: history[index])
+            let marker = GMSMarker(position: positions[index])
             marker.icon = trailIcons[step]
             marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
             marker.isTappable = false
@@ -476,6 +509,50 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             markers.append(marker)
         }
         trailMarkers[id] = markers
+    }
+
+    /// Dashed history line per aircraft (history + current position), shown only
+    /// when the Trail layer is on. Mirrors RadarMapController.syncTrailLines.
+    private func syncTrailLines() {
+        guard viewModel.layerOn(.trail) else {
+            trailLines.values.forEach { $0.map = nil }
+            trailLines = [:]
+            return
+        }
+        let liveIDs = Set(viewModel.radarAircraft.map(\.id))
+        for (id, line) in trailLines where !liveIDs.contains(id) {
+            line.map = nil; trailLines[id] = nil
+        }
+        for ac in viewModel.radarAircraft {
+            guard !ac.history.isEmpty else {
+                trailLines[ac.id]?.map = nil; trailLines[ac.id] = nil
+                continue
+            }
+            let path = GMSMutablePath()
+            ac.history.forEach { path.add($0) }
+            path.add(ac.position)
+            let line = trailLines[ac.id] ?? {
+                let l = GMSPolyline(path: path)
+                l.strokeWidth = 1.5
+                l.map = mapView
+                trailLines[ac.id] = l
+                return l
+            }()
+            line.path = path
+            line.spans = trailDashSpans(for: path)
+        }
+    }
+
+    /// Orange dashed spans matching RadarMapController's trail-line colour.
+    /// NOTE: MapLibre dashes in screen points ([4,5]); GMS style spans are
+    /// geographic, so the dash *cadence* is an approximation (tunable) rather
+    /// than pixel-identical — flagged for smoke-test.
+    private func trailDashSpans(for path: GMSPath) -> [GMSStyleSpan] {
+        let orange = UIColor(red: 1.0, green: 0.65, blue: 0.2, alpha: 0.75)
+        return GMSStyleSpans(path,
+                             [GMSStrokeStyle.solidColor(orange), GMSStrokeStyle.solidColor(.clear)],
+                             [NSNumber(value: 200), NSNumber(value: 250)],
+                             .rhumb)
     }
 
     private func updateTether(for id: UUID, from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
