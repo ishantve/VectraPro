@@ -66,6 +66,9 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var measurementLine: GMSPolyline?
     private var measurementLabel: GMSMarker?
     private var lastMeasurementText = ""
+    /// Holding-racetrack ovals, one per holding aircraft, shown only when the
+    /// Holding-racetrack layer is on.
+    private var holdingRacetrackLines: [UUID: GMSPolyline] = [:]
     private var zoneOverlays: [GMSOverlay] = []
     private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -141,6 +144,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncAircraft()
         syncColliders()
         syncSelectionRing()
+        syncHoldingRacetracks()
         syncMeasurement()
     }
 
@@ -583,6 +587,45 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             line.strokeWidth = 1.5
             line.map = mapView
             tethers[id] = line
+        }
+    }
+
+    // MARK: Holding racetracks
+
+    /// One cyan oval per holding aircraft when the Holding-racetrack layer is on.
+    /// Uses the shared HoldingRacetrack geometry; mirrors RadarMapController.
+    private func syncHoldingRacetracks() {
+        guard viewModel.layerOn(.holdingRacetrack) else {
+            holdingRacetrackLines.values.forEach { $0.map = nil }
+            holdingRacetrackLines = [:]
+            return
+        }
+        let holdingIDs = Set(viewModel.traffic.filter { $0.holdingName != nil }.map(\.id))
+        for (id, line) in holdingRacetrackLines where !holdingIDs.contains(id) {
+            line.map = nil; holdingRacetrackLines[id] = nil
+        }
+        for ac in viewModel.traffic where ac.holdingName != nil {
+            guard let name = ac.holdingName,
+                  let ic = ac.holdingInboundCourse,
+                  let fix = viewModel.holdingFixPosition(named: name) else {
+                holdingRacetrackLines[ac.id]?.map = nil; holdingRacetrackLines[ac.id] = nil
+                continue
+            }
+            // Resizes in real time with the current speed, like RadarMapController.
+            let track = HoldingRacetrack(fix: fix, inboundCourse: ic, speedKnots: ac.speedKnots)
+            let outline = track.outline()
+            guard outline.count > 1 else { continue }
+            let path = GMSMutablePath()
+            outline.forEach { path.add($0) }
+            if let line = holdingRacetrackLines[ac.id] {
+                line.path = path
+            } else {
+                let line = GMSPolyline(path: path)
+                line.strokeColor = UIColor.cyan.withAlphaComponent(0.85)
+                line.strokeWidth = 1.6
+                line.map = mapView
+                holdingRacetrackLines[ac.id] = line
+            }
         }
     }
 
