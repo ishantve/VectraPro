@@ -118,8 +118,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         super.init()
         setupMapView()
 
+        // Coalesce updates: MapViewModel.tick() emits objectWillChange 7+ times per
+        // simulation tick. Calling sync() on each one runs the full per-object
+        // render pass ~7× per tick and chokes the main thread (this is why Google
+        // hangs where MapLibre — which coalesces via a CADisplayLink — does not).
+        // Throttling to at most once per frame collapses each burst into a single
+        // sync(), matching MapLibre's effective update rate.
         viewModel.objectWillChange
-            .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(16), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] in self?.sync() }
             .store(in: &cancellables)
         viewModel.zoomPublisher
