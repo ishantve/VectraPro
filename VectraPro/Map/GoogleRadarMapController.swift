@@ -572,23 +572,32 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     }
 
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
-        trailMarkers[id]?.forEach { $0.map = nil }
         // Same sampling as RadarMapController: evenly-/fixed-spaced dots, not one
         // marker per raw history point.
         let positions = dynamicTrailSpacing
             ? TrailSampler.equalSpaced(from: history, count: 6)
             : TrailSampler.fixedSpaced(from: history, count: 6, spacingNM: fixedTrailSpacingNM)
-        guard !positions.isEmpty else { trailMarkers[id] = []; return }
-        var markers: [GMSMarker] = []
+
+        // Reuse existing markers instead of destroying and recreating all six every
+        // sync — at high simulation speeds that churn (create/destroy + GL scene
+        // mutation, per aircraft, per frame) was a real cost. Update positions/icons
+        // in place and only add/remove the delta.
+        var markers = trailMarkers[id] ?? []
+        while markers.count > positions.count { markers.removeLast().map = nil }
         for index in positions.indices {
             let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
-            let marker = GMSMarker(position: positions[index])
-            marker.icon = trailIcons[step]
-            marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
-            marker.isTappable = false
-            marker.map = mapView
-            markers.append(marker)
+            if index < markers.count {
+                markers[index].position = positions[index]
+                markers[index].icon = trailIcons[step]
+            } else {
+                let marker = GMSMarker(position: positions[index])
+                marker.icon = trailIcons[step]
+                marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+                marker.isTappable = false
+                marker.map = mapView
+                markers.append(marker)
+            }
         }
         trailMarkers[id] = markers
     }
