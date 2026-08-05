@@ -503,7 +503,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             if draggingLabelID != aircraft.id { label.position = offset }
 
             syncTrail(aircraft.history, id: aircraft.id)
-            updateTether(for: aircraft.id, from: aircraft.position, to: label.position)
+            updateTether(for: aircraft.id, aircraftPosition: aircraft.position, label: label)
         }
 
         syncTrailLines()
@@ -575,10 +575,33 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                              .rhumb)
     }
 
-    private func updateTether(for id: UUID, from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
+    /// Tether from the aircraft to the centre of the data-block edge that faces it
+    /// (left/right/top/bottom edge centre), computed in screen space — mirrors
+    /// RadarMapController.updateTethers, instead of anchoring at the block corner.
+    private func updateTether(for id: UUID, aircraftPosition: CLLocationCoordinate2D, label: GMSMarker) {
+        guard let image = label.icon else {
+            tethers[id]?.map = nil; tethers[id] = nil
+            return
+        }
+        // The label's bottom-left corner sits at label.position (groundAnchor 0,1),
+        // so its view centre is half a width right and half a height up.
+        let anchor = mapView.projection.point(for: label.position)
+        let center = CGPoint(x: anchor.x + image.size.width / 2,
+                             y: anchor.y - image.size.height / 2)
+        let acPoint = mapView.projection.point(for: aircraftPosition)
+        let halfW = image.size.width / 2, halfH = image.size.height / 2
+
+        let dx = acPoint.x - center.x, dy = acPoint.y - center.y
+        let edge: CGPoint
+        if abs(dx) >= abs(dy) {
+            edge = CGPoint(x: center.x + (dx < 0 ? -halfW : halfW), y: center.y)
+        } else {
+            edge = CGPoint(x: center.x, y: center.y + (dy < 0 ? -halfH : halfH))
+        }
+
         let path = GMSMutablePath()
-        path.add(start)
-        path.add(end)
+        path.add(aircraftPosition)
+        path.add(mapView.projection.coordinate(for: edge))
         if let tether = tethers[id] {
             tether.path = path
         } else {
@@ -809,7 +832,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 CATransaction.begin()
                 CATransaction.setAnimationDuration(0)
                 label.position = mapView.projection.coordinate(for: point)
-                updateTether(for: id, from: aircraft.position, to: label.position)
+                updateTether(for: id, aircraftPosition: aircraft.position, label: label)
                 CATransaction.commit()
             case .map:
                 let t = gesture.translation(in: mapView)
