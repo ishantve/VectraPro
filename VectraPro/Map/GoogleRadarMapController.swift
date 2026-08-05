@@ -60,6 +60,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var zoneColliderCircles: [UUID: GMSCircle] = [:]
     /// Green ring around the selected aircraft.
     private var selectionCircle: GMSCircle?
+    /// Distance-measurement overlay: two endpoint dots, a dashed line, a label.
+    private var measurementDotA: GMSMarker?
+    private var measurementDotB: GMSMarker?
+    private var measurementLine: GMSPolyline?
+    private var measurementLabel: GMSMarker?
+    private var lastMeasurementText = ""
     private var zoneOverlays: [GMSOverlay] = []
     private var zoneKey = ""
     /// Which aircraft's data block is being dragged (nil = none).
@@ -135,6 +141,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncAircraft()
         syncColliders()
         syncSelectionRing()
+        syncMeasurement()
     }
 
     /// Rotated name labels drawn along each VOR radial line.
@@ -609,11 +616,115 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// mirroring RadarMapController.handleTap.
     func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
         let point = mapView.projection.point(for: coordinate)
+        // In measurement mode, taps set anchors, not selection (mirrors RadarMapController).
+        if viewModel.isDistanceMeasuring {
+            if let id = labelHit(point) {
+                viewModel.addMeasurementAnchor(.aircraft(id))
+            } else {
+                viewModel.addMeasurementAnchor(.fixed(coordinate))
+            }
+            return
+        }
         if let id = labelHit(point) {
             viewModel.selectAircraft(viewModel.selectedAircraftID == id ? nil : id)
         } else {
             viewModel.selectAircraft(nil)
         }
+    }
+
+    // MARK: Distance measurement
+
+    /// Two endpoint dots, a dashed connecting line, and a midpoint distance label,
+    /// mirroring RadarMapController.syncMeasurement. Visual assets come from the
+    /// shared MeasurementRenderer; placement is this controller's job.
+    private func syncMeasurement() {
+        guard viewModel.isDistanceMeasuring else {
+            measurementLine?.map = nil;  measurementLine = nil
+            measurementDotA?.map = nil;  measurementDotA = nil
+            measurementDotB?.map = nil;  measurementDotB = nil
+            measurementLabel?.map = nil; measurementLabel = nil
+            lastMeasurementText = ""
+            return
+        }
+
+        // Endpoint A.
+        if let posA = viewModel.measurementPositionA {
+            if let dot = measurementDotA { dot.position = posA }
+            else {
+                let dot = GMSMarker(position: posA)
+                dot.icon = MeasurementRenderer.endpointImage()
+                dot.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+                dot.isTappable = false
+                dot.map = mapView
+                measurementDotA = dot
+            }
+        } else {
+            measurementDotA?.map = nil; measurementDotA = nil
+        }
+
+        // With only one point, clear the line / label / endpoint B.
+        guard let posA = viewModel.measurementPositionA,
+              let posB = viewModel.measurementPositionB else {
+            measurementLine?.map = nil;  measurementLine = nil
+            measurementDotB?.map = nil;  measurementDotB = nil
+            measurementLabel?.map = nil; measurementLabel = nil
+            lastMeasurementText = ""
+            return
+        }
+
+        // Endpoint B.
+        if let dot = measurementDotB { dot.position = posB }
+        else {
+            let dot = GMSMarker(position: posB)
+            dot.icon = MeasurementRenderer.endpointImage()
+            dot.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            dot.isTappable = false
+            dot.map = mapView
+            measurementDotB = dot
+        }
+
+        // Connecting line.
+        let path = GMSMutablePath()
+        path.add(posA); path.add(posB)
+        if let line = measurementLine {
+            line.path = path; line.spans = measurementDashSpans(for: path)
+        } else {
+            let line = GMSPolyline(path: path)
+            line.strokeWidth = 1.5
+            line.spans = measurementDashSpans(for: path)
+            line.map = mapView
+            measurementLine = line
+        }
+
+        // Midpoint distance label.
+        let distNM = Geo.distanceMeters(from: posA, to: posB) / 1852.0
+        let text   = String(format: "%.1f NM", distNM)
+        let mid    = CLLocationCoordinate2D(latitude:  (posA.latitude  + posB.latitude)  / 2,
+                                            longitude: (posA.longitude + posB.longitude) / 2)
+        if let label = measurementLabel {
+            label.position = mid
+            if text != lastMeasurementText {
+                label.icon = MeasurementRenderer.labelImage(text)
+                lastMeasurementText = text
+            }
+        } else {
+            let label = GMSMarker(position: mid)
+            label.icon = MeasurementRenderer.labelImage(text)
+            label.groundAnchor = CGPoint(x: 0.5, y: 0.5)
+            label.isTappable = false
+            label.map = mapView
+            measurementLabel = label
+            lastMeasurementText = text
+        }
+    }
+
+    /// White dashed spans for the measurement line. Same geographic-cadence caveat
+    /// as the trail line — GMS style spans are geographic, not screen-space.
+    private func measurementDashSpans(for path: GMSPath) -> [GMSStyleSpan] {
+        GMSStyleSpans(path,
+                      [GMSStrokeStyle.solidColor(.white), GMSStrokeStyle.solidColor(.clear)],
+                      [NSNumber(value: 300), NSNumber(value: 200)],
+                      .rhumb)
     }
 
     // MARK: Pan + clamp
