@@ -639,10 +639,13 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         return o
     }
 
-    /// Re-centres an existing symbol overlay on `position`, keeping its icon-sized
-    /// bounds (so it stays the correct on-screen size).
+    /// Re-centres an existing symbol overlay on `position`. Uses the cheap
+    /// `position` setter (a translation that keeps the overlay's existing bounds
+    /// size) rather than rebuilding `bounds` every sync — recomputing/​setting
+    /// bounds re-tessellates the overlay in GMS, and doing that for every aircraft
+    /// and trail dot each tick dropped frames and made zooming stutter.
     private func moveSymbol(_ overlay: GMSGroundOverlay, to position: CLLocationCoordinate2D) {
-        overlay.bounds = symbolBounds(around: position, pointSize: overlay.icon?.size ?? .zero)
+        overlay.position = position
     }
 
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
@@ -659,12 +662,12 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         var dots = trailMarkers[id] ?? []
         while dots.count > positions.count { dots.removeLast().map = nil }
         for index in positions.indices {
-            let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
-            let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
             if index < dots.count {
-                dots[index].icon = trailIcons[step]
+                // Fade (icon) for a given slot index is constant, so only move it.
                 moveSymbol(dots[index], to: positions[index])
             } else {
+                let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
+                let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
                 dots.append(makeSymbolOverlay(at: positions[index], icon: trailIcons[step], zIndex: 0))
             }
         }
