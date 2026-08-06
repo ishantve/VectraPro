@@ -74,6 +74,17 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// is map-pinned (scales with the map) instead of screen-fixed.
     private static let symbolBaseZoom: CGFloat = 8.8
 
+    /// Metres per point at symbolBaseZoom for the radar-centre latitude. Sizing a
+    /// symbol's ground-overlay bounds by (imagePoints × this) makes it occupy its
+    /// image's point size on screen at the base zoom — exactly MapLibre's
+    /// annotation-view size — and scale by 2^(zoom-base) from there. (GMS's own
+    /// zoomLevel initialiser left the point/pixel size ambiguous, so we size the
+    /// bounds explicitly to guarantee parity.)
+    private lazy var symbolMetersPerPoint: Double = {
+        let latRad = viewModel.center.latitude * .pi / 180
+        return 40_075_016.686 / (256.0 * pow(2.0, Double(Self.symbolBaseZoom))) * cos(latRad)
+    }()
+
     // Per-aircraft symbols, keyed by aircraft id (multi-aircraft support). Ground
     // overlays (not screen-fixed markers) so they scale smoothly with zoom.
     private var aircraftOverlays: [UUID: GMSGroundOverlay] = [:]
@@ -522,7 +533,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                         at: aircraft.position, icon: UIImage(named: "destroyed_Aircraft"))
                     destroyedOverlayIDs.insert(aircraft.id)
                 }
-                aircraftOverlays[aircraft.id]?.position = aircraft.position
+                if let o = aircraftOverlays[aircraft.id] { moveSymbol(o, to: aircraft.position) }
                 continue
             }
 
@@ -532,7 +543,7 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
                 aircraftOverlays[aircraft.id] = o
                 return o
             }()
-            overlay.position = aircraft.position
+            moveSymbol(overlay, to: aircraft.position)
             overlay.bearing = aircraft.headingDegrees
 
             // Data block.
@@ -585,16 +596,37 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncTrailLines()
     }
 
-    /// Builds a map-pinned symbol: a ground overlay whose icon is native size at
-    /// symbolBaseZoom and scales with the map at other zooms (matching MapLibre),
-    /// centred on its position and rotatable via `bearing`.
+    /// Geographic bounds sized so `pointSize` points map to the same on-screen
+    /// point size at symbolBaseZoom (and scale 2^(zoom-base) from there).
+    private func symbolBounds(around center: CLLocationCoordinate2D, pointSize: CGSize) -> GMSCoordinateBounds {
+        let halfW = Double(pointSize.width)  / 2 * symbolMetersPerPoint
+        let halfH = Double(pointSize.height) / 2 * symbolMetersPerPoint
+        let north = Geo.offset(from: center, distanceMeters: halfH, bearingDegrees: 0)
+        let south = Geo.offset(from: center, distanceMeters: halfH, bearingDegrees: 180)
+        let east  = Geo.offset(from: center, distanceMeters: halfW, bearingDegrees: 90)
+        let west  = Geo.offset(from: center, distanceMeters: halfW, bearingDegrees: 270)
+        return GMSCoordinateBounds(
+            coordinate: CLLocationCoordinate2D(latitude: north.latitude, longitude: east.longitude),
+            coordinate: CLLocationCoordinate2D(latitude: south.latitude, longitude: west.longitude))
+    }
+
+    /// Builds a map-pinned symbol: a ground overlay sized (via explicit bounds) to
+    /// its icon's point size at symbolBaseZoom, scaling with the map at other zooms
+    /// exactly like MapLibre's annotation view; rotatable via `bearing`.
     private func makeSymbolOverlay(at position: CLLocationCoordinate2D,
                                    icon: UIImage?, zIndex: Int32 = 1) -> GMSGroundOverlay {
-        let o = GMSGroundOverlay(position: position, icon: icon, zoomLevel: Self.symbolBaseZoom)
+        let o = GMSGroundOverlay(bounds: symbolBounds(around: position, pointSize: icon?.size ?? .zero),
+                                 icon: icon)
         o.isTappable = false
         o.zIndex = zIndex   // aircraft (1) above trail dots (0); labels (markers) sit above both
         o.map = mapView
         return o
+    }
+
+    /// Re-centres an existing symbol overlay on `position`, keeping its icon-sized
+    /// bounds (so it stays the correct on-screen size).
+    private func moveSymbol(_ overlay: GMSGroundOverlay, to position: CLLocationCoordinate2D) {
+        overlay.bounds = symbolBounds(around: position, pointSize: overlay.icon?.size ?? .zero)
     }
 
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
@@ -614,8 +646,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
             let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
             if index < dots.count {
-                dots[index].position = positions[index]
                 dots[index].icon = trailIcons[step]
+                moveSymbol(dots[index], to: positions[index])
             } else {
                 dots.append(makeSymbolOverlay(at: positions[index], icon: trailIcons[step], zIndex: 0))
             }
