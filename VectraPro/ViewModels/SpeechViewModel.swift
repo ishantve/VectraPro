@@ -42,7 +42,9 @@ final class SpeechViewModel: ObservableObject {
     init() {
         live?.onPartial = { [weak self] text in
             guard let self, self.isRecording else { return }
-            self.transcript = text
+            // Clean + ICAO-uppercase live too, so the field is uppercase from the
+            // first partial instead of flipping to caps only at the end.
+            self.transcript = TranscriptCleaner.displayText(text)
         }
     }
 
