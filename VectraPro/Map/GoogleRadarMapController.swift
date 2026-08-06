@@ -68,11 +68,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var stripLines: [UUID: [GMSPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
 
-    /// Zoom level at which the aircraft symbol is shown at its native pixel size.
-    /// A GMSGroundOverlay pinned here scales by 2^(zoom − base) at other zooms,
-    /// exactly matching RadarMapController.aircraftScale (base 8.8) so the symbol
-    /// is map-pinned (scales with the map) instead of screen-fixed.
-    private static let symbolBaseZoom: CGFloat = 8.8
+    /// Base zoom for map-pinned symbol scaling (symbol is native size here, scales
+    /// 2^(zoom − base) elsewhere). RadarMapController/MapLibre uses base 8.8, but
+    /// MapLibre GL measures zoom against 512-pt tiles while the Google Maps SDK
+    /// uses 256-pt tiles, so for the SAME on-screen scale GMS reports a zoom one
+    /// level HIGHER than MapLibre. We therefore use 8.8 + 1 = 9.8 so the symbol
+    /// resolves to the same on-screen size as MapLibre/ArcGIS (without it, Google
+    /// symbols come out 2× too big).
+    private static let symbolBaseZoom: CGFloat = 9.8
 
     // Per-aircraft symbols, keyed by aircraft id (multi-aircraft support). Ground
     // overlays (not screen-fixed markers) so they scale smoothly with zoom.
