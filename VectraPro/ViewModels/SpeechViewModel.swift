@@ -31,7 +31,9 @@ final class SpeechViewModel: ObservableObject {
     /// How long the field stays visible after a result before auto-hiding.
     private let autoHideDelay: TimeInterval = 3
 
-    private let live = LiveSpeechRecognizerFactory.make()
+    // Prefer offline Vosk for live transcription; fall back to Azure (or REST) if
+    // no bundled Vosk model is available.
+    private let live: LiveTranscribing? = VoskLiveRecognizer() ?? LiveSpeechRecognizerFactory.make()
     private let recorder = AudioRecorder()
     private let service = TranscriptionService()
     private var hideTask: Task<Void, Never>?
