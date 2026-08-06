@@ -11,11 +11,11 @@
 //  MapProvider changes the rendering engine, not the feature set.
 //
 //  ── Intentional, accepted renderer differences (NOT parity defects) ─────────
-//  • Aircraft/trail symbols are screen-fixed (constant on-screen size) rather
-//    than scaling with zoom as MapLibre's do. GMSMarkers are screen-fixed by
-//    design; emulating MapLibre's 2^(zoom-baseZoom) growth would need per-camera
-//    icon regeneration (perf + jitter) or a GroundOverlay rewrite, for little
-//    product value — screen-fixed radar symbols are acceptable/arguably better.
+//  • Aircraft + trail symbols are map-pinned: GMSGroundOverlays pinned to
+//    symbolBaseZoom so they scale with the map (2^(zoom-base)), matching
+//    RadarMapController.aircraftScale. (This replaced an earlier screen-fixed
+//    GMSMarker approach, which jerked and appeared to resize during zoom because
+//    the symbol stayed a fixed pixel size while the map scaled.)
 //  • Dashed lines (trail, distance measurement) use a geographic dash cadence.
 //    GMS style-span dashes are geographic (rhumb/geodesic/projected), with no
 //    screen-space option; MapLibre dashes in screen points. Exact screen-space
@@ -68,11 +68,22 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     private var stripLines: [UUID: [GMSPolyline]] = [:]
     private var localizerLineSets: [ApproachID: [GMSPolyline]] = [:]
 
-    // Per-aircraft markers, keyed by aircraft id (multi-aircraft support).
-    private var aircraftMarkers: [UUID: GMSMarker] = [:]
+    /// Zoom level at which the aircraft symbol is shown at its native pixel size.
+    /// A GMSGroundOverlay pinned here scales by 2^(zoom − base) at other zooms,
+    /// exactly matching RadarMapController.aircraftScale (base 8.8) so the symbol
+    /// is map-pinned (scales with the map) instead of screen-fixed.
+    private static let symbolBaseZoom: CGFloat = 8.8
+
+    // Per-aircraft symbols, keyed by aircraft id (multi-aircraft support). Ground
+    // overlays (not screen-fixed markers) so they scale smoothly with zoom.
+    private var aircraftOverlays: [UUID: GMSGroundOverlay] = [:]
+    /// Aircraft currently shown as a wreck (ground overlay sized for the wreck
+    /// image); tracked so the overlay is rebuilt once on the destroyed transition.
+    private var destroyedOverlayIDs: Set<UUID> = []
     private var labelMarkers: [UUID: GMSMarker] = [:]
     private var labelTexts: [UUID: String] = [:]
-    private var trailMarkers: [UUID: [GMSMarker]] = [:]
+    /// Trail dots — map-pinned ground overlays (scale with zoom like the aircraft).
+    private var trailMarkers: [UUID: [GMSGroundOverlay]] = [:]
     private var tethers: [UUID: GMSPolyline] = [:]
     private var fixIconMarkers: [GMSMarker] = []
     private var fixNameMarkers: [GMSMarker] = []
@@ -485,10 +496,11 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let current = viewModel.radarAircraft
         let liveIDs = Set(current.map(\.id))
 
-        // Remove markers for aircraft that no longer exist.
-        for (id, marker) in aircraftMarkers where !liveIDs.contains(id) {
-            marker.map = nil
-            aircraftMarkers[id] = nil
+        // Remove overlays for aircraft that no longer exist.
+        for (id, overlay) in aircraftOverlays where !liveIDs.contains(id) {
+            overlay.map = nil
+            aircraftOverlays[id] = nil
+            destroyedOverlayIDs.remove(id)
             labelMarkers[id]?.map = nil; labelMarkers[id] = nil
             labelTexts[id] = nil
             trailMarkers[id]?.forEach { $0.map = nil }; trailMarkers[id] = nil
@@ -499,27 +511,29 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         for aircraft in current {
             let isDestroyed = viewModel.destroyedAircraftIDs.contains(aircraft.id)
 
-            // Symbol.
-            let marker = aircraftMarkers[aircraft.id] ?? {
-                let m = GMSMarker(position: aircraft.position)
-                m.icon = AircraftSymbol.image()
-                m.groundAnchor = CGPoint(x: 0.5, y: 0.5)
-                m.isFlat = true
-                m.isTappable = false
-                m.map = mapView
-                aircraftMarkers[aircraft.id] = m
-                return m
-            }()
             if isDestroyed {
                 // Show the wreck and freeze label / trail / rotation until the
-                // aircraft is removed — exactly as RadarMapController does.
-                marker.icon = UIImage(named: "destroyed_Aircraft")
-                marker.position = aircraft.position
+                // aircraft is removed — exactly as RadarMapController does. The
+                // ground overlay is rebuilt once (on the transition) so its size
+                // matches the wreck image rather than stretching the aircraft one.
+                if !destroyedOverlayIDs.contains(aircraft.id) {
+                    aircraftOverlays[aircraft.id]?.map = nil
+                    aircraftOverlays[aircraft.id] = makeSymbolOverlay(
+                        at: aircraft.position, icon: UIImage(named: "destroyed_Aircraft"))
+                    destroyedOverlayIDs.insert(aircraft.id)
+                }
+                aircraftOverlays[aircraft.id]?.position = aircraft.position
                 continue
             }
-            marker.icon = AircraftSymbol.image()
-            marker.position = aircraft.position
-            marker.rotation = aircraft.headingDegrees
+
+            // Symbol — map-pinned ground overlay (scales with zoom, see symbolBaseZoom).
+            let overlay = aircraftOverlays[aircraft.id] ?? {
+                let o = makeSymbolOverlay(at: aircraft.position, icon: AircraftSymbol.image())
+                aircraftOverlays[aircraft.id] = o
+                return o
+            }()
+            overlay.position = aircraft.position
+            overlay.bearing = aircraft.headingDegrees
 
             // Data block.
             let text = aircraft.dataBlock
@@ -571,6 +585,18 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncTrailLines()
     }
 
+    /// Builds a map-pinned symbol: a ground overlay whose icon is native size at
+    /// symbolBaseZoom and scales with the map at other zooms (matching MapLibre),
+    /// centred on its position and rotatable via `bearing`.
+    private func makeSymbolOverlay(at position: CLLocationCoordinate2D,
+                                   icon: UIImage?, zIndex: Int32 = 1) -> GMSGroundOverlay {
+        let o = GMSGroundOverlay(position: position, icon: icon, zoomLevel: Self.symbolBaseZoom)
+        o.isTappable = false
+        o.zIndex = zIndex   // aircraft (1) above trail dots (0); labels (markers) sit above both
+        o.map = mapView
+        return o
+    }
+
     private func syncTrail(_ history: [CLLocationCoordinate2D], id: UUID) {
         // Same sampling as RadarMapController: evenly-/fixed-spaced dots, not one
         // marker per raw history point.
@@ -582,24 +608,19 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         // sync — at high simulation speeds that churn (create/destroy + GL scene
         // mutation, per aircraft, per frame) was a real cost. Update positions/icons
         // in place and only add/remove the delta.
-        var markers = trailMarkers[id] ?? []
-        while markers.count > positions.count { markers.removeLast().map = nil }
+        var dots = trailMarkers[id] ?? []
+        while dots.count > positions.count { dots.removeLast().map = nil }
         for index in positions.indices {
             let fraction = positions.count > 1 ? Double(index) / Double(positions.count - 1) : 1.0
             let step = Int((fraction * Double(trailIcons.count - 1)).rounded())
-            if index < markers.count {
-                markers[index].position = positions[index]
-                markers[index].icon = trailIcons[step]
+            if index < dots.count {
+                dots[index].position = positions[index]
+                dots[index].icon = trailIcons[step]
             } else {
-                let marker = GMSMarker(position: positions[index])
-                marker.icon = trailIcons[step]
-                marker.groundAnchor = CGPoint(x: 0.5, y: 0.5)
-                marker.isTappable = false
-                marker.map = mapView
-                markers.append(marker)
+                dots.append(makeSymbolOverlay(at: positions[index], icon: trailIcons[step], zIndex: 0))
             }
         }
-        trailMarkers[id] = markers
+        trailMarkers[id] = dots
     }
 
     /// Dashed history line per aircraft (history + current position), shown only
