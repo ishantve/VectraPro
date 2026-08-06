@@ -1,6 +1,15 @@
 {
-  "originHash" : "e0948a1062203f122fbc4763eb3168850ff9673781a312c30933c3f4426b8ad5",
+  "originHash" : "1c04a0ec708dce6abd9d2f3b2683ed10d62dfb8b406983bd1d0624771ee854ca",
   "pins" : [
+    {
+      "identity" : "atcparserkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/ATCParserKit.git",
+      "state" : {
+        "revision" : "6bf2ec2832896ce186ca2cabd8ca54975dca9f6d",
+        "version" : "1.4.0"
+      }
+    },
     {
       "identity" : "geonavkit",
       "kind" : "remoteSourceControl",

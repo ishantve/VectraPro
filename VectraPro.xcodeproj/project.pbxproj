@@ -241,7 +241,7 @@
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
 				6E0C170000000000000000A3 /* XCRemoteSwiftPackageReference "GeoNavKit" */,
-				A7C9DD0000000000000000D3 /* XCLocalSwiftPackageReference "../../../ATCParserKit" */,
+				A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */,
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
 				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
 				A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */,
@@ -666,9 +666,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/ATCSimKit;
 		};
-		A7C9DD0000000000000000D3 /* XCLocalSwiftPackageReference "../../../ATCParserKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../ATCParserKit;
+		A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ishantve/ATCParserKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.4.0;
+			};
 		};
 		A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -755,7 +759,7 @@
 		};
 		A7C9DD0000000000000000D2 /* ATCParserKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A7C9DD0000000000000000D3 /* XCLocalSwiftPackageReference "../../../ATCParserKit" */;
+			package = A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */;
 			productName = ATCParserKit;
 		};
 		A7D000000000000000000E2 /* ATCTrafficKit */ = {
