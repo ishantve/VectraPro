@@ -74,17 +74,6 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// is map-pinned (scales with the map) instead of screen-fixed.
     private static let symbolBaseZoom: CGFloat = 8.8
 
-    /// Metres per point at symbolBaseZoom for the radar-centre latitude. Sizing a
-    /// symbol's ground-overlay bounds by (imagePoints × this) makes it occupy its
-    /// image's point size on screen at the base zoom — exactly MapLibre's
-    /// annotation-view size — and scale by 2^(zoom-base) from there. (GMS's own
-    /// zoomLevel initialiser left the point/pixel size ambiguous, so we size the
-    /// bounds explicitly to guarantee parity.)
-    private lazy var symbolMetersPerPoint: Double = {
-        let latRad = viewModel.center.latitude * .pi / 180
-        return 40_075_016.686 / (256.0 * pow(2.0, Double(Self.symbolBaseZoom))) * cos(latRad)
-    }()
-
     // Per-aircraft symbols, keyed by aircraft id (multi-aircraft support). Ground
     // overlays (not screen-fixed markers) so they scale smoothly with zoom.
     private var aircraftOverlays: [UUID: GMSGroundOverlay] = [:]
@@ -596,11 +585,29 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         syncTrailLines()
     }
 
-    /// Geographic bounds sized so `pointSize` points map to the same on-screen
-    /// point size at symbolBaseZoom (and scale 2^(zoom-base) from there).
+    /// Metres per screen point at the current camera, measured from the live GMS
+    /// projection so it self-calibrates to GMS's real point scale (no assumption
+    /// about points vs pixels / device scale). Falls back to the web-mercator
+    /// formula only before the projection is laid out.
+    private func metersPerPoint() -> Double {
+        let c = mapView.camera.target
+        let p0 = mapView.projection.point(for: c)
+        let p1 = mapView.projection.point(for: Geo.offset(from: c, distanceMeters: 1852, bearingDegrees: 90))
+        let d = hypot(Double(p1.x - p0.x), Double(p1.y - p0.y))
+        if d > 0.5 { return 1852.0 / d }
+        let latRad = c.latitude * .pi / 180
+        return 40_075_016.686 / (256.0 * pow(2.0, Double(mapView.camera.zoom))) * cos(latRad)
+    }
+
+    /// Geographic bounds sized so `pointSize` points occupy the same on-screen
+    /// point size as MapLibre's annotation view: pointSize × 2^(zoom-base) screen
+    /// points. (scale × metresPerPoint is constant across zoom, i.e. a fixed
+    /// geographic size, so the overlay scales natively with the map.)
     private func symbolBounds(around center: CLLocationCoordinate2D, pointSize: CGSize) -> GMSCoordinateBounds {
-        let halfW = Double(pointSize.width)  / 2 * symbolMetersPerPoint
-        let halfH = Double(pointSize.height) / 2 * symbolMetersPerPoint
+        let scale = pow(2.0, Double(mapView.camera.zoom) - Double(Self.symbolBaseZoom))
+        let mpp = metersPerPoint()
+        let halfW = Double(pointSize.width)  / 2 * scale * mpp
+        let halfH = Double(pointSize.height) / 2 * scale * mpp
         let north = Geo.offset(from: center, distanceMeters: halfH, bearingDegrees: 0)
         let south = Geo.offset(from: center, distanceMeters: halfH, bearingDegrees: 180)
         let east  = Geo.offset(from: center, distanceMeters: halfW, bearingDegrees: 90)
