@@ -41,6 +41,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     private var didLimitZoom = false
 
+    // Frame-aligned sync (mirrors RadarMapController): objectWillChange just sets
+    // needsSync; a CADisplayLink drains it at most once per display frame. Aligning
+    // to vsync keeps GMS's zoom animation smooth (a plain timer/throttle fires
+    // mid-frame and makes zooming stutter).
+    private var needsSync = false
+    private var displayLink: CADisplayLink?
+    private var displayLinkProxy: DisplayLinkProxy?
+
     // Environment tracking for external-display / window-size changes.
     private var lastKnownSize: CGSize = .zero
     private weak var lastScreen: UIScreen?
@@ -140,9 +148,19 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         // Throttling to at most once per frame collapses each burst into a single
         // sync(), matching MapLibre's effective update rate.
         viewModel.objectWillChange
-            .throttle(for: .milliseconds(16), scheduler: DispatchQueue.main, latest: true)
-            .sink { [weak self] in self?.sync() }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.needsSync = true }
             .store(in: &cancellables)
+
+        // CADisplayLink drives sync frame-aligned. The link is retained by the run
+        // loop, so it targets a weak proxy (not self) to avoid leaking the
+        // controller when the radar view is recreated (e.g. provider switch).
+        let proxy = DisplayLinkProxy()
+        proxy.owner = self
+        displayLinkProxy = proxy
+        let dl = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.fire))
+        dl.add(to: .main, forMode: .common)
+        displayLink = dl
         viewModel.zoomPublisher
             .sink { [weak self] delta in self?.applyZoom(delta) }
             .store(in: &cancellables)
@@ -221,6 +239,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     }
 
     // MARK: Sync
+
+    /// Called once per display frame by the CADisplayLink; runs sync() only if the
+    /// model changed since the last frame (coalescing the tick's many emissions).
+    fileprivate func displayLinkFired() {
+        guard needsSync else { return }
+        needsSync = false
+        sync()
+    }
 
     func sync() {
         // Disable GMS's implicit position/property animations for the whole pass.
@@ -1079,5 +1105,16 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     /// per view is released for real. Declaring the deinit `nonisolated` says what is
     /// true — tearing this down needs no actor — and skips the hop.
     /// `IsolatedDeinitScanTests` is what catches a class that forgets it.
+    nonisolated deinit {
+        displayLink?.invalidate()
+    }
+}
+
+/// Weak-proxy target for the CADisplayLink. The run loop retains the link and the
+/// link retains its target, so targeting this proxy (which only weakly references
+/// the controller) prevents the link from keeping the controller alive forever.
+private final class DisplayLinkProxy {
+    weak var owner: GoogleRadarMapController?
+    @objc func fire() { owner?.displayLinkFired() }
     nonisolated deinit { }
 }
