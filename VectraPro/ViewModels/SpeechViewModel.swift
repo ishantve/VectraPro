@@ -12,6 +12,7 @@
 
 import Combine
 import SpeechKit
+import ATCParserKit
 import Foundation
 
 @MainActor
@@ -81,6 +82,8 @@ final class SpeechViewModel: ObservableObject {
             live?.stop()
             isRecording = false
             CommandFeedbackManager.shared.micStopped()
+            // Clean recognizer quirks + ICAO-uppercase for display (and command).
+            transcript = TranscriptCleaner.displayText(transcript)
             if !transcript.isEmpty { onCommand?(transcript) }
             scheduleAutoHide()
             return
@@ -95,7 +98,7 @@ final class SpeechViewModel: ObservableObject {
         isTranscribing = true
         Task {
             do {
-                let text = try await service.transcribe(wavURL: url)
+                let text = TranscriptCleaner.displayText(try await service.transcribe(wavURL: url))
                 transcript = text.isEmpty ? "(no speech recognized)" : text
                 if !text.isEmpty { onCommand?(text) }
             } catch TranscriptionError.notConfigured {
