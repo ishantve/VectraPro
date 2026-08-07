@@ -24,7 +24,9 @@ struct RootView: View {
     @State private var phase: Phase = .checking
     @State private var path: [AppRoute] = []
     @State private var showSessionExpired = false
-    @State private var showVoskTest = false
+    #if DEBUG
+    @State private var showVoskTest = false   // debug-only Vosk test screen
+    #endif
     @ObservedObject private var auth = AuthService.shared
 
     var body: some View {

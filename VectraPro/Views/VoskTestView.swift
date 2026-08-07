@@ -6,7 +6,12 @@
 //  bundled Vosk model, streams the mic, and shows live partial + final transcripts
 //  plus the engine/model versions. Not part of the normal app flow.
 //
+//  DEBUG-only: the whole file compiles out of Release builds, so this screen (and
+//  its RootView launcher, also #if DEBUG) never ships. The real push-to-talk mic
+//  uses Vosk independently via SpeechViewModel / VoskLiveRecognizer.
+//
 
+#if DEBUG
 import Combine
 import SwiftUI
 import VoskSpeechKit
@@ -104,3 +109,4 @@ struct VoskTestView: View {
         .onDisappear { model.stop() }
     }
 }
+#endif
