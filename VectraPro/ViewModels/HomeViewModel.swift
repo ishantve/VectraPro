@@ -6,6 +6,7 @@
 //
 
 import Combine
+import NetworkKit
 import Foundation
 
 @MainActor
@@ -26,12 +27,12 @@ final class HomeViewModel: ObservableObject {
     private let exerciseService: ExerciseService
     private let radar: MapViewModel
 
-    init(api: APIManager = .shared,
-         exerciseService: ExerciseService = .shared,
-         radar: MapViewModel = .shared) {
-        self.api = api
-        self.exerciseService = exerciseService
-        self.radar = radar
+    init(api: APIManager? = nil,
+         exerciseService: ExerciseService? = nil,
+         radar: MapViewModel? = nil) {
+        self.api = api ?? .shared
+        self.exerciseService = exerciseService ?? .shared
+        self.radar = radar ?? .shared
     }
 
     /// More pages available to load.
@@ -85,7 +86,17 @@ final class HomeViewModel: ObservableObject {
 
     private func fetch(page: Int) async throws -> ExercisesResponse {
         try await api.request(
-            .exercises(pageNo: page, pageSize: pageSize, search: "")
+            Endpoint.exercises(pageNo: page, pageSize: pageSize, search: "")
         )
     }
+
+    /// Released classes need this. The target compiles with
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so a class's compiler-generated
+    /// deinit is an isolated one, and the runtime hops an isolated deinit onto the
+    /// main executor — which aborts the process on this toolchain (Swift 6.2.4).
+    /// Singletons hide it by never being released; anything created per screen or
+    /// per view is released for real. Declaring the deinit `nonisolated` says what is
+    /// true — tearing this down needs no actor — and skips the hop.
+    /// `IsolatedDeinitScanTests` is what catches a class that forgets it.
+    nonisolated deinit { }
 }

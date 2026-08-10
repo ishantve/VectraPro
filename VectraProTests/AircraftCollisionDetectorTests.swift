@@ -6,6 +6,7 @@
 //
 
 import Testing
+import ATCSimKit
 import CoreLocation
 @testable import VectraPro
 
@@ -48,6 +49,14 @@ struct AircraftCollisionDetectorTests {
     @Test func verticalSeparationSuppressesProximityFlags() {
         let (a, b) = pair(nm: 2, altA: 18_000, altB: 20_000)   // 2000 ft apart ≥ 1000
         let r = detector.detectConflicts(in: [a, b])
+        #expect(r.yellows.isEmpty && r.reds.isEmpty)
+    }
+
+    @Test func verticalSeparationPreventsBodyCollision() {
+        // Footprints overlap horizontally, but 2000 ft apart vertically → no crash.
+        let (a, b) = pair(nm: 0.3, altA: 18_000, altB: 20_000)
+        let r = detector.detectConflicts(in: [a, b])
+        #expect(r.destroyed.isEmpty)
         #expect(r.yellows.isEmpty && r.reds.isEmpty)
     }
 

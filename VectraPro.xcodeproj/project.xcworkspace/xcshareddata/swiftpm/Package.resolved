@@ -1,13 +1,31 @@
 {
-  "originHash" : "100e8f54469b1aa2afc7677134e4cb68d842d0dc9a1283d4121bf38e4608ff3e",
+  "originHash" : "4a54ecb05052059fc9e27ad4e002290a4f6e5541cefc0850bf38dbeda3028346",
   "pins" : [
+    {
+      "identity" : "atcparserkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/ATCParserKit.git",
+      "state" : {
+        "revision" : "6bf2ec2832896ce186ca2cabd8ca54975dca9f6d",
+        "version" : "1.4.0"
+      }
+    },
+    {
+      "identity" : "geonavkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/GeoNavKit.git",
+      "state" : {
+        "revision" : "cd9d341cb09c09aec55a4f272f630f944f7f3512",
+        "version" : "1.0.1"
+      }
+    },
     {
       "identity" : "ios-maps-sdk",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/googlemaps/ios-maps-sdk",
       "state" : {
-        "revision" : "a951b24ac0ca7720f87d4be3d5bd539552d13882",
-        "version" : "10.15.0"
+        "revision" : "c37c4946d60f0ab069476d5781053b837771546e",
+        "version" : "11.0.0"
       }
     },
     {

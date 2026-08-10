@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import ATCSimKit
 
 struct HangarPanel: View {
 

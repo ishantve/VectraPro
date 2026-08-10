@@ -1,0 +1,19 @@
+# Swift Package Manager build artifacts (e.g. from `swift build` / `swift test`
+# inside LocalPackages/*)
+.build/
+.swiftpm/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+build/
+
+# macOS
+.DS_Store
+
+# local package resolutions (app workspace Package.resolved is authoritative)
+LocalPackages/**/Package.resolved
+
+# Vosk acoustic model — dropped in per machine, hundreds of MB, never committed.
+Models/

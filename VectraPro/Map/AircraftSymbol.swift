@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import ATCSimKit
 
 enum AircraftSymbol {
 

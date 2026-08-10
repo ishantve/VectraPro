@@ -11,6 +11,7 @@
 //
 
 import Combine
+import SpeechKit
 import Foundation
 
 @MainActor
