@@ -4,7 +4,10 @@
 //
 //  Offline (Vosk) implementation of SpeechKit's LiveTranscribing, so the existing
 //  push-to-talk pipeline (SpeechViewModel) can stream from Vosk instead of Azure —
-//  no change to SpeechKit. Backed by the model bundled in VoskSpeechKit.
+//  no change to SpeechKit. The acoustic model ships in the app bundle under
+//  Models/ (a folder reference the developer populates — see Models/README.md);
+//  VoskSpeechKit itself no longer carries one. If no model is present, init fails
+//  and SpeechViewModel falls back to Azure.
 //
 
 import Foundation
@@ -19,10 +22,12 @@ final class VoskLiveRecognizer: LiveTranscribing {
     private let model: VoskSpeechModel
     private var session: VoskSpeechSession?
 
-    /// Fails (returns nil) if no bundled Vosk model can be loaded, so the caller
-    /// can fall back to another recognizer.
+    /// Fails (returns nil) if no Vosk model is present in the app bundle's Models/
+    /// folder, so the caller can fall back to another recognizer.
     init?() {
-        guard let model = try? VoskSpeechModel.bundledLatest() else { return nil }
+        guard let modelsRoot = Bundle.main.resourceURL?.appendingPathComponent("Models"),
+              let info = VoskModelLocator(modelsRootPath: modelsRoot.path).latest(),
+              let model = try? VoskSpeechModel(info: info) else { return nil }
         self.model = model
     }
 

@@ -1,5 +1,5 @@
 {
-  "originHash" : "1c04a0ec708dce6abd9d2f3b2683ed10d62dfb8b406983bd1d0624771ee854ca",
+  "originHash" : "60cabb37b933f1a18200bc3175ec3b6f96030a8ebe439deaee5140751b3b10e1",
   "pins" : [
     {
       "identity" : "atcparserkit",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "84a79bc375a301169390ac110c868f06c857b83f",
         "version" : "6.27.0"
+      }
+    },
+    {
+      "identity" : "voskspeechkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/VoskSpeechKit.git",
+      "state" : {
+        "revision" : "2ffd17a4c3d62290e4601459e01454753d4411a7",
+        "version" : "0.1.2"
       }
     }
   ],
