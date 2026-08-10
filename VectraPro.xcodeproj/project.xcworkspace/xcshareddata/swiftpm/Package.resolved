@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ishantve/ATCParserKit.git",
       "state" : {
-        "revision" : "a6204c117c6cf322c9d84eb720cf03d17353f107",
-        "version" : "1.3.0"
+        "revision" : "6bf2ec2832896ce186ca2cabd8ca54975dca9f6d",
+        "version" : "1.4.0"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/googlemaps/ios-maps-sdk",
       "state" : {
-        "revision" : "a951b24ac0ca7720f87d4be3d5bd539552d13882",
-        "version" : "10.15.0"
+        "revision" : "c37c4946d60f0ab069476d5781053b837771546e",
+        "version" : "11.0.0"
       }
     },
     {

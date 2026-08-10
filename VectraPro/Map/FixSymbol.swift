@@ -19,7 +19,14 @@ enum FixSymbol {
     /// The "holding" asset (holding fixes), tinted off-white.
     static func holding(size: CGFloat = 20) -> UIImage {
         guard let image = resized(named: "holding", size: size) else { return drawnTriangle(size: size) }
-        return image.withTintColor(offWhite, renderingMode: .alwaysOriginal)
+        let tinted = image.withTintColor(offWhite, renderingMode: .alwaysOriginal)
+        // Bake the tint into the bitmap. `withTintColor` only applies its tint when
+        // UIKit draws the image (e.g. MapLibre's UIImageView); a GMSMarker reads the
+        // raw CGImage and would show the untinted (dark) asset. Re-drawing the
+        // tinted image flattens the tint into the pixels so every renderer matches.
+        return UIGraphicsImageRenderer(size: tinted.size, format: AircraftSymbol.hiResFormat).image { _ in
+            tinted.draw(in: CGRect(origin: .zero, size: tinted.size))
+        }
     }
 
     /// An icon with the fix name (off-white, all-caps) below it, centered.
