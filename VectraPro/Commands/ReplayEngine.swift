@@ -77,6 +77,13 @@ final class ReplayEngine {
     private let coordinator: SessionCoordinator
     private var sessions: SessionManager { coordinator.sessions }
 
+    /// Which kinds of event feed the simulation, and how to read one back.
+    ///
+    /// Static because it is a table, not state. The engine consults it by tag while sorting a loaded recording
+    /// into inputs and annotations — the one replay decision the core cannot make, because only the ATC
+    /// adapter knows which of its own kinds are causes.
+    private static let codec = ATCEventCodec()
+
     /// The single authority on replay state — see `ReplayClock`. The engine writes `position` and reads
     /// everything else; it keeps no playback state of its own.
     let clock: ReplayClock
@@ -125,7 +132,9 @@ final class ReplayEngine {
         var inputs: [Int: [Event]] = [:]
         var annotations: [Event] = []
         for event in events {
-            if event.payload.affectsSimulation {
+            // By wire tag, never by decoded payload. A build that cannot decode a payload a newer release wrote
+            // must still route the recording correctly, and asking the codec by tag is what preserves that.
+            if Self.codec.affectsSimulation(tag: event.tag) {
                 inputs[event.tick, default: []].append(event)
             } else {
                 annotations.append(event)
@@ -360,7 +369,8 @@ final class ReplayEngine {
     /// wants typed values, so they are rebuilt into `StaticCommandSlots` — which is exactly what a keypress
     /// supplies, and why this is a reconstruction rather than a new path.
     private func inject(_ event: Event) {
-        guard case .commandIssued(let code, let callsign, let slots) = event.payload else { return }
+        guard case .commandIssued(let code, let callsign, let slots)? = ATCEvent.payload(of: event)
+        else { return }
 
         // The recording holds the *resolved* callsign, including for an instruction that named no aircraft and
         // went to the selected one — selection is something a controller did with their finger and cannot be

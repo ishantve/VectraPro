@@ -63,8 +63,11 @@ final class SessionCoordinator {
             resolved = InMemorySessionCatalogue()
         }
 
+        // The ATC codec is this app's answer to "what do these payloads mean". ReplayCore has no default and
+        // deliberately cannot have one: it routes payloads, and only an adapter can read them.
         sessions = SessionManager(root: root, catalogue: resolved,
-                                  environment: environment, retention: retention)
+                                  environment: environment, coding: ATCEventCodec(),
+                                  retention: retention)
         branches = BranchManager(sessions: sessions)
     }
 
@@ -102,7 +105,8 @@ final class SessionCoordinator {
                 sessionClass: session.sessionClass,
                 manifestBytes: try manifest.encoded(),
                 store: EventStore(url: sessions.eventLogURL(for: session.id),
-                                  sessionClass: session.sessionClass))
+                                  sessionClass: session.sessionClass,
+                                  coding: ATCEventCodec()))
             try recorder.open()
             self.recorder = recorder
             return recorder
@@ -165,7 +169,8 @@ final class SessionCoordinator {
         let manifest = try sessions.manifest(for: child.id)
 
         let store = EventStore(url: sessions.eventLogURL(for: child.id),
-                               sessionClass: child.sessionClass)
+                               sessionClass: child.sessionClass,
+                               coding: ATCEventCodec())
         let recorder = SessionRecorder(sessionID: child.id,
                                       sessionClass: child.sessionClass,
                                       manifestBytes: try manifest.encoded(),

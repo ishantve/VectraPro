@@ -8,7 +8,8 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+import ATCReplayAdapter
+@testable import ReplayCore
 
 final class SessionSealTests: XCTestCase {
 
@@ -29,15 +30,16 @@ final class SessionSealTests: XCTestCase {
         let url = directory.appendingPathComponent("events.log")
         let recorder = SessionRecorder(sessionID: UUID(), sessionClass: sessionClass,
                                        manifestBytes: manifest,
-                                       store: EventStore(url: url, sessionClass: sessionClass))
+                                       store: EventStore(url: url, sessionClass: sessionClass,
+                                                         coding: ATCEventCodec()))
         recorder.now = { Date(timeIntervalSince1970: 1_700_000_000) }
         return (recorder, url)
     }
 
     private func event(_ ordinal: UInt32) -> Event {
-        Event(position: EventPosition(tick: Int(ordinal), ordinal: ordinal),
-              payload: .commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"]),
-              source: .voice)
+        ATCEvent.commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"],
+                               at: EventPosition(tick: Int(ordinal), ordinal: ordinal),
+                               source: .voice)
     }
 
     // MARK: - The two forms agree
@@ -120,7 +122,8 @@ final class SessionSealTests: XCTestCase {
         // First run, killed after three events.
         let first = SessionRecorder(sessionID: UUID(), sessionClass: .assessment,
                                     manifestBytes: manifest,
-                                    store: EventStore(url: url, sessionClass: .assessment))
+                                    store: EventStore(url: url, sessionClass: .assessment,
+                                                      coding: ATCEventCodec()))
         first.now = { Date(timeIntervalSince1970: 1_700_000_000) }
         try first.open()
         for ordinal in UInt32(1)...3 { first.record(event(ordinal)) }
@@ -129,7 +132,8 @@ final class SessionSealTests: XCTestCase {
         // Second run continues.
         let second = SessionRecorder(sessionID: UUID(), sessionClass: .assessment,
                                      manifestBytes: manifest,
-                                     store: EventStore(url: url, sessionClass: .assessment))
+                                     store: EventStore(url: url, sessionClass: .assessment,
+                                                      coding: ATCEventCodec()))
         second.now = { Date(timeIntervalSince1970: 1_700_000_000) }
         let position = try second.open()
         XCTAssertEqual(position?.ordinal, 3, "the resumed recorder must see where the log got to")

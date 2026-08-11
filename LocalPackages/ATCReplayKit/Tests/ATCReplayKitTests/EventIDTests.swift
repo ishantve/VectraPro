@@ -7,7 +7,8 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+import ATCReplayAdapter
+@testable import ReplayCore
 
 final class EventIDTests: XCTestCase {
 
@@ -61,21 +62,21 @@ final class EventIDTests: XCTestCase {
     /// annotation pointing at that event is silently orphaned the day a migration lands.
     func testTheIDDoesNotDependOnThePayload() {
         let position = EventPosition(tick: 42, ordinal: 9)
-        let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
-            .timelineAction(.paused),
-            .scoreEvaluated(value: 82, rulesVersion: "v3"),
+        // Three different facts at one position. Expressed as events rather than as a payload list, because the
+        // adapter constructs facts and the property under test is about the *event's* identity.
+        let events = [
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], at: position),
+            ATCEvent.timeline(.paused, at: position),
+            ATCEvent.scoreEvaluated(value: 82, rulesVersion: "v3", at: position),
         ]
-        let ids = payloads.map { Event(position: position, payload: $0).id(in: session) }
+        let ids = events.map { $0.id(in: session) }
         XCTAssertEqual(Set(ids).count, 1, "the id moved with the payload")
     }
 
     /// `tick` is not part of identity, so a repaired or re-based recording keeps its anchors.
     func testTheIDDoesNotDependOnTheTick() {
-        let a = Event(position: EventPosition(tick: 10, ordinal: 5),
-                      payload: .timelineAction(.paused)).id(in: session)
-        let b = Event(position: EventPosition(tick: 9_999, ordinal: 5),
-                      payload: .timelineAction(.paused)).id(in: session)
+        let a = ATCEvent.timeline(.paused, at: EventPosition(tick: 10, ordinal: 5)).id(in: session)
+        let b = ATCEvent.timeline(.paused, at: EventPosition(tick: 9_999, ordinal: 5)).id(in: session)
         XCTAssertEqual(a, b)
     }
 
@@ -83,9 +84,9 @@ final class EventIDTests: XCTestCase {
     /// otherwise produce different ids for the same event.
     func testTheIDDoesNotDependOnWallClock() {
         let position = EventPosition(tick: 1, ordinal: 1)
-        let stamped = Event(position: position, payload: .timelineAction(.paused),
-                            wallClock: Date(timeIntervalSince1970: 1_700_000_000))
-        let bare = Event(position: position, payload: .timelineAction(.paused))
+        let stamped = ATCEvent.timeline(.paused, at: position,
+                                       wallClock: Date(timeIntervalSince1970: 1_700_000_000))
+        let bare = ATCEvent.timeline(.paused, at: position)
         XCTAssertEqual(stamped.id(in: session), bare.id(in: session))
     }
 
@@ -94,10 +95,9 @@ final class EventIDTests: XCTestCase {
     /// An envelope can name its event without the payload being decodable — so an index or a sync
     /// manifest can cover a log written by a newer build.
     func testAnEnvelopeCanNameItsEventWithoutThePayload() throws {
-        let event = Event(position: EventPosition(tick: 3, ordinal: 11),
-                          payload: .commandIssued(code: "101", callsign: "AIC1",
-                                                  slots: [:]))
-        let coder = EventCoder()
+        let event = ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
+                                           at: EventPosition(tick: 3, ordinal: 11))
+        let coder = EventCoder(coding: ATCEventCodec())
         let envelope = try coder.decodeEnvelope(try coder.encode(event))
 
         XCTAssertEqual(envelope.id(in: session), event.id(in: session))

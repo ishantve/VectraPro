@@ -12,7 +12,7 @@
 
 import XCTest
 import ATCReplayKit
-import ATCReplayStore
+import ReplayPersistence
 
 /// The contract. Subclasses supply the implementation.
 class SessionCatalogueContractTests: XCTestCase {
