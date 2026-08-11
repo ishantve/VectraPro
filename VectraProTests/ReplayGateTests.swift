@@ -238,7 +238,9 @@ extension ReplayGateTests {
                        "the exercise was not embedded as the bytes that were served")
 
         let recorded = try coordinator.sessions.events(for: sessionID)
-        XCTAssertEqual(recorded.filter { $0.payload.affectsSimulation }.count, 1)
+        // Post-R-Dist: simulation-affecting is decided by the codec from the event's tag, not a payload flag.
+        let codec = ATCEventCodec()
+        XCTAssertEqual(recorded.filter { codec.affectsSimulation(tag: $0.tag) }.count, 1)
         XCTAssertEqual(recorded.first?.source, .keypad)
     }
 

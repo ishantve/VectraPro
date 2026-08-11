@@ -34,7 +34,8 @@ final class ReplayKitWiringTests: XCTestCase {
             root: root,
             catalogue: catalogue,
             environment: RecordingEnvironment(buildVersion: Bundle.main.buildVersionForRecording,
-                                              platform: RecordingEnvironment.currentPlatform))
+                                              platform: RecordingEnvironment.currentPlatform),
+            coding: ATCEventCodec())
 
         // The exercise payload as the app would embed it: the bytes the backend served.
         let payload = Data(#"{"exerciseName":"Delhi","runwaysResponse":[]}"#.utf8)
@@ -44,11 +45,13 @@ final class ReplayKitWiringTests: XCTestCase {
                                         exercise: EmbeddedExercise(payload: payload,
                                                                    exerciseName: "Delhi"))
 
-        let store = EventStore(url: manager.eventLogURL(for: session.id), sessionClass: .training)
+        let store = EventStore(url: manager.eventLogURL(for: session.id), sessionClass: .training,
+                               coding: ATCEventCodec())
         try store.openForAppending()
-        try store.append(Event(position: EventPosition(tick: 12, ordinal: 1),
-                               payload: .commandIssued(code: "101", callsign: "AIC123",
-                                                       slots: ["LEVEL": "260"])))
+        // Post-R-Dist: payloads are opaque to ReplayCore; the ATC adapter builds the typed event.
+        try store.append(ATCEvent.commandIssued(code: "101", callsign: "AIC123",
+                                                 slots: ["LEVEL": "260"],
+                                                 at: EventPosition(tick: 12, ordinal: 1)))
         try store.close()
 
         let finished = try manager.end(tickCount: 12)
