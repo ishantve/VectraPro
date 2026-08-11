@@ -24,6 +24,9 @@ struct RootView: View {
     @State private var phase: Phase = .checking
     @State private var path: [AppRoute] = []
     @State private var showSessionExpired = false
+    #if DEBUG
+    @State private var showVoskTest = false   // debug-only Vosk test screen
+    #endif
     @ObservedObject private var auth = AuthService.shared
 
     var body: some View {
@@ -71,6 +74,22 @@ struct RootView: View {
         } message: {
             Text("Your session has expired. Please log in again.")
         }
+        #if DEBUG
+        // Temporary: a corner button to open the VoskSpeechKit test screen without
+        // going through the full app flow. Remove when Vosk testing is done.
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                showVoskTest = true
+            } label: {
+                Image(systemName: "waveform.badge.mic")
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .tint(.green)
+            .padding(24)
+        }
+        .sheet(isPresented: $showVoskTest) { VoskTestView() }
+        #endif
     }
 
     /// On launch, if there's a saved session and a known API base URL, restore

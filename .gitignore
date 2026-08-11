@@ -15,5 +15,7 @@ build/
 # local package resolutions (app workspace Package.resolved is authoritative)
 LocalPackages/**/Package.resolved
 
-# Vosk acoustic model — dropped in per machine, hundreds of MB, never committed.
-Models/
+# Vosk acoustic model — added manually per machine, never committed (100s of MB).
+# Keep the folder + its README; ignore any actual model dropped inside.
+Models/*
+!Models/README.md
