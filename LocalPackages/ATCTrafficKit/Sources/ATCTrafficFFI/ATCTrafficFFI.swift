@@ -28,14 +28,19 @@ private final class ScheduleRegistry {
     private let lock = NSLock()
     private var schedules: [Int32: TrafficSchedule] = [:]
     private var promotions: [Int32: RadarPromotionSchedule] = [:]
+    /// One generator per handle, so two schedules stepped side by side do not draw from each
+    /// other's sequence — and so a handle created with the same seed produces the same traffic.
+    private var generators: [Int32: SeededGenerator] = [:]
     private var nextHandle: Int32 = 1
 
-    func create(_ schedule: TrafficSchedule) -> Int32 {
+    func create(seed: UInt64, _ make: (inout SeededGenerator) -> TrafficSchedule) -> Int32 {
         lock.lock(); defer { lock.unlock() }
         let handle = nextHandle
         nextHandle += 1
-        schedules[handle] = schedule
-        promotions[handle] = RadarPromotionSchedule()
+        var rng = SeededGenerator(seed: seed)
+        schedules[handle] = make(&rng)
+        promotions[handle] = RadarPromotionSchedule(using: &rng)
+        generators[handle] = rng
         return handle
     }
 
@@ -44,15 +49,18 @@ private final class ScheduleRegistry {
               currentCount: Int,
               radarCount: Int) -> (spawn: [TrafficCategory], promote: Bool)? {
         lock.lock(); defer { lock.unlock() }
-        guard var schedule = schedules[handle], var promotion = promotions[handle] else {
+        guard var schedule = schedules[handle], var promotion = promotions[handle],
+              var rng = generators[handle] else {
             return nil
         }
-        let spawn = schedule.advance(by: elapsed, currentCount: currentCount)
+        let spawn = schedule.advance(by: elapsed, currentCount: currentCount, using: &rng)
         let promote = promotion.advance(by: elapsed,
                                        radarCount: radarCount,
-                                       capacity: schedule.configuration.airspaceCapacity)
+                                       capacity: schedule.configuration.airspaceCapacity,
+                                       using: &rng)
         schedules[handle] = schedule
         promotions[handle] = promotion
+        generators[handle] = rng      // the draws advanced it; that has to be kept
         return (spawn, promote)
     }
 
@@ -60,6 +68,7 @@ private final class ScheduleRegistry {
         lock.lock(); defer { lock.unlock() }
         schedules[handle] = nil
         promotions[handle] = nil
+        generators[handle] = nil
     }
 }
 
@@ -75,6 +84,9 @@ private struct CreateRequest: Decodable {
     let capacity: Int
     let frequencies: [String: Frequency]
     let randomIntervals: [TimeInterval]?
+    /// Optional. Supply it to get the same traffic every time — for a replay, or a test. Omitted
+    /// means a fresh sequence, which is what a live exercise wants.
+    let seed: UInt64?
 }
 
 private struct StepResponse: Encodable {
@@ -112,7 +124,13 @@ func atc_traffic_create(_ configuration: UnsafePointer<CChar>?) -> Int32 {
         airspaceCapacity: request.capacity,
         randomIntervals: request.randomIntervals ?? [15, 20, 30, 45, 60, 90])
 
-    return ScheduleRegistry.shared.create(TrafficSchedule(configuration: config))
+    // No seed given → derive one from the configuration so the run is still varied but the
+    // caller can reproduce it by sending the seed back. Never the system generator: a handle
+    // that cannot be reproduced cannot be replayed.
+    let seed = request.seed ?? UInt64(bitPattern: Int64(config.airspaceCapacity)) &* 0x9E37_79B9
+    return ScheduleRegistry.shared.create(seed: seed) { rng in
+        TrafficSchedule(configuration: config, using: &rng)
+    }
 }
 
 /// Advances a schedule and returns what to do, as a JSON C string.

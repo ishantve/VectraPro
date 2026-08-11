@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: Packages · test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: ATCSimKit
+        run: swift test --package-path LocalPackages/ATCSimKit
+      - name: ATCTrafficKit
+        run: swift test --package-path LocalPackages/ATCTrafficKit
+      - name: ATCReplayKit
+        run: swift test --package-path LocalPackages/ATCReplayKit
+      - name: NetworkKit
+        run: swift test --package-path LocalPackages/NetworkKit
+
+  app:
+    name: App · build + test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        # Unit tests only. VectraProUITests is slow and flaky and would make every run untrustworthy;
+        # a suite people learn to ignore is worse than no suite.
+        run: |
+          xcodebuild test \
+            -project VectraPro.xcodeproj \
+            -scheme VectraPro \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -only-testing:VectraProTests \
+            | xcpretty || exit ${PIPESTATUS[0]}
+
+  determinism:
+    name: Determinism · cross-architecture
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The measurement the replay architecture needs and cannot make on paper: an assessment is
+      # recorded on one device and reviewed on another, and every aircraft position comes out of
+      # great-circle maths whose sin/cos/atan2 are library functions rather than instructions. If the
+      # architectures disagree, cross-device replay cannot be scored — see
+      # docs/architecture/replay-engine.md §22.1.
+      - name: arm64 vs x86_64 fingerprint
+        run: ./scripts/arch-fingerprint.sh
+
+      # Runs the same self-check on macOS. VectraProTests runs it on the iOS simulator against the
+      # same compiled-in constant, so the two platforms are compared as well as the two
+      # architectures.
+      - name: Self-check on macOS
+        run: swift test --package-path LocalPackages/ATCSimKit --filter DeterminismSelfCheck

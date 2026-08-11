@@ -6,6 +6,16 @@
 //
 
 import SwiftUI
+import ATCReplayKit
+
+/// A chosen recording, on its way to the radar.
+///
+/// A wrapper because `navigationDestination(item:)` needs `Identifiable` and `SessionID` belongs to
+/// ATCReplayKit — conforming it from here would be a retroactive conformance on someone else's type.
+private struct PendingReplay: Identifiable, Hashable {
+    let id = UUID()
+    let sessionID: SessionID
+}
 
 struct HomeScreen: View {
 
@@ -17,6 +27,13 @@ struct HomeScreen: View {
     @ObservedObject private var auth = AuthService.shared
     @AppStorage(MapProvider.storageKey) private var providerRaw = MapProvider.mapLibre.rawValue
     @State private var startedExercise: Exercise?
+
+    /// The exercise whose recordings are being browsed, if any.
+    @State private var browsing: Exercise?
+
+    /// A recording chosen for replay. Wrapped because navigation needs an `Identifiable`, and a `SessionID` is a
+    /// value the package owns — conforming it here would be a retroactive conformance on someone else's type.
+    @State private var replaying: PendingReplay?
     @State private var startError: String?
     @State private var showAccount = false
     @State private var mode: SimMode = .single
@@ -54,6 +71,15 @@ struct HomeScreen: View {
             }
             .navigationDestination(item: $startedExercise) { _ in
                 MapScreen()
+            }
+            .navigationDestination(item: $replaying) { pending in
+                MapScreen(replaying: pending.sessionID)
+            }
+            .sheet(item: $browsing) { exercise in
+                ReplayBrowserView(coordinator: .shared,
+                                  exerciseName: exercise.exerciseName) { sessionID in
+                    replaying = PendingReplay(sessionID: sessionID)
+                }
             }
             .task { await viewModel.load() }
             .alert("Couldn't start exercise", isPresented: .constant(startError != nil)) {
@@ -248,9 +274,9 @@ struct HomeScreen: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 24) {
                     ForEach(Array(viewModel.exercises.enumerated()), id: \.element.id) { index, exercise in
-                        ExerciseCard(exercise: exercise, number: index + 1) {
-                            await start(exercise)
-                        }
+                        ExerciseCard(exercise: exercise, number: index + 1,
+                                     onStart: { await start(exercise) },
+                                     onReplay: { browsing = exercise })
                         .task { await viewModel.loadMoreIfNeeded(currentItem: exercise) }
                     }
 

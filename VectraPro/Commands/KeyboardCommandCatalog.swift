@@ -51,6 +51,12 @@ enum KeyboardCommandCatalog {
     /// collect — a fix name for `DIR` and `HLD`, a runway for `ILOC` and `C/T` —
     /// or phraseology the simulator has no behaviour for yet (`GO ARD`). They keep
     /// their existing no-op handlers rather than being wired to something wrong.
+    /// Every bound key.
+    ///
+    /// Sorted, because a test iterates it and an unsorted dictionary would report a different key first
+    /// on each run — which makes a failure harder to reproduce than it needs to be.
+    static var allKeys: [String] { byKey.keys.sorted() }
+
     static let byKey: [String: KeyboardCommand] = [
         // Speed
         "↑SPD*":   .init(code: "359", slot: "NUMBER", prompt: "Increase speed to xxx knots"),

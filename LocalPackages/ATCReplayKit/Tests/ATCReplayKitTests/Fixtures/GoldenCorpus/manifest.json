@@ -1,0 +1,26 @@
+{
+  "createdAt" : "2026-02-02T02:40:00Z",
+  "environment" : {
+    "architecture" : "arm64",
+    "buildVersion" : "1.0.0-corpus",
+    "platform" : "corpus"
+  },
+  "exercise" : {
+    "digest" : "d61fd864e234488f24a0f0341b4336179b331aac69ecb8e31925c7490b3fe9c3",
+    "exerciseID" : "corpus-1",
+    "exerciseName" : "Corpus",
+    "payload" : "eyJleGVyY2lzZU5hbWUiOiJDb3JwdXMifQ=="
+  },
+  "manifestVersion" : 1,
+  "origin" : {
+    "kind" : "selfDirected"
+  },
+  "ownerID" : {
+    "user" : {
+      "_0" : "corpus-owner"
+    }
+  },
+  "seed" : 1511106021,
+  "sessionClass" : "training",
+  "sessionID" : "5A11A5E5-0000-4000-8000-000000000001"
+}

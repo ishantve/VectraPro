@@ -17,6 +17,7 @@
 
 import Foundation
 import ATCParserKit
+import ATCReplayKit
 import ATCSimKit
 
 @MainActor
@@ -30,7 +31,20 @@ final class CommandKeyboardHandler {
     private let store: CommandTemplateStore
     private let renderer = ReadbackRenderer()
 
-    private init(radar: MapViewModel? = nil, store: CommandTemplateStore? = nil) {
+    /// Everything this handler says out loud, behind the side-effect boundary — see `SideEffects.swift`.
+    /// Taken from the view model so the keypad and the microphone share one gate; two gates could be in
+    /// two modes, and a seek would silence one of them.
+    private var feedback: CommandFeedback { radar.sideEffects }
+
+    /// Not private: a test needs a handler pointed at its own view model rather than the shared one, and
+    /// so will a second live session. The defaults keep every existing call site unchanged.
+    /// The app target defaults to `MainActor` isolation, which makes an implicit deinit isolated, and
+    /// releasing one off the main actor aborts the process. Invisible while this was only ever the shared
+    /// singleton — never released, so the deinit never ran. The third class in this project to need this;
+    /// `IsolatedDeinitScanTests` now covers it.
+    nonisolated deinit { }
+
+    init(radar: MapViewModel? = nil, store: CommandTemplateStore? = nil) {
         self.radar = radar ?? .shared
         self.store = store ?? .shared
     }
@@ -93,27 +107,40 @@ final class CommandKeyboardHandler {
         guard store.templates != nil else {
             // The reply comes from the template, so without the vocabulary a key would
             // act on an aircraft and then say nothing about it.
-            CommandFeedbackManager.shared.commandError("Unable, phraseology unavailable")
+            feedback.commandError("Unable, phraseology unavailable")
             return
         }
 
         let slots = StaticCommandSlots(
             integers: binding.slot.map { [$0: values] } ?? [:])
 
-        switch CommandMapping.map(code: binding.code, slots: slots) {
-        case .commands(let effects):
-            radar.apply(effects, readback: readback(for: binding, values: values))
-        case .communicationOnly:
+        // The same entry point the microphone uses, so `CommandMapping.map` has one call site and the
+        // validation around it cannot drift between the two paths. A keypress names no aircraft, so the
+        // callsign is nil and the effect lands on the selected one — as it always has.
+        let result = radar.commands.perform(code: binding.code,
+                                            callsign: nil,
+                                            slots: slots,
+                                            source: .keypad,
+                                            // The template's own category, so a refusal reads the same
+                                            // whether the instruction was spoken or typed. The key's prompt
+                                            // ("Climb to FL xxx") is UI wording, not a category, and would
+                                            // have produced "climb to fl xxx instruction not implemented".
+                                            category: store.templates?.template(id: binding.code)?.category
+                                                ?? binding.prompt.lowercased())
+
+        switch (result.earnedReply, result.effects.isEmpty) {
+        case (false, _):
+            // Refused, and already reported by `perform`.
+            break
+        case (true, false):
+            radar.apply(result.effects, readback: readback(for: binding, values: values))
+        case (true, true):
             if let spoken = readback(for: binding, values: values) {
-                CommandFeedbackManager.shared.readback(spoken)
+                feedback.readback(spoken)
             }
-        case .unmapped:
-            // A key bound to a code the simulator has no behaviour for. Reported
-            // rather than ignored — a silent key is indistinguishable from a
-            // working one.
-            CommandFeedbackManager.shared.commandError(
-                "Unable, \(binding.prompt.lowercased()) not implemented")
         }
+        // A key bound to a code the simulator has no behaviour for is reported by `perform`, using the
+        // prompt as its category — the same wording this branch used to produce, now written once.
     }
 
     /// ICAO readback for the chosen template, spoken to the selected aircraft.

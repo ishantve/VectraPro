@@ -6,9 +6,17 @@
 //
 
 import SwiftUI
+import ATCReplayKit
 import ATCSimKit
 
 struct MapScreen: View {
+
+    /// A recording to replay instead of flying.
+    ///
+    /// Passed in rather than chosen here: the browser lives on the exercise card, so by the time this screen opens
+    /// the choice is already made. It also removes a hazard the radar-side entry point had — opening a replay
+    /// mid-exercise detached the recorder and left the live session open, losing the run in progress.
+    var replaying: SessionID?
 
     @ObservedObject private var viewModel = MapViewModel.shared
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
@@ -21,6 +29,19 @@ struct MapScreen: View {
     @State private var showLayers = false
     /// Which left-toolbar menu is open (nil = none). Only one at a time.
     @State private var openLeftMenu: LeftMenu?
+    // MARK: - Replay
+    //
+    // Replay drives the radar that is already on screen rather than opening a second one: a reviewer watches the
+    // same picture the trainee flew, and the only thing added is a transport bar over it.
+
+    /// The transport, present only while replaying. Its absence *is* "not replaying" — the screen keeps no
+    /// separate flag, because a flag and a transport are two things that would have to agree.
+    @State private var replay: ReplayTransport?
+
+    /// Observed so the bar redraws as the replay advances. `ReplayClock` is the authority; this is a reference to
+    /// it, not a copy of it.
+    @StateObject private var replayClock = ReplayClock()
+
     /// Which operations popup is open (nil = none). Only one at a time.
     enum OperationsPopup { case flightData }
     @State private var activePopup: OperationsPopup?
@@ -141,20 +162,40 @@ struct MapScreen: View {
                 speedButtons
             }
             .padding(.leading, 24)
-            .padding(.bottom, 12)
+            // Lifts above the transport while replaying. Zoom stays reachable — looking closer at what happened
+            // is most of what a review is — but it cannot sit under the bar.
+            .padding(.bottom, replay == nil ? 12 : 96)
         }
+        .overlay(alignment: .bottom) {
+            if let replay {
+                ReplayTransportBar(clock: replayClock, transport: replay) {
+                    continueFromReplay(replay)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: replay == nil)
         .overlay(alignment: .bottomLeading) {
-            feedbackLogView
-                .padding(.leading, 24)
-                .padding(.bottom, 90)
+            if replay == nil {
+                feedbackLogView
+                    .padding(.leading, 24)
+                    .padding(.bottom, 90)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             HStack(alignment: .bottom, spacing: 16) {
-                PushToTalkMicButton(viewModel: speechViewModel)
+                // Hidden while replaying, and not merely to clear the transport: a replay is driven by the
+                // instructions that were recorded, so a live transmission has nowhere to go. Leaving the mic and
+                // the keypad up would invite a reviewer to issue a command that silently does nothing. Continue
+                // is how you take control, and hiding these is what makes that legible.
+                if replay == nil {
+                    PushToTalkMicButton(viewModel: speechViewModel)
                 // Command keyboard only on the main (attached) view. While
                 // detached, the big Macro Keyboard fills the main screen instead.
                 if !presentation.isMapDetached {
-                    CommandKeyboard(
+                        CommandKeyboard(
                         onCommand: { CommandKeyboardHandler.shared.perform($0) },
                         requiresValue: { CommandKeyboardHandler.shared.requiresValue($0) },
                         promptFor: { CommandKeyboardHandler.shared.prompt(for: $0) },
@@ -167,7 +208,8 @@ struct MapScreen: View {
                         valueCount: { CommandKeyboardHandler.shared.valueCount(for: $0) },
                         onPreview: { text in speechViewModel.previewCommand(text) },
                         onDismissPreview: { _ in speechViewModel.clearPreview() }   // close at once on ENT/Back
-                    )
+                        )
+                    }
                 }
             }
             .padding(.trailing, 16)
@@ -215,14 +257,30 @@ struct MapScreen: View {
         .onKeyPress("+") { viewModel.zoom(by: 1); return .handled }
         .onKeyPress("-") { viewModel.zoom(by: -1); return .handled }
         .onAppear {
-            viewModel.reset()   // fresh radar each time the screen opens
+            if let replaying {
+                // No `reset()` first. Loading restores the world from the recording's own manifest, and resetting
+                // would open a live recording session that the load then orphans.
+                startReplay(of: replaying)
+            } else {
+                // A replay detaches recording (ReplayEngine.load sets radar.recording = nil so a replay
+                // writes nothing). Re-attach it here for a live run, so an exercise started after viewing a
+                // replay records again instead of silently not recording.
+                if viewModel.recording == nil { viewModel.recording = .shared }
+                viewModel.reset()   // fresh radar each time the screen opens
+            }
             speechViewModel.prepare()
             let vm = viewModel
             speechViewModel.onCommand = { [weak vm] transcript in
                 vm?.handleVoiceCommand(transcript)
             }
         }
-        .onDisappear { viewModel.clearOnExit() }
+        .onDisappear {
+            // If we leave mid-replay (e.g. the back button rather than Continue), end the replay cleanly:
+            // stops the engine's timer (otherwise it keeps firing on the shared radar) and hands recording
+            // back to live. The Continue path tears down on its own.
+            replay?.tearDown()
+            viewModel.clearOnExit()
+        }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
@@ -399,6 +457,41 @@ struct MapScreen: View {
     }
 
     /// Left-side tool column: 4 tools + Instructor Mode (2). Clickable; actions TBD.
+    // MARK: - Replay actions
+
+    /// Loads a recording and shows the transport over the radar.
+    ///
+    /// The engine is built with the screen's own clock, so the bar observes the same authority the engine writes —
+    /// rather than the screen keeping a copy that would need syncing.
+    private func startReplay(of sessionID: SessionID) {
+        let engine = ReplayEngine(radar: viewModel, recording: .shared, clock: replayClock)
+        do {
+            try engine.load(sessionID)
+            replay = ReplayTransport(engine: engine)
+        } catch {
+            feedbackManager.commandError("Unable to open that recording")
+            #if DEBUG
+            print("[MapScreen] replay load failed: \(error)")
+            #endif
+        }
+    }
+
+    /// Forks here and hands the radar back to a live exercise.
+    ///
+    /// Dismissing the bar is all the screen has to do — the world is already live, because it was reached by
+    /// simulating rather than by being restored.
+    private func continueFromReplay(_ transport: ReplayTransport) {
+        // Named for the point it left, because "Continued" on its own makes every branch of a session an
+        // identical row in the browser — which is exactly what the snapshot pass showed.
+        let from = replayClock.position
+        let label = String(format: "Continued from %02d:%02d", from / 60, from % 60)
+        guard transport.perform(.continueLive(label: label)) else {
+            feedbackManager.commandError("Unable to continue from here")
+            return
+        }
+        replay = nil
+    }
+
     /// Back button and clock. Both layouts show it; each pads it differently.
     private var exerciseHeader: some View {
         ExerciseHeader(elapsedSeconds: viewModel.elapsedSeconds,

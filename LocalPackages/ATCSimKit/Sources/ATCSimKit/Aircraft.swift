@@ -27,7 +27,11 @@ public enum FlightCategory {
 }
 
 public struct Aircraft: Identifiable {
-    public let id = UUID()
+    /// Stable identity. Supplied rather than generated inline so an aircraft can be restored
+    /// from a saved simulation with the identity it had: every id anything else holds — the
+    /// selected aircraft, the conflict sets, the reports a pilot owes — has to keep pointing at
+    /// the same aircraft after a restore.
+    public let id: UUID
     public var callsign: String
     public var position: CLLocationCoordinate2D
     public var headingDegrees: Double
@@ -101,7 +105,11 @@ public struct Aircraft: Identifiable {
     public static let defaultSpeedKnots = 250.0
     public static let defaultAltitudeFeet = 18_000.0   // FL180
 
-    public init(callsign: String, position: CLLocationCoordinate2D, headingDegrees: Double) {
+    public init(id: UUID = UUID(),
+                callsign: String,
+                position: CLLocationCoordinate2D,
+                headingDegrees: Double) {
+        self.id = id
         self.callsign = callsign
         self.position = position
         self.headingDegrees = headingDegrees

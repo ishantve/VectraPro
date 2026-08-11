@@ -16,11 +16,11 @@
 //    RadarMapController.aircraftScale. (This replaced an earlier screen-fixed
 //    GMSMarker approach, which jerked and appeared to resize during zoom because
 //    the symbol stayed a fixed pixel size while the map scaled.)
-//  • Dashed lines (trail, distance measurement) use a geographic dash cadence.
-//    GMS style-span dashes are geographic (rhumb/geodesic/projected), with no
-//    screen-space option; MapLibre dashes in screen points. Exact screen-space
-//    parity is only possible via a custom GMSProjection + Core Graphics overlay
-//    (future optional work); the geographic approximation is accepted.
+//  • Dashed lines (trail, tether): GMS style-span dashes are geographic (metres),
+//    while MapLibre dashes in screen points. We convert the MapLibre point cadence
+//    to metres via the live metres-per-point (screenDashLengths) and recompute it
+//    every sync, so the dashes hold a fixed on-screen cadence across zoom instead
+//    of collapsing to a solid line at operational zoom.
 //  • Display DPI/crispness is handled natively by GMSMapView's GL surface — there
 //    is no contentScaleFactor to manage as there is for MapLibre's MLNMapView.
 //
@@ -70,6 +70,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     /// Range rings + area-control rings — built once, never removed.
     private var ringLines: [GMSPolyline] = []
+    /// Rebuild key for the range rings — the exercise centre (rings move if a replayed exercise recentres).
+    private var ringLinesKey = ""
     /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
     private var radialLines: [GMSPolyline] = []
     private var radialLinesKey = ""
@@ -406,16 +408,22 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        // Range rings + area-control rings: built once, never removed.
-        if ringLines.isEmpty {
+        // Range rings + area-control rings: rebuilt when the exercise centre changes (e.g. a replay whose
+        // recorded exercise recentres the radar), not just once — otherwise they stay on the old centre.
+        let ringsKey = "\(viewModel.center.latitude),\(viewModel.center.longitude)"
+        if ringsKey != ringLinesKey {
+            ringLines.forEach { $0.map = nil }
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
             lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
             ringLines = add(lines)
+            ringLinesKey = ringsKey
         }
 
-        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        // Fix radials: rebuild when the Radials toggle, the enabled-radials list, OR the fixes change. The
+        // fixes count matters because the radial lines are derived from `fixes` (fixRadialLines) — a replay
+        // loads the exercise (and its fixes) after the radar is already up, so omitting it left radials blank.
         let radialsOn = viewModel.layerOn(.radials)
-        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        let radialKey = "\(radialsOn)-\(viewModel.fixes.count)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             radialLines.forEach { $0.map = nil }
             radialLines = radialsOn ? add(viewModel.fixRadialLines()) : []
@@ -732,15 +740,34 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         }
     }
 
-    /// Orange dashed spans matching RadarMapController's trail-line colour.
-    /// NOTE: MapLibre dashes in screen points ([4,5]); GMS style spans are
-    /// geographic, so the dash *cadence* is an approximation (tunable) rather
-    /// than pixel-identical — flagged for smoke-test.
+    /// Metres covered by one screen point at `coord` under the current camera.
+    /// GMS style-span dash lengths are geographic (metres), but MapLibre dashes in
+    /// screen space; converting screen points → metres here (and recomputing every
+    /// sync) makes the GMS dashes track a fixed on-screen cadence across zoom,
+    /// matching MapLibre instead of collapsing to a solid line at operational zoom.
+    private func metresPerPoint(at coord: CLLocationCoordinate2D) -> Double {
+        let p = mapView.projection.point(for: coord)
+        let onePointOver = mapView.projection.coordinate(for: CGPoint(x: p.x + 1, y: p.y))
+        return GMSGeometryDistance(coord, onePointOver)
+    }
+
+    /// Screen-space dash lengths (in metres) for a GMS style span: `dashPoints`
+    /// visible then `gapPoints` clear, sized from the live metres-per-point.
+    private func screenDashLengths(dashPoints: Double, gapPoints: Double,
+                                   at coord: CLLocationCoordinate2D) -> [NSNumber] {
+        let mpp = metresPerPoint(at: coord)
+        guard mpp > 0 else { return [NSNumber(value: dashPoints), NSNumber(value: gapPoints)] }
+        return [NSNumber(value: dashPoints * mpp), NSNumber(value: gapPoints * mpp)]
+    }
+
+    /// Orange dashed spans matching RadarMapController's trail line (MapLibre dash
+    /// pattern [4,5] in line-width units; stroke width 1.5 → 6 pt on / 7.5 pt off).
     private func trailDashSpans(for path: GMSPath) -> [GMSStyleSpan] {
         let orange = UIColor(red: 1.0, green: 0.65, blue: 0.2, alpha: 0.75)
+        let anchor = path.count() > 0 ? path.coordinate(at: 0) : mapView.camera.target
         return GMSStyleSpans(path,
                              [GMSStrokeStyle.solidColor(orange), GMSStrokeStyle.solidColor(.clear)],
-                             [NSNumber(value: 200), NSNumber(value: 250)],
+                             screenDashLengths(dashPoints: 6, gapPoints: 7.5, at: anchor),
                              .rhumb)
     }
 
@@ -784,13 +811,14 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
     }
 
     /// White dashed spans for the tether. Mirrors RadarMapController's dashed
-    /// tether (screen-space [2,2]); GMS style spans are geographic, so the cadence
-    /// is the same accepted approximation used by the trail and measurement lines.
+    /// tether (MapLibre dash pattern [2,2] in line-width units; stroke width 1.5 →
+    /// 3 pt on / 3 pt off), sized in screen space via the live metres-per-point.
     private func tetherDashSpans(for path: GMSPath) -> [GMSStyleSpan] {
         let white = UIColor.white.withAlphaComponent(0.5)
+        let anchor = path.count() > 0 ? path.coordinate(at: 0) : mapView.camera.target
         return GMSStyleSpans(path,
                              [GMSStrokeStyle.solidColor(white), GMSStrokeStyle.solidColor(.clear)],
-                             [NSNumber(value: 150), NSNumber(value: 150)],
+                             screenDashLengths(dashPoints: 3, gapPoints: 3, at: anchor),
                              .rhumb)
     }
 
