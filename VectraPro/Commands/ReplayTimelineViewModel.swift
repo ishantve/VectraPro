@@ -29,6 +29,11 @@ final class ReplayTimelineViewModel: ObservableObject {
     @Published private(set) var failure: String?
     @Published private(set) var isLoaded = false
 
+    /// How many events the recording held before description/filtering. Lets the UI tell "recorded nothing"
+    /// (0) apart from "recorded events none of which could be shown" (> 0 with no entries) — e.g. a log in a
+    /// format this build no longer reads — instead of one blank that hides which it was.
+    @Published private(set) var rawEventCount = 0
+
     private let descriptor: ReplayEventDescriptor
 
     init(descriptor: ReplayEventDescriptor = .shared) {
@@ -54,9 +59,11 @@ final class ReplayTimelineViewModel: ObservableObject {
                                             text: text))
             }
             entries = built
+            rawEventCount = events.count
             failure = nil
         } catch {
             entries = []
+            rawEventCount = 0
             failure = "\(error)"
         }
         isLoaded = true

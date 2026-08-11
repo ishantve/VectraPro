@@ -25,9 +25,6 @@ struct ReplayBrowserView: View {
     /// Play/open the recording as a replay.
     let onSelect: (SessionID) -> Void
 
-    /// Open the recording as a replay AND surface its timeline panel.
-    let onLogs: (SessionID) -> Void
-
     /// Told after a successful delete, so a parent can drop any stale replay reference to that id.
     var onDeleted: (SessionID) -> Void = { _ in }
 
@@ -37,6 +34,10 @@ struct ReplayBrowserView: View {
     @State private var failure: String?
     @State private var pendingDelete: SessionSummary?
     @State private var deleteError: String?
+
+    /// The recording whose log is being read in place, if any. When set, the popup shows that recording's
+    /// timeline instead of the list — the logs stay on this screen rather than opening the radar.
+    @State private var loggingSession: SessionSummary?
 
     private let environment = RecordingEnvironment.current()
     private let panelBG = Color(red: 0.06, green: 0.10, blue: 0.18).opacity(0.97)
@@ -68,11 +69,24 @@ struct ReplayBrowserView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "record.circle")
-                .font(.system(size: 15)).foregroundStyle(.white.opacity(0.85))
-            Text(exerciseName ?? "Replay Recordings")
-                .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                .lineLimit(1)
+            if let logging = loggingSession {
+                // Logs mode: a back affordance returns to the list; the title names the recording.
+                Button { loggingSession = nil } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 34, height: 34).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Text(logging.label.isEmpty ? "Replay Log" : logging.label)
+                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    .lineLimit(1)
+            } else {
+                Image(systemName: "record.circle")
+                    .font(.system(size: 15)).foregroundStyle(.white.opacity(0.85))
+                Text(exerciseName ?? "Replay Recordings")
+                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 0)
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
@@ -86,7 +100,11 @@ struct ReplayBrowserView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let failure {
+        if let logging = loggingSession {
+            // The recording's log, read through the same manager the row was listed from, in place.
+            ReplayTimelineView(sessionID: logging.id, sessions: coordinator.sessions)
+                .id(logging.id)   // a distinct recording gets a fresh model + load
+        } else if let failure {
             centered("Could not read recordings", failure, "exclamationmark.triangle")
         } else if rows.isEmpty {
             centered("No recordings yet", "Fly an exercise and it will appear here.", "record.circle")
@@ -99,7 +117,7 @@ struct ReplayBrowserView: View {
                                    environment: environment,
                                    logURL: coordinator.sessions.eventLogURL(for: row.summary.id),
                                    onPlay: { onSelect(row.summary.id); dismiss() },
-                                   onLogs: { onLogs(row.summary.id); dismiss() },
+                                   onLogs: { loggingSession = row.summary },
                                    onDelete: { pendingDelete = row.summary })
                         Divider().overlay(.white.opacity(0.12))
                     }
