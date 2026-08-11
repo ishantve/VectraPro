@@ -16,6 +16,7 @@
 //
 
 import XCTest
+import ATCParserKit
 import ATCSimKit
 @testable import VectraPro
 
@@ -39,6 +40,12 @@ final class MapViewModelCommandTests: XCTestCase {
 
     private final class ReportsSpy: DeferredReportAnnouncing {
         var advanceCount = 0
+        var registered: [String] = []
+
+        func register(_ command: RecognizedCommand, aircraftCallsign: String?) {
+            registered.append(command.code)
+        }
+
         func advance(aircraft: [Aircraft], allCallsigns: Set<String>,
                      fixes: [Fix], runways: [Runway]) {
             advanceCount += 1

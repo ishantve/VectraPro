@@ -42,8 +42,8 @@ final class HomeViewModel: ObservableObject {
     /// failure so the view can surface the error. (Orchestration lives here,
     /// not in the view.)
     func startExercise(_ exercise: Exercise) async throws {
-        let detail = try await exerciseService.loadDetail(exerciseID: exercise.id)
-        radar.applyExercise(detail)
+        let (detail, payload) = try await exerciseService.loadDetail(exerciseID: exercise.id)
+        radar.applyExercise(detail, payload: payload)
     }
 
     /// Load (or reload) the first page.

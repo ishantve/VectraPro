@@ -35,6 +35,13 @@ import GeoNavKit
 public protocol CommandSlots {
     func integer(_ name: String, occurrence: Int) -> Int?
     func text(_ name: String, occurrence: Int) -> String?
+
+    /// Every slot this instruction filled, in template order.
+    ///
+    /// Added so an instruction's values can be written down without knowing which template it came from.
+    /// The mapping table asks for slots by name because it knows what it wants; recording does not, and
+    /// cannot, so it needs to be able to ask what is there.
+    var slotNames: [String] { get }
 }
 
 public extension CommandSlots {
@@ -60,6 +67,12 @@ public struct StaticCommandSlots: CommandSlots {
 
     public func text(_ name: String, occurrence: Int) -> String? {
         texts[name].flatMap { $0.indices.contains(occurrence) ? $0[occurrence] : nil }
+    }
+
+    /// Sorted, because these come from dictionaries and dictionary order is not stable in Swift — an
+    /// unsorted answer would make a recording's slot order differ between two runs of the same input.
+    public var slotNames: [String] {
+        Array(Set(integers.keys).union(texts.keys)).sorted()
     }
 }
 

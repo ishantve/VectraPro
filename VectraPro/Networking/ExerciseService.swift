@@ -22,13 +22,18 @@ final class ExerciseService {
     }
 
     /// Fetch the exercise detail. Call on START, before opening the radar.
-    func loadDetail(exerciseID: String) async throws -> ExerciseDetail {
-        let response: ExerciseDetailResponse = try await api.request(
+    ///
+    /// Returns the payload alongside the decoded value. A recording embeds the exercise configuration as the
+    /// **bytes the backend actually served** — not an exercise id and not a re-encoding of a decoded copy —
+    /// because a replay that fetched its configuration again would be replaying a different world if the
+    /// backend had since changed a fix, with no error anywhere.
+    func loadDetail(exerciseID: String) async throws -> (detail: ExerciseDetail, payload: Data) {
+        let (response, payload): (ExerciseDetailResponse, Data) = try await api.requestWithPayload(
             Endpoint.exerciseDetail(exerciseID: exerciseID)
         )
         guard let detail = response.record else {
             throw APIError.invalidResponse
         }
-        return detail
+        return (detail, payload)
     }
 }

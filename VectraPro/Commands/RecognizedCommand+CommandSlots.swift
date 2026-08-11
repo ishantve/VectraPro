@@ -20,6 +20,16 @@ import ATCSimKit
 
 extension RecognizedCommand: @retroactive CommandSlots {
 
+    /// Every slot the transmission filled, in template order.
+    ///
+    /// Template order, not sorted: this is the order the controller said them in, and a recording should
+    /// read the way the instruction was given. Repeated placeholders — a block altitude names `LEVEL`
+    /// twice — appear once, since a caller asks for occurrences by index.
+    public nonisolated var slotNames: [String] {
+        var seen = Set<String>()
+        return slots.compactMap { seen.insert($0.name).inserted ? $0.name : nil }
+    }
+
     public nonisolated func integer(_ name: String, occurrence: Int) -> Int? {
         guard case .integer(let value)? = value(name, occurrence) else { return nil }
         return value

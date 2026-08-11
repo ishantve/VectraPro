@@ -18,37 +18,46 @@
 //  good; that is what a quota means.
 //
 //  ── Randomness is injected ─────────────────────────────────────────────────
-//  Interval choices come in through `IntervalChooser` rather than being drawn
-//  inside, so a schedule can be stepped through deterministically in a test. The
-//  production default still picks at random.
+//  Interval choices come in through `IntervalChooser`, and the generator itself comes
+//  in from the caller, so a schedule can be stepped through deterministically in a
+//  test and replayed exactly in a saved simulation. The production default still
+//  picks at random — from the caller's generator, never from the system's.
+//
+//  The generator arrives as `some RandomNumberGenerator`, a standard-library
+//  protocol, so this package still depends on nothing but Foundation and remains
+//  portable to a C interface.
 //
 
 import Foundation
 
 // MARK: - Interval choice
 
-public struct IntervalChooser: Sendable {
-
-    private let choose: @Sendable ([TimeInterval]) -> TimeInterval
-
-    public init(_ choose: @escaping @Sendable ([TimeInterval]) -> TimeInterval) {
-        self.choose = choose
-    }
-
-    func pick(from options: [TimeInterval]) -> TimeInterval {
-        choose(options)
-    }
+/// How the wait until the next aircraft is chosen.
+///
+/// An enum rather than a closure: a closure cannot be generic over the generator, and the
+/// generator has to come from the caller for the schedule to be reproducible. Three cases have
+/// covered every use so far, and an enum makes the whole set of behaviours visible.
+public enum IntervalChooser: Sendable, Equatable {
 
     /// Production behaviour: an irregular rate.
-    public static let random = IntervalChooser { $0.randomElement() ?? 30 }
-
+    case random
     /// A fixed interval, for tests that need to know when the next one is due.
-    public static func fixed(_ interval: TimeInterval) -> IntervalChooser {
-        IntervalChooser { _ in interval }
-    }
-
+    case fixed(TimeInterval)
     /// Always the shortest option — useful for exercising quota exhaustion quickly.
-    public static let shortest = IntervalChooser { $0.min() ?? 30 }
+    case shortest
+
+    /// The fallback when there are no options to choose from. A schedule with no configured
+    /// intervals should still tick rather than stop, so this is a value and not a crash.
+    static let fallback: TimeInterval = 30
+
+    func pick<R: RandomNumberGenerator>(from options: [TimeInterval],
+                                       using rng: inout R) -> TimeInterval {
+        switch self {
+        case .random:              return options.randomElement(using: &rng) ?? Self.fallback
+        case .fixed(let interval): return interval
+        case .shortest:            return options.min() ?? Self.fallback
+        }
+    }
 }
 
 // MARK: - Schedule
@@ -84,7 +93,9 @@ public struct TrafficSchedule: Sendable {
     private let chooser: IntervalChooser
     private var spawners: [Spawner]
 
-    public init(configuration: Configuration, intervals: IntervalChooser = .random) {
+    public init<R: RandomNumberGenerator>(configuration: Configuration,
+                                          intervals: IntervalChooser = .random,
+                                          using rng: inout R) {
         self.configuration = configuration
         self.chooser = intervals
 
@@ -100,7 +111,7 @@ public struct TrafficSchedule: Sendable {
                   let frequency = configuration.frequencies[category] else { return nil }
 
             let fixed = frequency.fixedInterval
-            let first = fixed ?? intervals.pick(from: configuration.randomIntervals)
+            let first = fixed ?? intervals.pick(from: configuration.randomIntervals, using: &rng)
             return Spawner(category: category,
                            fixedInterval: fixed,
                            remaining: quota,
@@ -131,8 +142,9 @@ public struct TrafficSchedule: Sendable {
     /// `currentCount` is every aircraft already in the exercise, radar and hangar
     /// together, so the capacity ceiling counts what is actually there rather than
     /// what this schedule produced.
-    public mutating func advance(by elapsed: TimeInterval,
-                                 currentCount: Int) -> [TrafficCategory] {
+    public mutating func advance<R: RandomNumberGenerator>(by elapsed: TimeInterval,
+                                                           currentCount: Int,
+                                                           using rng: inout R) -> [TrafficCategory] {
         var spawned: [TrafficCategory] = []
 
         for index in spawners.indices {
@@ -150,15 +162,16 @@ public struct TrafficSchedule: Sendable {
 
             spawned.append(spawners[index].category)
             spawners[index].remaining -= 1
-            spawners[index].countdown = nextInterval(after: spawners[index])
+            spawners[index].countdown = nextInterval(after: spawners[index], using: &rng)
         }
         return spawned
     }
 
-    private func nextInterval(after spawner: Spawner) -> TimeInterval {
+    private func nextInterval<R: RandomNumberGenerator>(after spawner: Spawner,
+                                                       using rng: inout R) -> TimeInterval {
         guard spawner.remaining > 0 else { return .infinity }   // nothing further due
         if let fixed = spawner.fixedInterval { return fixed }
-        return chooser.pick(from: configuration.randomIntervals)
+        return chooser.pick(from: configuration.randomIntervals, using: &rng)
     }
 }
 
@@ -176,11 +189,12 @@ public struct RadarPromotionSchedule: Sendable {
     private let chooser: IntervalChooser
     private var countdown: TimeInterval
 
-    public init(intervals: [TimeInterval] = [15, 20, 30, 45, 60, 90],
-                chooser: IntervalChooser = .random) {
+    public init<R: RandomNumberGenerator>(intervals: [TimeInterval] = [15, 20, 30, 45, 60, 90],
+                                          chooser: IntervalChooser = .random,
+                                          using rng: inout R) {
         self.intervals = intervals
         self.chooser = chooser
-        self.countdown = chooser.pick(from: intervals)
+        self.countdown = chooser.pick(from: intervals, using: &rng)
     }
 
     /// Brings the next promotion forward, for when a radar slot has just freed up.
@@ -188,23 +202,24 @@ public struct RadarPromotionSchedule: Sendable {
     /// A vacancy should refill promptly rather than waiting out an interval that
     /// was timed against a full screen, so the wait is cut to one of the shorter
     /// choices — and only ever shortened, never extended.
-    public mutating func hurry() {
+    public mutating func hurry<R: RandomNumberGenerator>(using rng: inout R) {
         let shortest = intervals.sorted().prefix(3)
-        let target = chooser.pick(from: Array(shortest))
+        let target = chooser.pick(from: Array(shortest), using: &rng)
         countdown = min(countdown, target)
     }
 
     /// True when an aircraft should be promoted now.
-    public mutating func advance(by elapsed: TimeInterval,
-                                 radarCount: Int,
-                                 capacity: Int) -> Bool {
+    public mutating func advance<R: RandomNumberGenerator>(by elapsed: TimeInterval,
+                                                           radarCount: Int,
+                                                           capacity: Int,
+                                                           using rng: inout R) -> Bool {
         guard radarCount < capacity else {
             countdown = max(countdown, 0)   // wait for room, do not switch off
             return false
         }
         countdown -= elapsed
         guard countdown <= 0 else { return false }
-        countdown = chooser.pick(from: intervals)
+        countdown = chooser.pick(from: intervals, using: &rng)
         return true
     }
 }
