@@ -6,6 +6,7 @@
 //
 
 import Combine
+import ATCReplayKit
 import ATCSimKit
 import ATCTrafficKit
 import GeoNavKit
@@ -79,7 +80,7 @@ final class MapViewModel: ObservableObject {
     /// Owned by ATCTrafficKit, which knows nothing about aircraft or geometry, so
     /// the rules are testable on their own and portable off Apple platforms.
     private var schedule: TrafficSchedule?
-    private var promotion = RadarPromotionSchedule()
+    private var promotion: RadarPromotionSchedule
 
     /// Multi-aircraft spawning (from the exercise).
     private var isMultiMode = false
@@ -164,7 +165,15 @@ final class MapViewModel: ObservableObject {
     /// Apply the started exercise: center the radar and derive runways +
     /// enabled approaches from the API. Built once here so UUIDs stay stable
     /// across `reset()`.
-    func applyExercise(_ detail: ExerciseDetail) {
+    func applyExercise(_ detail: ExerciseDetail, payload: Data? = nil) {
+        // A new scene is being applied — exercise start, or a replay/exercise re-load onto an already-visible
+        // radar. `fixes`/`center` are not @Published, so setting them fires no notification on their own;
+        // announce the change here so the map controllers re-sync their static overlays (radials, rings).
+        objectWillChange.send()
+        // Kept so the recording can embed the exercise verbatim. Optional because a test may apply a detail
+        // without one; a session started without it simply records an empty payload rather than refusing.
+        exercisePayload = payload
+        exerciseID = detail.id
         if let lat = detail.mapLatitude, let lon = detail.mapLongitude {
             center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
@@ -220,6 +229,9 @@ final class MapViewModel: ObservableObject {
     /// Display name of the active exercise (set by applyExercise).
     @Published private(set) var exerciseName: String = ""
     /// Seconds elapsed since the exercise started (counts up from 0).
+    /// Exercise clock, for the UI. A published mirror of `clock`, not a second counter: it used to
+    /// be incremented separately from the tick count, which meant two numbers that had to agree and
+    /// nothing making them.
     @Published private(set) var elapsedSeconds: Int = 0
     /// Total exercise duration in seconds (0 = unlimited).
     @Published private(set) var exerciseDurationSeconds: Int = 0
@@ -232,7 +244,9 @@ final class MapViewModel: ObservableObject {
 
     private var simulationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
-    private let tickInterval = 1.0          // seconds
+    /// Simulated seconds per step. Owned by `SimulationClock`; mirrored here because the physics
+    /// and schedule calls take it as a delta.
+    private var tickInterval: Double { SimulationClock.tickInterval }
 
     // MARK: - Simulation speed (fast-forward)
 
@@ -259,7 +273,9 @@ final class MapViewModel: ObservableObject {
 
     /// App-wide shared instance so every scene's map shows the same live state.
     static let shared = MapViewModel()
-    private var tickCount = 0
+    /// Simulated time. The only clock the simulation reads — see `SimulationClock` for why
+    /// nothing here may reach for a real one.
+    private var clock = SimulationClock()
     private let historySampleTicks = 3      // sample a trail point every N ticks
     private let maxHistoryPoints = 500      // ~25 min of trail at 3-second sampling
 
@@ -269,6 +285,11 @@ final class MapViewModel: ObservableObject {
     private let physics:   AircraftPhysics
     private let collision: AircraftCollisionDetector
     private let spawner:   AircraftSpawner
+
+    /// The simulation's random streams. Every random choice the simulation makes is drawn from
+    /// here rather than from the system generator, so the same seed replays the same exercise.
+    /// Seeded per exercise in `reset()`; the seed is what a saved simulation would record.
+    private var streams = RandomStreams(seed: RandomStreams.defaultSeed)
 
     /// Context bundle passed to the simulator for all spawn calls.
     private var spawnContext: SpawnContext {
@@ -341,7 +362,49 @@ final class MapViewModel: ObservableObject {
 
     @Published private(set) var pendingStart: CLLocationCoordinate2D?
 
-    private lazy var commandController = CommandController(mapViewModel: self)
+    /// The bytes the backend served for this exercise, embedded in a recording.
+    private var exercisePayload: Data?
+    private var exerciseID: String?
+
+    /// Starts and ends a recording around an exercise. Optional: with none, nothing records and the
+    /// simulation behaves identically — which is the property `InputGatewayTests` pins.
+    var recording: SessionCoordinator?
+
+    /// Who a recording belongs to.
+    ///
+    /// The authenticated backend user when there is one, otherwise a device identity that is stable per
+    /// install — a trainee practising before signing in should not be second-class, and inventing a fake user
+    /// id would be worse than saying "this device".
+    private static func currentOwner() -> OwnerID {
+        if let userId = SessionStore.load()?.userId, !userId.isEmpty {
+            return .user(userId)
+        }
+        return .device(Self.deviceIdentity())
+    }
+
+    private static let deviceIdentityKey = "vectrapro.deviceIdentity"
+
+    private static func deviceIdentity() -> UUID {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: deviceIdentityKey), let uuid = UUID(uuidString: stored) {
+            return uuid
+        }
+        let fresh = UUID()
+        defaults.set(fresh.uuidString, forKey: deviceIdentityKey)
+        return fresh
+    }
+
+    /// Where every simulation input is stamped and recorded — see `InputGateway`.
+    ///
+    /// Owned here because the tick is here. Nothing is recording until a session is started, and with no
+    /// recorder attached the gateway only advances a counter, so the simulation behaves identically.
+    lazy var inputs = InputGateway(currentTick: { [weak self] in self?.clock.tick ?? 0 })
+
+    /// The one path from phraseology to effect.
+    ///
+    /// Not private: the keypad performs through the same controller the microphone does, so
+    /// `CommandMapping.map` has a single call site and the validation around it cannot drift between them.
+    lazy var commands = CommandController(mapViewModel: self)
 
     /// Services 0–360 radials; default set on until the API supplies them.
     let radialManager = RadialManager()
@@ -378,9 +441,23 @@ final class MapViewModel: ObservableObject {
 
     /// Where spoken and logged output goes. Named rather than reached for, so a
     /// test can hand over a spy — the real one talks to the device synthesiser.
-    private let feedback: CommandFeedback
+    /// The side-effect boundary. Everything non-deterministic the simulation causes goes through this —
+    /// see `SideEffects.swift` for why it is one object rather than a check at each call site.
+    ///
+    /// Not private: the command controller and the keypad share it, because two gates could sit in two
+    /// modes and a seek would silence only one of them.
+    let sideEffects: SideEffectGate
+
+    /// Reads as before at every call site; now the gate rather than the manager.
+    private var feedback: CommandFeedback { sideEffects }
     /// Reports aircraft owe, evaluated each tick.
-    private let reports: DeferredReportAnnouncing
+    /// Simulation state, not a side effect — the reports a pilot owes are part of the world.
+    ///
+    /// Not private: the command controller registers into the same tracker the step loop advances. Two
+    /// trackers would mean a report registered into one and never announced from the other.
+    let deferredReports: DeferredReportAnnouncing
+
+    private var reports: DeferredReportAnnouncing { deferredReports }
 
     init(physics: AircraftPhysics? = nil,
          collision: AircraftCollisionDetector? = nil,
@@ -389,17 +466,23 @@ final class MapViewModel: ObservableObject {
          reports: DeferredReportAnnouncing? = nil) {
         self.physics   = physics ?? .shared
         self.collision = collision ?? .shared
-        self.spawner   = spawner ?? .shared
-        self.feedback  = feedback ?? CommandFeedbackManager.shared
-        self.reports   = reports ?? DeferredReportCoordinator.shared
-        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext)]
+        // One spawner per simulation, never shared — its shuffled radial cycle is mutable state, and two
+        // simulations sharing it would draw from each other's sequence.
+        self.spawner   = spawner ?? AircraftSpawner()
+        self.sideEffects = SideEffectGate(presentation: feedback ?? CommandFeedbackManager.shared)
+        self.deferredReports = reports ?? DeferredReportCoordinator.shared
+        // The coordinator exists before any view model does, so it cannot be handed the gate at its own
+        // init. Announcing a due report is a side effect and must cross the same gate as everything else.
+        (self.deferredReports as? DeferredReportCoordinator)?.feedback = self.sideEffects
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
+        aircraft = [self.spawner.makeRandomAircraft(context: spawnContext, rng: &streams.spawner)]
     }
 
     // MARK: - Voice commands
 
     /// Entry point for a transcribed command — parsed & applied centrally.
     func handleVoiceCommand(_ transcript: String) {
-        commandController.process(transcript)
+        commands.process(transcript)
     }
 
     /// Apply parsed commands to the selected aircraft.
@@ -538,11 +621,14 @@ final class MapViewModel: ObservableObject {
     /// onAppear fires, so exercise config (fixes, zones, etc.) is safe to clear.
     func clearOnExit() {
         stopSimulation()
-        tickCount = 0
+        // Left early, so the recording is not a completed exercise. Abandoned rather than completed, and an
+        // assessment abandoned this way is never sealed — which is what stops a partial one being graded.
+        stopRecordingSession()
+        clock.reset()
         aircraft = []
         traffic  = []
         schedule = nil
-        promotion = RadarPromotionSchedule()
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
         selectedAircraftID   = nil
         yellowConflictIDs    = []
         redConflictIDs       = []
@@ -572,7 +658,7 @@ final class MapViewModel: ObservableObject {
         airspaceCapacity     = 1
         aircraftSpawningCount = 1
         exerciseName             = ""
-        elapsedSeconds           = 0
+        elapsedSeconds           = clock.elapsedSeconds
         exerciseDurationSeconds  = 0
         isExerciseFinished       = false
         simulationSpeed          = 1
@@ -580,9 +666,14 @@ final class MapViewModel: ObservableObject {
 
     /// Full fresh start — clears radar state and re-spawns. Called each time the
     /// screen opens so reopening renders new.
-    func reset() {
+    /// Restarts the exercise.
+    ///
+    /// `seed` decides every random choice the run will make. It defaults to a fresh one so live
+    /// exercises still vary; a test — and, later, a replay — passes a known seed to get the same
+    /// exercise back. Recording this one value is what makes a whole run reproducible.
+    func reset(seed: UInt64 = RandomStreams.freshSeed()) {
         stopSimulation()
-        tickCount = 0
+        clock.reset()
         // Runways come only from the started exercise; none otherwise.
         runways = exerciseRunways ?? []
         enabledApproaches = exerciseApproaches ?? []
@@ -590,22 +681,30 @@ final class MapViewModel: ObservableObject {
         pendingStart = nil
         // Initial aircraft count toward the capacity and are distributed across
         // the active categories with the same priority logic as the lists.
-        elapsedSeconds      = 0
+        elapsedSeconds      = clock.elapsedSeconds
         isExerciseFinished  = false
-        spawner.resetRadialCycle(fixes: fixes)
+        destroyedAircraftIDs = []
+        wreckageDueTick     = [:]
+        streams = RandomStreams(seed: seed)
+        spawner.resetRadialCycle(fixes: fixes, rng: &streams.spawner)
+
+        // A new run is a new session. Started here rather than in `applyExercise` because the seed is chosen
+        // here, and the seed is the root of everything a recording reproduces.
+        startRecordingSession(seed: seed)
         // Spawn one at a time so each new aircraft stays ≥15 NM from the rest.
         var spawned: [Aircraft] = []
         for category in initialCategories() {
             let ac = spawner.makeRandomAircraft(context: spawnContext,
                                                 category: category,
-                                                existing: spawned.map(\.position))
+                                                existing: spawned.map(\.position),
+                                                rng: &streams.spawner)
             spawned.append(ac)
         }
         aircraft = spawned
         resetTraffic()
-        promotion = RadarPromotionSchedule()
+        promotion = RadarPromotionSchedule(using: &streams.traffic)
         // Fill toward capacity promptly if the initial spawn fell short of it.
-        if aircraft.count < airspaceCapacity { promotion.hurry() }
+        if aircraft.count < airspaceCapacity { promotion.hurry(using: &streams.traffic) }
         startSimulation()
     }
 
@@ -666,12 +765,15 @@ final class MapViewModel: ObservableObject {
         traffic = []
         schedule = TrafficSchedule(configuration: .init(
             frequencies: configuredFrequencies,
-            airspaceCapacity: airspaceCapacity))
+            airspaceCapacity: airspaceCapacity),
+            using: &streams.traffic)
 
         // Seed one departure aircraft into the hangar immediately so the
         // controller always has something to clear for takeoff at exercise start.
         if schedule?.isActive(.departure) == true {
-            traffic.append(spawner.makeListAircraft(context: spawnContext, category: .departure))
+            traffic.append(spawner.makeListAircraft(context: spawnContext,
+                                                    category: .departure,
+                                                    rng: &streams.spawner))
         }
     }
 
@@ -681,11 +783,18 @@ final class MapViewModel: ObservableObject {
     private func tick() {
         guard !isExerciseFinished else { return }
         advanceStep()
-        if tickCount % max(1, simulationSpeed) == 0 { blinkState.toggle() }
+        if clock.isDue(every: max(1, simulationSpeed)) { blinkState.toggle() }
     }
 
-    private func advanceStep() {
-        tickCount += 1
+    /// Advances the simulation exactly one tick.
+    ///
+    /// Not private: a test has to be able to step the simulation without a timer, since the whole
+    /// point of the determinism check is to compare two runs step for step rather than watch one
+    /// in real time.
+    func advanceStep() {
+        clock.advance()
+        elapsedSeconds = clock.elapsedSeconds
+        clearElapsedWreckage()
         advanceSpawners()
         advanceRadarPromotion()
         rollClearedDepartures()
@@ -706,7 +815,7 @@ final class MapViewModel: ObservableObject {
                LocalizerGuidanceService.reachedRunway(aircraft[index], runways: runways) {
                 landedIDs.insert(aircraft[index].id)
             }
-            if tickCount % historySampleTicks == 0 {
+            if clock.isDue(every: historySampleTicks) {
                 aircraft[index].history.append(aircraft[index].position)
                 if aircraft[index].history.count > maxHistoryPoints {
                     aircraft[index].history.removeFirst()
@@ -735,7 +844,7 @@ final class MapViewModel: ObservableObject {
         if !captured.isEmpty {
             if let sel = selectedAircraftID, captured.contains(sel) { selectedAircraftID = nil }
             if aircraft.count < airspaceCapacity {
-                promotion.hurry()
+                promotion.hurry(using: &streams.traffic)
             }
         }
 
@@ -743,7 +852,7 @@ final class MapViewModel: ObservableObject {
         // by the layer toggle).
         HoldingController.flyRacetracks(
             traffic: &traffic, fixes: holdingFixesDomain, physics: physics, dt: tickInterval,
-            sampleHistory: tickCount % historySampleTicks == 0, maxHistory: maxHistoryPoints)
+            sampleHistory: clock.isDue(every: historySampleTicks), maxHistory: maxHistoryPoints)
 
         // Aircraft-to-aircraft collisions.
         let acResult = collision.detectConflicts(in: aircraft)
@@ -759,7 +868,7 @@ final class MapViewModel: ObservableObject {
 
         // After any destruction, arm a short-delay promotion so the slot refills quickly.
         if (!acResult.destroyed.isEmpty || !zoneResult.destroyed.isEmpty), aircraft.count < airspaceCapacity {
-            promotion.hurry()
+            promotion.hurry(using: &streams.traffic)
         }
         let zoneWarnings = zoneResult.warnings.subtracting(zoneResult.destroyed)
         if zoneWarnings != zoneConflictIDs { zoneConflictIDs = zoneWarnings }
@@ -774,15 +883,28 @@ final class MapViewModel: ObservableObject {
         if sequencingConflictIDs != seqConflicts { sequencingConflictIDs = seqConflicts }
 
         // Advance the exercise clock; finish when we reach the target duration.
-        elapsedSeconds += 1
         if exerciseDurationSeconds > 0, elapsedSeconds >= exerciseDurationSeconds {
             isExerciseFinished = true
             stopSimulation()
+            // The exercise ran to its end, so the recording is complete and can be sealed.
+            stopRecordingSession()
         }
     }
 
-    /// How long the wreck stays on the radar before the aircraft leaves the scene.
-    private static let wreckageDisplaySeconds = 1.5
+    /// How long the wreck stays on the radar before the aircraft leaves the scene, in ticks.
+    ///
+    /// Counted in simulated time rather than real seconds. It used to be a 1.5 s wall-clock timer,
+    /// which meant the wreck cleared 1.5 *real* seconds later however fast the simulation was
+    /// running — at 30× that is 45 simulated seconds, and while paused it cleared anyway. Two ticks
+    /// is the same delay at 1× and stays correct at every speed.
+    private static let wreckageDisplayTicks = 2
+
+    /// Aircraft due to be removed, and the tick they are due at.
+    ///
+    /// Held here rather than scheduled on a queue so that removal is part of stepping the
+    /// simulation: it happens when simulated time says so, and it can be saved and restored with
+    /// the rest of the state.
+    private var wreckageDueTick: [UUID: Int] = [:]
 
     /// Marks aircraft destroyed, and removes them once the wreck has been shown.
     ///
@@ -794,12 +916,61 @@ final class MapViewModel: ObservableObject {
         guard !fresh.isEmpty else { return }
         destroyedAircraftIDs.formUnion(fresh)
         if let sel = selectedAircraftID, fresh.contains(sel) { selectedAircraftID = nil }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.wreckageDisplaySeconds) { [weak self] in
-            guard let self else { return }
-            self.aircraft.removeAll { fresh.contains($0.id) }
-            self.traffic.removeAll  { fresh.contains($0.id) }
-            self.destroyedAircraftIDs.subtract(fresh)
-        }
+        for id in fresh { wreckageDueTick[id] = clock.tick + Self.wreckageDisplayTicks }
+    }
+
+    /// Removes wrecks whose display time has elapsed in simulated time.
+    ///
+    /// Sorted before use: the due set is a dictionary, and dictionary iteration order is not stable
+    /// in Swift, so iterating it directly would let the same simulation take a different path on a
+    /// second run. Nothing here depends on order today, but a rule kept only where it currently
+    /// matters is a rule that will be broken later.
+    private func clearElapsedWreckage() {
+        let due = wreckageDueTick.filter { $0.value <= clock.tick }.keys.sorted()
+        guard !due.isEmpty else { return }
+        let ids = Set(due)
+        aircraft.removeAll { ids.contains($0.id) }
+        traffic.removeAll  { ids.contains($0.id) }
+        destroyedAircraftIDs.subtract(ids)
+        for id in due { wreckageDueTick[id] = nil }
+    }
+
+    // MARK: - Recording lifecycle
+
+    /// Begins recording this run, if recording is configured.
+    ///
+    /// Silent when it is not, and silent when it fails: the exercise proceeds either way, and nothing in the
+    /// simulation branches on whether a recorder attached.
+    private func startRecordingSession(seed: UInt64) {
+        guard let recording else { return }
+        inputs.recorder = nil
+
+        let recorder = recording.startRecording(
+            exercisePayload: exercisePayload ?? Data(),
+            exerciseID: exerciseID,
+            exerciseName: exerciseName.isEmpty ? nil : exerciseName,
+            seed: seed,
+            owner: Self.currentOwner())
+
+        // The ordinal counter continues from whatever is already in the log, so a resumed session cannot mint
+        // an event id that already exists — ids are derived from `(session, ordinal)`.
+        inputs.resume(after: recorder.flatMap { try? $0.open() })
+        inputs.recorder = recorder
+    }
+
+    /// Ends the recording for this run.
+    private func stopRecordingSession() {
+        guard let recording, inputs.recorder != nil else { return }
+        recording.stopRecording(tickCount: clock.tick)
+        inputs.recorder = nil
+    }
+
+    /// Fingerprint of the current simulation state.
+    ///
+    /// Two runs that agree here have not diverged; two that do not have. See `StateHash` for why
+    /// the values are quantised rather than compared bit for bit.
+    var stateHash: StateHash {
+        StateHash(clock: clock, radar: aircraft, hangar: traffic)
     }
 
     /// Advance every spawner; add a list aircraft when its countdown elapses.
@@ -807,9 +978,11 @@ final class MapViewModel: ObservableObject {
         guard var schedule else { return }
         // The schedule decides what and when; making the aircraft is this layer's
         // job, since that needs a position and the schedule has no geometry.
-        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count) {
+        for category in schedule.advance(by: tickInterval, currentCount: listAircraft.count,
+                                        using: &streams.traffic) {
             traffic.append(spawner.makeListAircraft(context: spawnContext,
-                                                    category: category.asFlight))
+                                                    category: category.asFlight,
+                                                    rng: &streams.spawner))
         }
         self.schedule = schedule
     }
@@ -817,7 +990,8 @@ final class MapViewModel: ObservableObject {
     private func advanceRadarPromotion() {
         guard promotion.advance(by: tickInterval,
                                 radarCount: aircraft.count,
-                                capacity: airspaceCapacity) else { return }
+                                capacity: airspaceCapacity,
+                                using: &streams.traffic) else { return }
         promoteFromHangar()
     }
 
@@ -829,14 +1003,15 @@ final class MapViewModel: ObservableObject {
             (traffic[$0].category == .arrival || traffic[$0].category == .enroute)
         }
         let category: FlightCategory
-        if let idx = eligibleIndices.randomElement() {
+        if let idx = streams.promotion.pick(eligibleIndices) {
             category = traffic[idx].category
             traffic.remove(at: idx)
         } else {
-            category = Bool.random() ? .arrival : .enroute
+            category = streams.promotion.bool() ? .arrival : .enroute
         }
         aircraft.append(spawner.makeRandomAircraft(context: spawnContext, category: category,
-                                                   existing: aircraft.map(\.position)))
+                                                   existing: aircraft.map(\.position),
+                                                   rng: &streams.spawner))
         // The schedule restarts its own interval; nothing to reset here.
     }
 

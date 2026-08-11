@@ -45,6 +45,8 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
     private var lineStyles: [ObjectIdentifier: (color: UIColor, width: CGFloat)] = [:]
     /// Range rings + area-control rings — built once, never removed.
     private var ringLines: [MLNPolyline] = []
+    /// Rebuild key for the range rings — the exercise centre (rings move if a replayed exercise recentres).
+    private var ringLinesKey = ""
     /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
     private var radialLines: [MLNPolyline] = []
     private var radialLinesKey = ""
@@ -546,16 +548,22 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        // Range rings + area-control rings: built once, never removed or recreated.
-        if ringLines.isEmpty {
+        // Range rings + area-control rings: rebuilt when the exercise centre changes (e.g. a replay whose
+        // recorded exercise recentres the radar), not just once — otherwise they stay on the old centre.
+        let ringsKey = "\(viewModel.center.latitude),\(viewModel.center.longitude)"
+        if ringsKey != ringLinesKey {
+            remove(ringLines, from: mapView)
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
             lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
             ringLines = add(lines, to: mapView)
+            ringLinesKey = ringsKey
         }
 
-        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        // Fix radials: rebuild when the Radials toggle, the enabled-radials list, OR the fixes change. The
+        // fixes count matters because the radial lines are derived from `fixes` (fixRadialLines) — a replay
+        // loads the exercise (and its fixes) after the radar is already up, so omitting it left radials blank.
         let radialsOn = viewModel.layerOn(.radials)
-        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        let radialKey = "\(radialsOn)-\(viewModel.fixes.count)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             remove(radialLines, from: mapView)
             radialLines = radialsOn ? add(viewModel.fixRadialLines(), to: mapView) : []
@@ -980,7 +988,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         if let posA = viewModel.measurementPositionA {
             if measurementDotA == nil {
                 let dot = ImageAnnotation()
-                dot.image = measurementEndpointImage()
+                dot.image = MeasurementRenderer.endpointImage()
                 dot.coordinate = posA
                 mapView.addAnnotation(dot)
                 measurementDotA = dot
@@ -1004,7 +1012,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
         // --- dot B ---
         if measurementDotB == nil {
             let dot = ImageAnnotation()
-            dot.image = measurementEndpointImage()
+            dot.image = MeasurementRenderer.endpointImage()
             dot.coordinate = posB
             mapView.addAnnotation(dot)
             measurementDotB = dot
@@ -1024,7 +1032,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                                             longitude: (posA.longitude + posB.longitude) / 2)
         if measurementLabelAnnotation == nil {
             let label = ImageAnnotation()
-            label.image = measurementLabelImage(text)
+            label.image = MeasurementRenderer.labelImage(text)
             label.coordinate = mid
             mapView.addAnnotation(label)
             measurementLabelAnnotation = label
@@ -1034,7 +1042,7 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
             if text != lastMeasurementText {
                 let prev = measurementLabelAnnotation!
                 let label = ImageAnnotation()
-                label.image = measurementLabelImage(text)
+                label.image = MeasurementRenderer.labelImage(text)
                 label.coordinate = mid
                 mapView.addAnnotation(label)
                 mapView.removeAnnotation(prev)
@@ -1042,36 +1050,6 @@ final class RadarMapController: NSObject, MLNMapViewDelegate, UIGestureRecognize
                 lastMeasurementText = text
             }
         }
-    }
-
-    private func measurementEndpointImage() -> UIImage {
-        let size: CGFloat = 10
-        UIGraphicsBeginImageContextWithOptions(CGSize(width: size, height: size), false, 0)
-        UIColor.white.setFill()
-        UIBezierPath(ovalIn: CGRect(x: 1, y: 1, width: size - 2, height: size - 2)).fill()
-        let img = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
-        return img
-    }
-
-    private func measurementLabelImage(_ text: String) -> UIImage {
-        let font  = UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
-        let textSize = (text as NSString).size(withAttributes: attrs)
-        let pad   = CGSize(width: 12, height: 6)
-        let rect  = CGRect(origin: .zero,
-                           size: CGSize(width: textSize.width + pad.width,
-                                        height: textSize.height + pad.height))
-        UIGraphicsBeginImageContextWithOptions(rect.size, false, 3)
-        UIColor.black.withAlphaComponent(0.72).setFill()
-        UIBezierPath(roundedRect: rect, cornerRadius: 4).fill()
-        UIColor.white.withAlphaComponent(0.35).setStroke()
-        UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4).stroke()
-        (text as NSString).draw(in: rect.insetBy(dx: pad.width / 2, dy: pad.height / 2),
-                                withAttributes: attrs)
-        let img = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
-        return img
     }
 
     // MARK: Pan (map + data block)

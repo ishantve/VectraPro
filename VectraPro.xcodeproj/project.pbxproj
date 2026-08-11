@@ -18,6 +18,10 @@
 		A7C9DD0000000000000000D1 /* ATCParserKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7C9DD0000000000000000D2 /* ATCParserKit */; };
 		A7D000000000000000000E1 /* ATCTrafficKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7D000000000000000000E2 /* ATCTrafficKit */; };
 		A7D000000000000000000F1 /* ATCTrafficKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7D000000000000000000F2 /* ATCTrafficKit */; };
+		A7E000000000000000000R1 /* ATCReplayKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7E000000000000000000R2 /* ATCReplayKit */; };
+		A7E000000000000000000S1 /* ATCReplayKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7E000000000000000000S2 /* ATCReplayKit */; };
+		A7E000000000000000000T1 /* ATCReplayStore in Frameworks */ = {isa = PBXBuildFile; productRef = A7E000000000000000000T2 /* ATCReplayStore */; };
+		A7E000000000000000000U1 /* ATCReplayStore in Frameworks */ = {isa = PBXBuildFile; productRef = A7E000000000000000000U2 /* ATCReplayStore */; };
 		C5C5C5C5C5C5C5C5C5C5C501 /* MicrosoftCognitiveServicesSpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */; };
 /* End PBXBuildFile section */
 
@@ -74,6 +78,8 @@
 				4E70000000000000000000C1 /* NetworkKit in Frameworks */,
 				A7C000000000000000000E1 /* ATCSimKit in Frameworks */,
 				A7D000000000000000000E1 /* ATCTrafficKit in Frameworks */,
+				A7E000000000000000000R1 /* ATCReplayKit in Frameworks */,
+				A7E000000000000000000T1 /* ATCReplayStore in Frameworks */,
 				5EEC000000000000000000A1 /* SpeechKit in Frameworks */,
 				A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */,
 			);
@@ -86,6 +92,8 @@
 				6E0C170000000000000000B1 /* GeoNavKit in Frameworks */,
 				A7C000000000000000000F1 /* ATCSimKit in Frameworks */,
 				A7D000000000000000000F1 /* ATCTrafficKit in Frameworks */,
+				A7E000000000000000000S1 /* ATCReplayKit in Frameworks */,
+				A7E000000000000000000U1 /* ATCReplayStore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -146,6 +154,8 @@
 				4E70000000000000000000C2 /* NetworkKit */,
 				A7C000000000000000000E2 /* ATCSimKit */,
 				A7D000000000000000000E2 /* ATCTrafficKit */,
+				A7E000000000000000000R2 /* ATCReplayKit */,
+				A7E000000000000000000T2 /* ATCReplayStore */,
 				5EEC000000000000000000A2 /* SpeechKit */,
 				A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */,
 			);
@@ -174,6 +184,8 @@
 				6E0C170000000000000000B2 /* GeoNavKit */,
 				A7C000000000000000000F2 /* ATCSimKit */,
 				A7D000000000000000000F2 /* ATCTrafficKit */,
+				A7E000000000000000000S2 /* ATCReplayKit */,
+				A7E000000000000000000U2 /* ATCReplayStore */,
 			);
 			productName = VectraProTests;
 			productReference = 8B7FEE0F2FEC24A90055FDF8 /* VectraProTests.xctest */;
@@ -242,6 +254,7 @@
 				4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */,
 				A7C000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCSimKit" */,
 				A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */,
+				A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */,
 				5EEC000000000000000000A3 /* XCLocalSwiftPackageReference "LocalPackages/SpeechKit" */,
 				A1A1A1A1A1A1A1A1A1A1A103 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 			);
@@ -658,17 +671,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/ATCSimKit;
 		};
-		A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ishantve/ATCParserKit.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.3.0;
-			};
-		};
 		A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/ATCTrafficKit;
+		};
+		A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/ATCReplayKit;
 		};
 		C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -698,7 +707,15 @@
 			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 10.0.0;
+				minimumVersion = 11.0.0;
+			};
+		};
+		A7C9DD0000000000000000D3 /* XCRemoteSwiftPackageReference "ATCParserKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ishantve/ATCParserKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -758,6 +775,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A7D000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCTrafficKit" */;
 			productName = ATCTrafficKit;
+		};
+		A7E000000000000000000R2 /* ATCReplayKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */;
+			productName = ATCReplayKit;
+		};
+		A7E000000000000000000S2 /* ATCReplayKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */;
+			productName = ATCReplayKit;
+		};
+		A7E000000000000000000T2 /* ATCReplayStore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */;
+			productName = ATCReplayStore;
+		};
+		A7E000000000000000000U2 /* ATCReplayStore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7E000000000000000000E3 /* XCLocalSwiftPackageReference "LocalPackages/ATCReplayKit" */;
+			productName = ATCReplayStore;
 		};
 		C5C5C5C5C5C5C5C5C5C5C502 /* MicrosoftCognitiveServicesSpeech */ = {
 			isa = XCSwiftPackageProductDependency;
