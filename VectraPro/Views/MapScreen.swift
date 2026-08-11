@@ -18,6 +18,9 @@ struct MapScreen: View {
     /// mid-exercise detached the recorder and left the live session open, losing the run in progress.
     var replaying: SessionID?
 
+    /// Open with the timeline panel already showing (the Logs action from the browser).
+    var showTimeline: Bool = false
+
     @ObservedObject private var viewModel = MapViewModel.shared
     @ObservedObject private var speechViewModel = SpeechViewModel.shared
     @ObservedObject private var presentation = RadarPresentation.shared
@@ -41,6 +44,9 @@ struct MapScreen: View {
     /// Observed so the bar redraws as the replay advances. `ReplayClock` is the authority; this is a reference to
     /// it, not a copy of it.
     @StateObject private var replayClock = ReplayClock()
+
+    /// Whether the replay timeline panel is visible over the replay.
+    @State private var showTimelinePanel = false
 
     /// Which operations popup is open (nil = none). Only one at a time.
     enum OperationsPopup { case flightData }
@@ -177,6 +183,36 @@ struct MapScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: replay == nil)
+        // Reopen the timeline during a replay after it's been closed.
+        .overlay(alignment: .bottomTrailing) {
+            if replay != nil && !showTimelinePanel {
+                Button { withAnimation(.easeInOut(duration: 0.2)) { showTimelinePanel = true } } label: {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 18)).foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.72), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 24).padding(.bottom, 96)
+                .transition(.opacity)
+            }
+        }
+        // The timeline panel over the replay; tapping a row seeks the live transport.
+        .overlay {
+            if showTimelinePanel, let replay, let sessionID = replaying {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showTimelinePanel = false } }
+                    ReplayTimelineView(sessionID: sessionID,
+                                       title: viewModel.exerciseName,
+                                       transport: replay,
+                                       clock: replayClock,
+                                       onClose: { withAnimation(.easeInOut(duration: 0.2)) { showTimelinePanel = false } })
+                }
+                .transition(.opacity)
+            }
+        }
         .overlay(alignment: .bottomLeading) {
             if replay == nil {
                 feedbackLogView
@@ -468,6 +504,7 @@ struct MapScreen: View {
         do {
             try engine.load(sessionID)
             replay = ReplayTransport(engine: engine)
+            showTimelinePanel = showTimeline   // Logs action opens straight into the timeline
         } catch {
             feedbackManager.commandError("Unable to open that recording")
             #if DEBUG

@@ -15,6 +15,8 @@ import ATCReplayKit
 private struct PendingReplay: Identifiable, Hashable {
     let id = UUID()
     let sessionID: SessionID
+    /// Open the replay with its timeline panel shown (the Logs action), vs. plain playback.
+    var showTimeline: Bool = false
 }
 
 struct HomeScreen: View {
@@ -73,13 +75,14 @@ struct HomeScreen: View {
                 MapScreen()
             }
             .navigationDestination(item: $replaying) { pending in
-                MapScreen(replaying: pending.sessionID)
+                MapScreen(replaying: pending.sessionID, showTimeline: pending.showTimeline)
             }
             .sheet(item: $browsing) { exercise in
                 ReplayBrowserView(coordinator: .shared,
-                                  exerciseName: exercise.exerciseName) { sessionID in
-                    replaying = PendingReplay(sessionID: sessionID)
-                }
+                                  exerciseName: exercise.exerciseName,
+                                  onSelect: { replaying = PendingReplay(sessionID: $0) },
+                                  onLogs: { replaying = PendingReplay(sessionID: $0, showTimeline: true) },
+                                  onDeleted: { id in if replaying?.sessionID == id { replaying = nil } })
             }
             .task { await viewModel.load() }
             .alert("Couldn't start exercise", isPresented: .constant(startError != nil)) {
