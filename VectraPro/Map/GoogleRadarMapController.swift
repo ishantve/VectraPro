@@ -70,6 +70,8 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
 
     /// Range rings + area-control rings — built once, never removed.
     private var ringLines: [GMSPolyline] = []
+    /// Rebuild key for the range rings — the exercise centre (rings move if a replayed exercise recentres).
+    private var ringLinesKey = ""
     /// VOR fix radials — rebuilt only when the Radials toggle or radials list changes.
     private var radialLines: [GMSPolyline] = []
     private var radialLinesKey = ""
@@ -406,16 +408,22 @@ final class GoogleRadarMapController: NSObject, GMSMapViewDelegate, UIGestureRec
         let enabled = viewModel.enabledApproaches
         let enabledStripIDs = Set(enabled.map(\.runwayID))
 
-        // Range rings + area-control rings: built once, never removed.
-        if ringLines.isEmpty {
+        // Range rings + area-control rings: rebuilt when the exercise centre changes (e.g. a replay whose
+        // recorded exercise recentres the radar), not just once — otherwise they stay on the old centre.
+        let ringsKey = "\(viewModel.center.latitude),\(viewModel.center.longitude)"
+        if ringsKey != ringLinesKey {
+            ringLines.forEach { $0.map = nil }
             var lines = RangeRingRenderer.lines(viewModel.rings, around: viewModel.center)
             lines += RangeRingRenderer.lines(viewModel.areaControlRings, around: viewModel.center)
             ringLines = add(lines)
+            ringLinesKey = ringsKey
         }
 
-        // Fix radials: only rebuild when Radials toggle or enabled-radials list changes.
+        // Fix radials: rebuild when the Radials toggle, the enabled-radials list, OR the fixes change. The
+        // fixes count matters because the radial lines are derived from `fixes` (fixRadialLines) — a replay
+        // loads the exercise (and its fixes) after the radar is already up, so omitting it left radials blank.
         let radialsOn = viewModel.layerOn(.radials)
-        let radialKey = "\(radialsOn)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
+        let radialKey = "\(radialsOn)-\(viewModel.fixes.count)-" + viewModel.radialManager.enabled.sorted().map(String.init).joined(separator: ",")
         if radialKey != radialLinesKey {
             radialLines.forEach { $0.map = nil }
             radialLines = radialsOn ? add(viewModel.fixRadialLines()) : []

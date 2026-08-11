@@ -166,6 +166,10 @@ final class MapViewModel: ObservableObject {
     /// enabled approaches from the API. Built once here so UUIDs stay stable
     /// across `reset()`.
     func applyExercise(_ detail: ExerciseDetail, payload: Data? = nil) {
+        // A new scene is being applied — exercise start, or a replay/exercise re-load onto an already-visible
+        // radar. `fixes`/`center` are not @Published, so setting them fires no notification on their own;
+        // announce the change here so the map controllers re-sync their static overlays (radials, rings).
+        objectWillChange.send()
         // Kept so the recording can embed the exercise verbatim. Optional because a test may apply a detail
         // without one; a session started without it simply records an empty payload rather than refusing.
         exercisePayload = payload
