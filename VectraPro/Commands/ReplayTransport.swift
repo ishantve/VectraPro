@@ -111,6 +111,10 @@ final class ReplayTransport {
 
     nonisolated deinit { }
 
+    /// Ends the replay: stops the engine's timer and hands recording back to live. Call when the transport is
+    /// dismissed without continuing — the Continue path tears the engine down on its own.
+    func tearDown() { engine.tearDown() }
+
     /// The clock, so SwiftUI can observe it. Other platforms poll `state` instead.
     var clock: ReplayClock { engine.clock }
 

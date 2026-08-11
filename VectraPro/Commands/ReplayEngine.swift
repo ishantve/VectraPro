@@ -103,6 +103,9 @@ final class ReplayEngine {
     func tearDown() {
         timer?.invalidate()
         timer = nil
+        // Symmetric with `load`, which detached recording so a replay writes nothing: hand it back so the next
+        // live exercise records again. (Continue re-attaches too; this covers leaving a replay any other way.)
+        radar.recording = coordinator
     }
 
     // MARK: - 1 · Loading

@@ -262,6 +262,10 @@ struct MapScreen: View {
                 // would open a live recording session that the load then orphans.
                 startReplay(of: replaying)
             } else {
+                // A replay detaches recording (ReplayEngine.load sets radar.recording = nil so a replay
+                // writes nothing). Re-attach it here for a live run, so an exercise started after viewing a
+                // replay records again instead of silently not recording.
+                if viewModel.recording == nil { viewModel.recording = .shared }
                 viewModel.reset()   // fresh radar each time the screen opens
             }
             speechViewModel.prepare()
@@ -270,7 +274,13 @@ struct MapScreen: View {
                 vm?.handleVoiceCommand(transcript)
             }
         }
-        .onDisappear { viewModel.clearOnExit() }
+        .onDisappear {
+            // If we leave mid-replay (e.g. the back button rather than Continue), end the replay cleanly:
+            // stops the engine's timer (otherwise it keeps firing on the shared radar) and hands recording
+            // back to live. The Continue path tears down on its own.
+            replay?.tearDown()
+            viewModel.clearOnExit()
+        }
     }
 
     /// Track orientation and whether we're in a windowed (non-fullscreen) scene —
