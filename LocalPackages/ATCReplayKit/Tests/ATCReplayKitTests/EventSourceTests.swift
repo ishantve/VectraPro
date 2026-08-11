@@ -8,7 +8,8 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+import ATCReplayAdapter
+@testable import ReplayCore
 
 final class EventSourceTests: XCTestCase {
 
@@ -18,25 +19,25 @@ final class EventSourceTests: XCTestCase {
     /// must still read the event. An enum would have failed to decode the whole thing, losing events over
     /// a field nobody was reading.
     func testAnUnknownSourceStillDecodes() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
-            with: try coder.encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                         payload: .timelineAction(.paused),
-                                         source: .voice))) as? [String: Any])
+            with: try coder.encode(ATCEvent.timeline(.paused,
+                                                     at: EventPosition(tick: 1, ordinal: 1),
+                                                     source: .voice))) as? [String: Any])
         object["source"] = "quantum-telepathy"
 
         let decoded = try coder.decode(try JSONSerialization.data(withJSONObject: object))
         XCTAssertEqual(decoded.source.rawValue, "quantum-telepathy")
-        XCTAssertEqual(decoded.payload, .timelineAction(.paused), "the event survived intact")
+        XCTAssertEqual(ATCEvent.payload(of: decoded), .timelineAction(.paused),
+                       "the event survived intact")
     }
 
     /// And it survives being written back out, so a round trip through an older build does not silently
     /// destroy attribution it did not understand.
     func testAnUnknownSourceRoundTrips() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         let exotic = EventSource(rawValue: "network-relay-v2")
-        let event = Event(position: EventPosition(tick: 1, ordinal: 1),
-                          payload: .timelineAction(.paused), source: exotic)
+        let event = ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1), source: exotic)
 
         XCTAssertEqual(try coder.decode(try coder.encode(event)).source, exotic)
     }
@@ -51,11 +52,11 @@ final class EventSourceTests: XCTestCase {
 
     /// A recording that predates the field is `.unspecified` — "we do not know" rather than a guess.
     func testAnAbsentSourceIsUnspecifiedRatherThanAssumed() throws {
-        let coder = EventCoder()
+        let coder = EventCoder(coding: ATCEventCodec())
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(
-            with: try coder.encode(Event(position: EventPosition(tick: 1, ordinal: 1),
-                                         payload: .timelineAction(.paused),
-                                         source: .voice))) as? [String: Any])
+            with: try coder.encode(ATCEvent.timeline(.paused,
+                                                     at: EventPosition(tick: 1, ordinal: 1),
+                                                     source: .voice))) as? [String: Any])
         object["source"] = nil
 
         let decoded = try coder.decode(try JSONSerialization.data(withJSONObject: object))
@@ -68,21 +69,22 @@ final class EventSourceTests: XCTestCase {
 
     /// Not only the ones with an obvious human behind them.
     func testEveryPayloadKindCanCarryASource() throws {
-        let coder = EventCoder()
-        let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: [:]),
-            .commandRejected(code: nil, callsign: nil, reason: "no"),
-            .transcriptReceived(raw: "a", normalized: "a"),
-            .readbackSpoken(callsign: "AIC1", spoken: "ROGER"),
-            .weatherChanged(windDegrees: 1, windKnots: nil, visibilityMetres: nil, qnh: nil),
-            .scoreEvaluated(value: 1, rulesVersion: "v1"),
-            .timelineAction(.paused),
+        let coder = EventCoder(coding: ATCEventCodec())
+        func p(_ i: Int) -> EventPosition { EventPosition(tick: i, ordinal: UInt32(i)) }
+        let events: [Event] = [
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: [:],
+                                   at: p(0), source: .instructor),
+            ATCEvent.commandRejected(code: nil, callsign: nil, reason: "no",
+                                     at: p(1), source: .instructor),
+            ATCEvent.transcriptReceived(raw: "a", normalized: "a", at: p(2), source: .instructor),
+            ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "ROGER", at: p(3), source: .instructor),
+            ATCEvent.weatherChanged(windDegrees: 1, at: p(4), source: .instructor),
+            ATCEvent.scoreEvaluated(value: 1, rulesVersion: "v1", at: p(5), source: .instructor),
+            ATCEvent.timeline(.paused, at: p(6), source: .instructor),
         ]
-        XCTAssertEqual(Set(payloads.map(\.kind)).count, EventKind.allCases.count)
+        XCTAssertEqual(Set(events.map(\.tag)).count, ATCEventCodec.allTags.count)
 
-        for (index, payload) in payloads.enumerated() {
-            let event = Event(position: EventPosition(tick: index, ordinal: UInt32(index)),
-                              payload: payload, source: .instructor)
+        for event in events {
             XCTAssertEqual(try coder.decode(try coder.encode(event)).source, .instructor)
         }
     }
@@ -90,11 +92,10 @@ final class EventSourceTests: XCTestCase {
     /// Readable from the envelope, so a log can be filtered by source without decoding — or being able
     /// to decode — payloads a newer build wrote.
     func testSourceIsReadableWithoutDecodingThePayload() throws {
-        let coder = EventCoder()
-        let data = try coder.encode(Event(position: EventPosition(tick: 5, ordinal: 5),
-                                          payload: .commandIssued(code: "101", callsign: "A",
-                                                                  slots: [:]),
-                                          source: .keypad))
+        let coder = EventCoder(coding: ATCEventCodec())
+        let data = try coder.encode(ATCEvent.commandIssued(code: "101", callsign: "A", slots: [:],
+                                                           at: EventPosition(tick: 5, ordinal: 5),
+                                                           source: .keypad))
         XCTAssertEqual(try coder.decodeEnvelope(data).source, .keypad)
     }
 
@@ -102,8 +103,8 @@ final class EventSourceTests: XCTestCase {
     func testSourceDoesNotAffectIdentity() {
         let session = UUID()
         let position = EventPosition(tick: 1, ordinal: 3)
-        let spoken = Event(position: position, payload: .timelineAction(.paused), source: .voice)
-        let typed = Event(position: position, payload: .timelineAction(.paused), source: .keypad)
+        let spoken = ATCEvent.timeline(.paused, at: position, source: .voice)
+        let typed = ATCEvent.timeline(.paused, at: position, source: .keypad)
 
         XCTAssertEqual(spoken.id(in: session), typed.id(in: session))
     }

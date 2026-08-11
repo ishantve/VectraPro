@@ -8,19 +8,20 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+import ATCReplayAdapter
+@testable import ReplayCore
 
 final class EventTracingTests: XCTestCase {
 
     private let session = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
-    private let coder = EventCoder()
+    private let coder = EventCoder(coding: ATCEventCodec())
 
     private func event(_ correlation: EventID? = nil, _ causation: EventID? = nil) -> Event {
-        Event(position: EventPosition(tick: 7, ordinal: 3),
-              payload: .commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"]),
-              source: .voice,
-              correlationID: correlation,
-              causationID: causation)
+        ATCEvent.commandIssued(code: "101", callsign: "AIC123", slots: ["LEVEL": "260"],
+                               at: EventPosition(tick: 7, ordinal: 3),
+                               source: .voice,
+                               correlationID: correlation,
+                               causationID: causation)
     }
 
     // MARK: - Absent by default

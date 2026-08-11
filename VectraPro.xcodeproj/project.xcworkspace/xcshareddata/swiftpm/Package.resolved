@@ -1,5 +1,5 @@
 {
-  "originHash" : "4a54ecb05052059fc9e27ad4e002290a4f6e5541cefc0850bf38dbeda3028346",
+  "originHash" : "3a3ba1c1ab36069770057d67b850856ac60b23cc4be2e006edac20e42affd472",
   "pins" : [
     {
       "identity" : "atcparserkit",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "84a79bc375a301169390ac110c868f06c857b83f",
         "version" : "6.27.0"
+      }
+    },
+    {
+      "identity" : "replaycore",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ishantve/ReplayCore.git",
+      "state" : {
+        "revision" : "113b1cc3d982e3c888ac946c686c49ba19e1cb75",
+        "version" : "0.1.0"
       }
     }
   ],

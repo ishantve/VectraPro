@@ -124,11 +124,11 @@ final class InputGateway {
         guard let recorder else {
             return InputReceipt(position: position, wasRecorded: false)
         }
-        recorder.record(Event(position: position,
-                              payload: .commandIssued(code: input.code,
-                                                      callsign: input.callsign,
-                                                      slots: input.slots),
-                              source: input.source))
+        recorder.record(ATCEvent.commandIssued(code: input.code,
+                                              callsign: input.callsign,
+                                              slots: input.slots,
+                                              at: position,
+                                              source: input.source))
         return InputReceipt(position: position, wasRecorded: true)
     }
 
@@ -136,13 +136,18 @@ final class InputGateway {
     ///
     /// Recorded, never dispatched. This is what keeps the record complete without letting presentation into
     /// the simulation: a readback is a thing the trainee heard, and it drives nothing.
+    ///
+    /// Takes a closure because the position is assigned here and the event needs it: the gateway owns the
+    /// ordinal, and an event built before it was stamped would have to be rebuilt. The closure is called with
+    /// the stamped position and returns the event, which keeps every annotation going through one of
+    /// `ATCEvent`'s fact-named constructors rather than through a payload this file would have to name.
     @discardableResult
-    func annotate(_ payload: EventPayload, source: EventSource) -> InputReceipt {
+    func annotate(_ event: (EventPosition) -> Event) -> InputReceipt {
         let position = stamp()
         guard let recorder else {
             return InputReceipt(position: position, wasRecorded: false)
         }
-        recorder.record(Event(position: position, payload: payload, source: source))
+        recorder.record(event(position))
         return InputReceipt(position: position, wasRecorded: true)
     }
 

@@ -7,7 +7,8 @@
 //
 
 import XCTest
-@testable import ATCReplayKit
+import ATCReplayAdapter
+@testable import ReplayCore
 
 final class EventStoreTests: XCTestCase {
 
@@ -24,13 +25,14 @@ final class EventStoreTests: XCTestCase {
     }
 
     private func makeStore(_ sessionClass: SessionClass = .training) -> EventStore {
-        EventStore(url: directory.appendingPathComponent("events.log"), sessionClass: sessionClass)
+        EventStore(url: directory.appendingPathComponent("events.log"),
+                   sessionClass: sessionClass,
+                   coding: ATCEventCodec())
     }
 
     private func command(_ code: String, tick: Int, ordinal: UInt32) -> Event {
-        Event(position: EventPosition(tick: tick, ordinal: ordinal),
-              payload: .commandIssued(code: code, callsign: "AIC123",
-                                      slots: ["LEVEL": "260"]))
+        ATCEvent.commandIssued(code: code, callsign: "AIC123", slots: ["LEVEL": "260"],
+                               at: EventPosition(tick: tick, ordinal: ordinal))
     }
 
     // MARK: - Round trip
@@ -51,27 +53,29 @@ final class EventStoreTests: XCTestCase {
     /// Every payload case survives the trip. The point of writing the coding by hand was that a
     /// renamed parameter must not silently stop decoding, and this is what would notice.
     func testEveryPayloadKindSurvivesARoundTrip() throws {
-        let payloads: [EventPayload] = [
-            .commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"]),
-            .commandRejected(code: "304", callsign: "AIC1", reason: "unmapped"),
-            .transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb"),
-            .readbackSpoken(callsign: "AIC1", spoken: "CLIMBING TO FLIGHT LEVEL 260"),
-            .weatherChanged(windDegrees: 270, windKnots: 12, visibilityMetres: 8_000, qnh: 1013),
-            .scoreEvaluated(value: 82, rulesVersion: "v3"),
-            .timelineAction(.speedChanged(to: 10)),
+        // One fact of every kind, each at its own position. Built as events rather than as a payload list: the
+        // adapter constructs facts, and comparing whole events checks the envelope too rather than only the payload.
+        func p(_ i: Int) -> EventPosition { EventPosition(tick: i, ordinal: UInt32(i)) }
+        let events: [Event] = [
+            ATCEvent.commandIssued(code: "101", callsign: "AIC1", slots: ["LEVEL": "260"], at: p(0)),
+            ATCEvent.commandRejected(code: "304", callsign: "AIC1", reason: "unmapped", at: p(1)),
+            ATCEvent.transcriptReceived(raw: "air india 123 climb", normalized: "aic123 climb", at: p(2)),
+            ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING TO FLIGHT LEVEL 260", at: p(3)),
+            ATCEvent.weatherChanged(windDegrees: 270, windKnots: 12, visibilityMetres: 8_000, qnh: 1013,
+                                    at: p(4)),
+            ATCEvent.scoreEvaluated(value: 82, rulesVersion: "v3", at: p(5)),
+            ATCEvent.timeline(.speedChanged(to: 10), at: p(6)),
         ]
-        XCTAssertEqual(Set(payloads.map(\.kind)).count, EventKind.allCases.count,
+
+        XCTAssertEqual(Set(events.map(\.tag)).count, ATCEventCodec.allTags.count,
                        "a payload kind is missing from this test")
 
         let store = makeStore()
         try store.openForAppending()
-        for (index, payload) in payloads.enumerated() {
-            try store.append(Event(position: EventPosition(tick: index, ordinal: UInt32(index)),
-                                   payload: payload))
-        }
+        for event in events { try store.append(event) }
         try store.close()
 
-        XCTAssertEqual(try makeStore().readAll().map(\.payload), payloads)
+        XCTAssertEqual(try makeStore().readAll(), events)
     }
 
     /// Several inputs in one tick is the ordinary case — one transmission, three instructions — so
@@ -90,14 +94,12 @@ final class EventStoreTests: XCTestCase {
     }
 
     func testWallClockIsPreservedButOptional() throws {
-        let stamped = Event(position: EventPosition(tick: 1, ordinal: 1),
-                            payload: .timelineAction(.paused),
-                            wallClock: Date(timeIntervalSince1970: 1_700_000_000))
+        let stamped = ATCEvent.timeline(.paused, at: EventPosition(tick: 1, ordinal: 1),
+                                       wallClock: Date(timeIntervalSince1970: 1_700_000_000))
         let store = makeStore()
         try store.openForAppending()
         try store.append(stamped)
-        try store.append(Event(position: EventPosition(tick: 2, ordinal: 2),
-                               payload: .timelineAction(.resumed)))
+        try store.append(ATCEvent.timeline(.resumed, at: EventPosition(tick: 2, ordinal: 2)))
         try store.close()
 
         let read = try makeStore().readAll()
@@ -312,9 +314,9 @@ final class EventStoreTests: XCTestCase {
         let store = makeStore()
         try store.openForAppending()
         for i in 0..<1_000 {
-            try store.append(Event(position: EventPosition(tick: i, ordinal: UInt32(i)),
-                                   payload: .commandIssued(code: "101", callsign: "AIC1234",
-                                                           slots: ["LEVEL": "260"])))
+            try store.append(ATCEvent.commandIssued(code: "101", callsign: "AIC1234",
+                                                    slots: ["LEVEL": "260"],
+                                                    at: EventPosition(tick: i, ordinal: UInt32(i))))
         }
         try store.close()
 
