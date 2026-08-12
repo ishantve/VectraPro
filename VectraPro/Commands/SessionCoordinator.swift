@@ -188,6 +188,19 @@ final class SessionCoordinator {
         return (session: child, recorder: recorder)
     }
 
+    // MARK: - Deleting
+
+    /// Deletes a recording — its on-disk files (manifest, log, snapshots) and its catalogue row — through the
+    /// session manager's own delete path. No second storage/deletion mechanism.
+    ///
+    /// `SessionManager.delete` refuses the session that is **actively recording** (throws
+    /// `.alreadyRecording`), so a run in progress cannot delete itself. A session being *replayed* attaches no
+    /// recorder, so it is safe to delete — the caller is responsible for clearing any transport/pending
+    /// reference to it afterwards.
+    func delete(_ id: SessionID) throws {
+        try sessions.delete(id)
+    }
+
     // MARK: - Launch recovery
 
     /// Sweeps up sessions a dead process left open.

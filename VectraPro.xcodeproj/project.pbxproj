@@ -10,6 +10,10 @@
 		0F05000000000000000000A1 /* VoskSpeechKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0F05000000000000000000A2 /* VoskSpeechKit */; };
 		0F05000000000000000000B5 /* Models in Resources */ = {isa = PBXBuildFile; fileRef = 0F05000000000000000000B4 /* Models */; };
 		4E70000000000000000000C1 /* NetworkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E70000000000000000000C2 /* NetworkKit */; };
+		5DCA00000000000000000C1 /* ReplayCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5DCA00000000000000000C2 /* ReplayCore */; };
+		5DCA00000000000000000D1 /* ReplayPersistence in Frameworks */ = {isa = PBXBuildFile; productRef = 5DCA00000000000000000D2 /* ReplayPersistence */; };
+		5DCA00000000000000000C6 /* ReplayCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5DCA00000000000000000C7 /* ReplayCore */; };
+		5DCA00000000000000000D6 /* ReplayPersistence in Frameworks */ = {isa = PBXBuildFile; productRef = 5DCA00000000000000000D7 /* ReplayPersistence */; };
 		5EEC000000000000000000A1 /* SpeechKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5EEC000000000000000000A2 /* SpeechKit */; };
 		6E0C170000000000000000A1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000A2 /* GeoNavKit */; };
 		6E0C170000000000000000B1 /* GeoNavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0C170000000000000000B2 /* GeoNavKit */; };
@@ -83,6 +87,8 @@
 				A7D000000000000000000E1 /* ATCTrafficKit in Frameworks */,
 				A7E000000000000000000R1 /* ATCReplayKit in Frameworks */,
 				A7E000000000000000000T1 /* ATCReplayStore in Frameworks */,
+				5DCA00000000000000000C6 /* ReplayCore in Frameworks */,
+				5DCA00000000000000000D6 /* ReplayPersistence in Frameworks */,
 				5EEC000000000000000000A1 /* SpeechKit in Frameworks */,
 				0F05000000000000000000A1 /* VoskSpeechKit in Frameworks */,
 				A1A1A1A1A1A1A1A1A1A1A101 /* GoogleMaps in Frameworks */,
@@ -98,6 +104,8 @@
 				A7D000000000000000000F1 /* ATCTrafficKit in Frameworks */,
 				A7E000000000000000000S1 /* ATCReplayKit in Frameworks */,
 				A7E000000000000000000U1 /* ATCReplayStore in Frameworks */,
+				5DCA00000000000000000C1 /* ReplayCore in Frameworks */,
+				5DCA00000000000000000D1 /* ReplayPersistence in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -161,6 +169,8 @@
 				A7D000000000000000000E2 /* ATCTrafficKit */,
 				A7E000000000000000000R2 /* ATCReplayKit */,
 				A7E000000000000000000T2 /* ATCReplayStore */,
+				5DCA00000000000000000C7 /* ReplayCore */,
+				5DCA00000000000000000D7 /* ReplayPersistence */,
 				5EEC000000000000000000A2 /* SpeechKit */,
 				0F05000000000000000000A2 /* VoskSpeechKit */,
 				A1A1A1A1A1A1A1A1A1A1A102 /* GoogleMaps */,
@@ -192,6 +202,8 @@
 				A7D000000000000000000F2 /* ATCTrafficKit */,
 				A7E000000000000000000S2 /* ATCReplayKit */,
 				A7E000000000000000000U2 /* ATCReplayStore */,
+				5DCA00000000000000000C2 /* ReplayCore */,
+				5DCA00000000000000000D2 /* ReplayPersistence */,
 			);
 			productName = VectraProTests;
 			productReference = 8B7FEE0F2FEC24A90055FDF8 /* VectraProTests.xctest */;
@@ -253,6 +265,7 @@
 			mainGroup = 8B7FEDF72FEC24A70055FDF8;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				5DCA00000000000000000C3 /* XCRemoteSwiftPackageReference "ReplayCore" */,
 				8B7FEE2C2FEC24E10055FDF8 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 				C5C5C5C5C5C5C5C5C5C5C503 /* XCLocalSwiftPackageReference "LocalPackages/MicrosoftCognitiveServicesSpeech" */,
 				6E0C170000000000000000A3 /* XCRemoteSwiftPackageReference "GeoNavKit" */,
@@ -746,6 +759,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4E70000000000000000000C3 /* XCLocalSwiftPackageReference "LocalPackages/NetworkKit" */;
 			productName = NetworkKit;
+		};
+		5DCA00000000000000000C2 /* ReplayCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5DCA00000000000000000C3 /* XCRemoteSwiftPackageReference "ReplayCore" */;
+			productName = ReplayCore;
+		};
+		5DCA00000000000000000D2 /* ReplayPersistence */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5DCA00000000000000000C3 /* XCRemoteSwiftPackageReference "ReplayCore" */;
+			productName = ReplayPersistence;
+		};
+		5DCA00000000000000000C7 /* ReplayCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5DCA00000000000000000C3 /* XCRemoteSwiftPackageReference "ReplayCore" */;
+			productName = ReplayCore;
+		};
+		5DCA00000000000000000D7 /* ReplayPersistence */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5DCA00000000000000000C3 /* XCRemoteSwiftPackageReference "ReplayCore" */;
+			productName = ReplayPersistence;
 		};
 		5EEC000000000000000000A2 /* SpeechKit */ = {
 			isa = XCSwiftPackageProductDependency;

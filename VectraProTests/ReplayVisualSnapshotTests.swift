@@ -81,7 +81,7 @@ final class ReplayVisualSnapshotTests: XCTestCase {
                     SessionRow(summary: entry.element.0, depth: entry.element.1,
                                environment: .current(),
                                logURL: URL(fileURLWithPath: "/dev/null"),
-                               onPlay: {})
+                               onPlay: {}, onLogs: {}, onDelete: {})
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
                     Divider()

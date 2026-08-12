@@ -77,9 +77,9 @@ struct HomeScreen: View {
             }
             .sheet(item: $browsing) { exercise in
                 ReplayBrowserView(coordinator: .shared,
-                                  exerciseName: exercise.exerciseName) { sessionID in
-                    replaying = PendingReplay(sessionID: sessionID)
-                }
+                                  exerciseName: exercise.exerciseName,
+                                  onSelect: { replaying = PendingReplay(sessionID: $0) },
+                                  onDeleted: { id in if replaying?.sessionID == id { replaying = nil } })
             }
             .task { await viewModel.load() }
             .alert("Couldn't start exercise", isPresented: .constant(startError != nil)) {

@@ -220,8 +220,9 @@ final class ReplayEngineTests: XCTestCase {
         radar.stopSimulation()
         let sessionID = try XCTUnwrap(coordinator.sessions.active?.id)
 
-        radar.inputs.annotate(.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING"), source: .system)
-        radar.inputs.annotate(.transcriptReceived(raw: "climb", normalized: "climb"), source: .voice)
+        // Post-R-Dist: annotate takes a position-stamped ATCEvent builder; source defaults match (.system / .voice).
+        radar.inputs.annotate { ATCEvent.readbackSpoken(callsign: "AIC1", spoken: "CLIMBING", at: $0) }
+        radar.inputs.annotate { ATCEvent.transcriptReceived(raw: "climb", normalized: "climb", at: $0) }
         for _ in 1...5 { radar.advanceStep() }
         coordinator.stopRecording(tickCount: 5)
 
