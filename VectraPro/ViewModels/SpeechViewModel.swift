@@ -12,6 +12,7 @@
 
 import Combine
 import SpeechKit
+import ATCParserKit
 import Foundation
 
 @MainActor
@@ -31,7 +32,9 @@ final class SpeechViewModel: ObservableObject {
     /// How long the field stays visible after a result before auto-hiding.
     private let autoHideDelay: TimeInterval = 3
 
-    private let live = LiveSpeechRecognizerFactory.make()
+    // Prefer offline Vosk for live transcription; fall back to Azure (or REST) if
+    // no bundled Vosk model is available.
+    private let live: LiveTranscribing? = VoskLiveRecognizer() ?? LiveSpeechRecognizerFactory.make()
     private let recorder = AudioRecorder()
     private let service = TranscriptionService()
     private var hideTask: Task<Void, Never>?
@@ -39,7 +42,9 @@ final class SpeechViewModel: ObservableObject {
     init() {
         live?.onPartial = { [weak self] text in
             guard let self, self.isRecording else { return }
-            self.transcript = text
+            // Clean + ICAO-uppercase live too, so the field is uppercase from the
+            // first partial instead of flipping to caps only at the end.
+            self.transcript = TranscriptCleaner.displayText(text)
         }
     }
 
@@ -79,6 +84,8 @@ final class SpeechViewModel: ObservableObject {
             live?.stop()
             isRecording = false
             CommandFeedbackManager.shared.micStopped()
+            // Clean recognizer quirks + ICAO-uppercase for display (and command).
+            transcript = TranscriptCleaner.displayText(transcript)
             if !transcript.isEmpty { onCommand?(transcript) }
             scheduleAutoHide()
             return
@@ -93,7 +100,7 @@ final class SpeechViewModel: ObservableObject {
         isTranscribing = true
         Task {
             do {
-                let text = try await service.transcribe(wavURL: url)
+                let text = TranscriptCleaner.displayText(try await service.transcribe(wavURL: url))
                 transcript = text.isEmpty ? "(no speech recognized)" : text
                 if !text.isEmpty { onCommand?(text) }
             } catch TranscriptionError.notConfigured {

@@ -355,8 +355,11 @@ final class CommandController {
             feedback.commandError("Command not recognized")
             return
         }
+        // Render fragments digit-by-digit (ICAO) so the synthesiser says
+        // "two two fife", not "twenty two five", for a fragment like "22 5".
+        let spoken = fragments.map(NumberWords.spokenFragment).joined(separator: ", ")
         feedback.commandError(
-            "Say again — did not understand \(fragments.joined(separator: ", "))")
+            "Say again — did not understand \(spoken)")
     }
 
     private func report(partiallyUnrecognized fragments: [String]) {
